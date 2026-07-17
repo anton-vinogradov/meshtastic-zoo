@@ -1,6 +1,6 @@
 /* meshtastic-zoo — рендер топологии в SVG.
-   Источник данных: data/live.json от сборщика (опрашивается раз в минуту);
-   если его нет — статичный data/topology.js. */
+   Единственный источник данных: data/live.json от сборщика
+   (collector/scan.py), перечитывается раз в минуту. */
 (function () {
   const W = 960, M = 18;
   const GAP = 26, DEF_H = { subnet: 150, world: 640 };
@@ -8,7 +8,7 @@
   const WCARD = { w: 200, h: 62, r: 11 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
-  function render(D, isLive) {
+  function render(D) {
     // Вертикальная раскладка: зоны стопкой в порядке из данных, число зон любое.
     // Высота зоны — z.h из данных, иначе дефолт по типу; высота холста считается сама.
     const zoneBoxes = {};
@@ -153,17 +153,17 @@
     // Легенда: градиент «% от идеала» + прочее + источник данных
     const grad = `linear-gradient(90deg, ${[0, 25, 50, 75, 100]
       .map(p => `hsl(${hue(p)}, 62%, 55%)`).join(", ")})`;
-    const stale = isLive && D.meta.updatedTs && Date.now() - D.meta.updatedTs > 15 * 60e3;
+    const stale = D.meta.updatedTs && Date.now() - D.meta.updatedTs > 15 * 60e3;
     document.getElementById("legend").innerHTML = `
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         100% от идеала (SNR ${fmtSnr(S.floor)}…${fmtSnr(S.ideal)} dB)</span>
       <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>не измерено</span>
       <span class="item"><span class="swatch" style="border-color:var(--lan)"></span>LAN</span>
-      <span class="item">${isLive ? "live-скан" : "статичные данные"} · ${esc(D.meta.updated)}
+      <span class="item">скан · ${esc(D.meta.updated)}
         ${stale ? '<b style="color:#e0a03c">· устарело!</b>' : ""}</span>`;
   }
 
-  // ---- Динамика: live.json от сборщика, иначе статичный topology.js ----
+  // ---- Опрос live.json раз в минуту; без него — подсказка запустить сборщик ----
   async function loadLive() {
     try {
       const r = await fetch("data/live.json?ts=" + Date.now(), { cache: "no-store" });
@@ -174,14 +174,17 @@
   let lastStamp = "";
   async function tick() {
     const live = await loadLive();
-    const D = live || window.MESHZOO_DATA;
-    const stamp = (live ? "live:" : "static:") + D.meta.updated;
-    if (stamp !== lastStamp) {
-      lastStamp = stamp;
-      render(D, !!live);
-    } else if (live) {
-      render(D, true); // обновить индикатор устаревания
+    if (!live) {
+      if (lastStamp !== "empty") {
+        lastStamp = "empty";
+        document.getElementById("map").innerHTML =
+          '<p class="empty">Данных пока нет — запусти <code>python3 collector/scan.py</code></p>';
+        document.getElementById("legend").innerHTML = "";
+      }
+      return;
     }
+    lastStamp = live.meta.updated;
+    render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
   }
   tick();
   setInterval(tick, 60e3);

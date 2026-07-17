@@ -48,6 +48,14 @@ body {
   vertical-align: middle;
 }
 
+#map .empty {
+  padding: 48px 24px;
+  color: var(--muted);
+  font-size: 15px;
+  text-align: center;
+}
+#map .empty code { color: var(--text); }
+
 /* Подсветка при наведении на ноду */
 svg .edge, svg .node { transition: opacity .15s ease; }
 svg.focus .edge:not(.lit), svg.focus .node:not(.lit) { opacity: 0.18; }
