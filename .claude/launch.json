@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "meshtastic-zoo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8814", "--directory", "/Users/Anton/claude/meshtastic-zoo"],
+      "port": 8814
+    }
+  ]
+}
