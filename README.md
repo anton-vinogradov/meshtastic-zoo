@@ -1,64 +1,72 @@
 # meshtastic-zoo 📡
 
-Карта зоопарка Meshtastic-нод: площадки-подсети, внешний мир с резервными
-нодами и качество радиолиний (SNR) между ними. Число площадок, нод и мостов
-не зашито в код — всё берётся из данных; текущие две подсети
-(`10.77.77.0/24` и `10.88.88.0/24`) — просто частный случай.
+**English** | [Русский](README.ru.md)
 
-Статичный сайт без сборки и зависимостей: HTML + CSS + vanilla JS, рендер в SVG.
+A map of a Meshtastic node zoo: site subnets, the outside world with
+standby nodes, and radio link quality (SNR) between all of them. The number
+of sites and nodes is not hard-coded — everything comes from data; the
+current two subnets (`10.77.77.0/24` and `10.88.88.0/24`) are just one
+particular case.
 
-## Посмотреть
+Static site with no build step and no dependencies: HTML + CSS + vanilla JS,
+rendered as SVG.
+
+## Viewing
 
 ```sh
 python3 -m http.server 8814
 # → http://localhost:8814
 ```
 
-## Live-режим: скан сети
+## Live mode: network scan
 
-Сборщик сам находит ноды (скан подсетей на открытый TCP-порт API),
-опрашивает их и собирает карту из их nodeDB — кого нода слышит напрямую,
-с каким SNR. Ничего в ноды не пишет.
+The collector discovers nodes by itself (scans the subnets for an open
+TCP API port), queries them, and assembles the map from their nodeDB —
+who each node hears directly, and at what SNR. It never writes to the nodes.
 
 ```sh
-python3 collector/scan.py            # один проход → data/live.json
-python3 collector/scan.py --loop 300 # пересканировать каждые 5 минут
+python3 collector/scan.py            # single pass → data/live.json
+python3 collector/scan.py --loop 300 # rescan every 5 minutes
 ```
 
-Страница раз в минуту перечитывает `data/live.json` и перерисовывается;
-если файла нет — показывает статичный `data/topology.js`. Источник и время
-последнего скана видны в легенде; протухшие данные (>15 мин) помечаются.
+The page re-reads `data/live.json` once a minute and re-renders; if the
+file is missing, it falls back to the static `data/topology.js`. The data
+source and the last scan time are shown in the legend; stale data
+(>15 min) gets flagged.
 
-Настройки — [`collector/config.json`](collector/config.json): список
-подсетей (порядок = порядок полос на карте), таймауты, «хрупкие» подсети
-(там после двух неудачных полных хендшейков нода опрашивается лёгким,
-без выгрузки nodeDB), фильтр внешнего мира (свежесть, максимум нод),
-известные IP↔radio-id на случай недоступности ноды, кочующие ноды.
+Settings live in [`collector/config.json`](collector/config.json): the
+subnet list (its order = the order of bands on the map), timeouts,
+"fragile" subnets (after two failed full handshakes a node there is
+queried with a light handshake, without downloading its nodeDB), the
+outside-world filter (freshness, max node count), known IP↔radio-id pairs
+for when a node is unreachable, and roaming nodes.
 
-## Статичный режим
+## Static mode
 
-Без сборщика топология описывается руками в
-[`data/topology.js`](data/topology.js) (та же схема, что у `live.json`):
+Without the collector, the topology is written by hand in
+[`data/topology.js`](data/topology.js) (same schema as `live.json`):
 
-- `zones` — полосы карты сверху вниз, сколько угодно: `kind: "subnet"`
-  (площадка) или `"world"` (эфир между площадками), `h` — высота в px (опц.);
-- `nodes` — ноды: `zone` — id полосы, `x`/`y` — позиция в долях зоны,
-  `mobile: true` — кочующая нода (пунктирная рамка), `hint` — тултип;
-- `links` — линки: `lan` (провод внутри площадки) или `rf` (радиоплечо;
-  `snr` в dB, `null` + `note` = не измерено, `labelT` — положение подписи
-  вдоль линии 0..1). Плечо направленное: `to` — кто услышал; встречные
-  плечи одной пары рисуются рядом. Никаких особых «мостов» нет — межплощадочный
-  линк это просто ещё одно плечо;
-- `meta.snrScale` — шкала «% от идеала»: `floor` дБ → 0% (красный),
-  `ideal` дБ → 100% (зелёный); цвет плеча — непрерывный градиент по этому
-  проценту, подпись — SNR, точный % — в тултипе плеча.
+- `zones` — map bands top to bottom, any number of them: `kind: "subnet"`
+  (a site) or `"world"` (the ether between sites), `h` — band height in px
+  (optional);
+- `nodes` — `zone` — band id, `x`/`y` — position as fractions of the band,
+  `mobile: true` — roaming node (dashed frame), `hint` — tooltip;
+- `links` — `lan` (wire within a site) or `rf` (radio leg; `snr` in dB,
+  `null` + `note` = not measured, `labelT` — label position along the
+  line, 0..1). A leg is directional: `to` is the node that heard the
+  other one; opposite legs of the same pair are drawn side by side.
+  There are no special "bridges" — an inter-site link is just another leg;
+- `meta.snrScale` — the "% of ideal" scale: `floor` dB → 0% (red),
+  `ideal` dB → 100% (green); leg color is a continuous gradient over that
+  percentage, the label shows the SNR, and the exact % is in the leg's
+  tooltip.
 
-Наведение на ноду подсвечивает её линки и соседей.
+Hovering over a node highlights its legs and neighbors.
 
-## Дорожная карта
+## Roadmap
 
-- [x] Этап 1: статичная карта из руками заполненного `data/topology.js`
-- [x] Этап 2: сборщик — скан подсетей + опрос нод по TCP API,
-      автогенерация `data/live.json`, живая перерисовка
-- [ ] Этап 2.5: батарея, uptime, online/offline на карточках нод
-- [ ] Этап 3: история измерений и графики качества линков
+- [x] Stage 1: static map from a hand-written `data/topology.js`
+- [x] Stage 2: collector — subnet scan + node queries over the TCP API,
+      auto-generated `data/live.json`, live re-rendering
+- [ ] Stage 2.5: battery, uptime, online/offline on node cards
+- [ ] Stage 3: measurement history and link quality charts
