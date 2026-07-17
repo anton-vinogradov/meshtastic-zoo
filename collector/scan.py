@@ -132,13 +132,14 @@ def build(found):
     for c in world:
         links.extend(dict(link=(o, n), snr=s) for o, n, s in c["hears"])
 
-    # Зоны: полоса на каждую подсеть, «внешний мир» после первой
+    # Зоны — только полосы подсетей; между первой и второй — свободная
+    # область (не рисуется), в ней живут внешние ноды
     zones, zid = [], {}
     for i, s in enumerate(subnets):
         zid[s] = f"net{i}"
         zones.append(dict(id=f"net{i}", kind="subnet", label=s))
         if i == 0:
-            zones.append(dict(id="world", kind="world", label="Внешний мир", h=CFG["worldH"]))
+            zones.append(dict(id="gap0", kind="gap", h=CFG["gapH"]))
 
     # Стационарные: равномерно по полосе в порядке IP
     nodes, xpos, by_sub = [], {}, {}
@@ -154,12 +155,12 @@ def build(found):
                 node.update(mobile=True, hint="кочующая нода, IP меняется")
             nodes.append(node)
 
-    # Мир: x — среднее по слышащим его нодам, y — лесенкой слева направо
+    # Внешние ноды: x — среднее по слышащим их нодам, y — лесенкой
     def avg_x(c):
         return sum(xpos.get(h[1], 0.5) for h in c["hears"]) / len(c["hears"])
     for j, c in enumerate(sorted(world, key=avg_x)):
         y = 0.12 + (0.72 * j / (len(world) - 1) if len(world) > 1 else 0.3)
-        nodes.append(dict(id=c["id"], label=c["short"], sub=c["id"], zone="world",
+        nodes.append(dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
                           x=min(0.9, max(0.1, avg_x(c))), y=round(y, 3)))
 
     # LAN-цепочки внутри полос

@@ -3,7 +3,7 @@
    (collector/scan.py), перечитывается раз в минуту. */
 (function () {
   const W = 960, M = 18;
-  const GAP = 26, DEF_H = { subnet: 150, world: 640 };
+  const GAP = 26, DEF_H = { subnet: 150, gap: 640 };
   const CARD = { w: 190, h: 64, r: 11 };
   const WCARD = { w: 200, h: 62, r: 11 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -14,7 +14,7 @@
     const zoneBoxes = {};
     let H = M;
     for (const z of D.zones) {
-      const h = z.h ?? DEF_H[z.kind] ?? DEF_H.world;
+      const h = z.h ?? DEF_H[z.kind] ?? DEF_H.gap;
       zoneBoxes[z.id] = { x: M, y: H, w: W - M * 2, h, ...z };
       H += h + GAP;
     }
@@ -25,7 +25,7 @@
     for (const n of D.nodes) {
       const z = zoneBoxes[n.zone];
       if (!z) continue;
-      const world = z.kind === "world";
+      const world = z.kind !== "subnet";
       const c = world ? WCARD : CARD;
       const cx = z.x + 40 + n.x * (z.w - 80);
       const cy = world ? z.y + 30 + (n.y ?? 0.5) * (z.h - 60) : z.y + z.h / 2;
@@ -51,11 +51,11 @@
 
     let out = [];
 
-    // Зоны
+    // Полосы площадок; gap-области не рисуются — это просто свободное место
     for (const z of Object.values(zoneBoxes)) {
-      const dash = z.kind === "world" ? 'stroke-dasharray="7 6"' : "";
+      if (z.kind !== "subnet") continue;
       out.push(`<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="16"
-        fill="${z.kind === "world" ? "none" : "var(--zone-bg)"}" stroke="var(--zone-stroke)" ${dash}/>`);
+        fill="var(--zone-bg)" stroke="var(--zone-stroke)"/>`);
       out.push(`<text x="${z.x + 22}" y="${z.y + 34}" fill="var(--text)"
         font-size="17" font-weight="700">${esc(z.label)}</text>`);
     }

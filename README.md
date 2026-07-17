@@ -2,8 +2,8 @@
 
 **English** | [Русский](README.ru.md)
 
-A map of a Meshtastic node zoo: site subnets, the outside world with
-standby nodes, and radio link quality (SNR) between all of them. The number
+A map of a Meshtastic node zoo: site subnets, the open ether around them,
+and radio link quality (SNR) between everyone heard in it. The number
 of sites and nodes is not hard-coded — everything comes from data; the
 current two subnets (`10.77.77.0/24` and `10.88.88.0/24`) are just one
 particular case.
@@ -46,7 +46,8 @@ for when a node is unreachable, and roaming nodes.
 about your network — it just draws whatever is in the file:
 
 - `zones` — map bands top to bottom, any number of them: `kind: "subnet"`
-  (a site) or `"world"` (the ether between sites), `h` — band height in px
+  (a site) or `"gap"` (a zone-free area between sites — nothing is drawn
+  for it, outside nodes simply live there), `h` — band height in px
   (optional);
 - `nodes` — `zone` — band id, `x`/`y` — position as fractions of the band,
   `mobile: true` — roaming node (dashed frame), `hint` — tooltip;
