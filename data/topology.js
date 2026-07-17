@@ -41,8 +41,8 @@ window.MESHZOO_DATA = {
     { from: "FADV", to: "FC2",  type: "lan" },
     { from: "FCA",  to: "FC1",  type: "lan" },
 
-    // Межплощадочный радиомост
-    { from: "FC2", to: "FC1", type: "bridge", label: "мост (прямой)" },
+    // Межплощадочное плечо FC2→FC1 (−2.8 dB — замер чистого теста 2026-07-13)
+    { from: "FC2", to: "FC1", type: "rf", snr: -2.8, labelT: 0.15 },
 
     // RF-плечи через внешний мир
     { from: "ZHTB", to: "FCB", type: "rf", snr: 2.5,  labelT: 0.25 },
