@@ -209,7 +209,10 @@
       const fill = n.world ? "var(--world-card)" : "var(--card-fill)";
       const stroke = n.world ? "#3a3a3e" : "var(--card-stroke)";
       const subFill = n.world ? "var(--muted)" : "var(--card-sub)";
-      const tipTxt = [n.hw, n.hint].filter(Boolean).join(" · ");
+      const long = (n.info || {}).long;
+      const tipTxt = [long !== n.label ? long : null, n.hw, n.hint].filter(Boolean).join(" · ");
+      const name = String(n.label);
+      const nm = name.length > 18 ? name.slice(0, 17) + "…" : name;
       // Пиктограмма — фолбэк, поверх неё фото девайса (если файл есть)
       const ik = hwKey(n.hw);
       const icon = ik ? `<g transform="translate(${x + 17}, ${n.cy - 11})" fill="none"
@@ -229,7 +232,8 @@
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
         ${icon}${photo}${badge}
         <text x="${n.cx + 14}" y="${n.cy - 6}" text-anchor="middle" fill="var(--text)"
-          font-size="17" font-weight="700">${esc(n.label)}</text>
+          font-size="${nm.length > 13 ? 12.5 : nm.length > 9 ? 15 : 17}"
+          font-weight="700">${esc(nm)}</text>
         <text x="${n.cx + 14}" y="${n.cy + 17}" text-anchor="middle" fill="${subFill}"
           font-size="13">${esc(n.sub)}</text>
       </g>`);
@@ -277,7 +281,8 @@
       panel.innerHTML = `
         <button id="pclose" aria-label="закрыть">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
-          <div><b>${esc(n.label)}</b>${i.long ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
+          <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
+            ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v]) => `<div class="prow"><span>${k}</span><span>${esc(String(v))}</span></div>`).join("")}
         ${legs ? `<div class="plegs"><b>Плечи</b>${legs}</div>` : ""}`;
       panel.classList.add("open");

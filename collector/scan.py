@@ -222,7 +222,9 @@ def build(found, prev=None):
                 y = base + (row - (rows - 1) / 2) * 0.16
             else:
                 y = base + step * row * 0.16
-            node = dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
+            label = c.get("long") or c["short"]
+            sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
+            node = dict(id=c["id"], label=label, sub=sub, zone="gap0",
                         x=round(min(x, 0.64), 3), y=round(min(0.96, max(0.04, y)), 3),
                         heard=c["heard"] or None)
             if c.get("hw"):
