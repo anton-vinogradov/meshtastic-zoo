@@ -27,8 +27,10 @@ ASPECT = CANVAS_H / 960
 def layout(ids, des, seed):
     """Силовая укладка без зон. des: {(a,b): желаемая дистанция в долях
     ширины холста} — из качества плеч; seed: стартовые позиции (прошлый
-    прогон — карта не скачет между сканами). Несвязанные пары мягко
-    отталкиваются, в конце — раздвижка перекрывшихся карточек."""
+    прогон — карта не скачет между сканами). Несвязанные пары активно
+    расталкиваются (их дистанция ничем не измерена — можно занимать
+    свободное место), итог поворачивается по главной оси разброса и
+    вписывается в холст ОДНИМ масштабом — пропорции дистанций честные."""
     pos = {}
     for nid in ids:
         x, y = seed.get(nid, (0.5, 0.5))
@@ -54,17 +56,55 @@ def layout(ids, des, seed):
                 dx = pos[b][0] - pos[a][0]
                 dy = pos[b][1] - pos[a][1]
                 dist = math.hypot(dx, dy) or 1e-6
-                if dist < 0.3:
-                    mv = (0.3 - dist) / dist * 0.15 * t
+                if dist < 0.55:
+                    mv = (0.55 - dist) / dist * 0.22 * t
                     pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
                     pos[b][0] += dx * mv; pos[b][1] += dy * mv
-    # нормировка в поля холста (запас по краям под карточки)
-    xs = [p[0] for p in pos.values()]
-    ys = [p[1] for p in pos.values()]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    for p in pos.values():
-        p[0] = 0.13 + (p[0] - x0) / ((x1 - x0) or 1) * 0.74
-        p[1] = 0.06 + (p[1] - y0) / ((y1 - y0) or 1) * 0.88
+
+    # PCA-поворот: главная ось разброса — вдоль длинной (вертикальной)
+    # стороны холста; из четырёх ориентаций берём ближайшую к затравке
+    n = len(pos) or 1
+    mx = sum(p[0] for p in pos.values()) / n
+    my = sum(p[1] for p in pos.values()) / n
+    sxx = sum((p[0] - mx) ** 2 for p in pos.values())
+    syy = sum((p[1] - my) ** 2 for p in pos.values())
+    sxy = sum((p[0] - mx) * (p[1] - my) for p in pos.values())
+    theta = 0.5 * math.atan2(2 * sxy, sxx - syy)
+    base = math.pi / 2 - theta
+
+    def transformed(rot, mirror):
+        c, s = math.cos(rot), math.sin(rot)
+        out = {}
+        for nid, p in pos.items():
+            dx, dy = p[0] - mx, p[1] - my
+            if mirror:
+                dx = -dx
+            out[nid] = [dx * c - dy * s, dx * s + dy * c]
+        return out
+
+    def seed_cost(cand):
+        cost = c_n = 0
+        for nid, p in cand.items():
+            if nid in seed:
+                sx, sy = seed[nid]
+                cost += math.hypot(p[0] - (sx - 0.5), p[1] - (sy * ASPECT - 0.5 * ASPECT))
+                c_n += 1
+        return cost if c_n else 0
+
+    cands = [transformed(base + k * math.pi, m) for k in (0, 1) for m in (False, True)]
+    pts = min(cands, key=seed_cost)
+
+    # равномерное вписывание в поля холста (один масштаб по обеим осям)
+    xs = [p[0] for p in pts.values()]
+    ys = [p[1] for p in pts.values()]
+    dx_span = (max(xs) - min(xs)) or 1e-6
+    dy_span = (max(ys) - min(ys)) or 1e-6
+    scale = min(0.74 / dx_span, 0.88 * ASPECT / dy_span)
+    for nid, p in pts.items():
+        x = 0.5 + (p[0] - (min(xs) + max(xs)) / 2) * scale
+        y = (0.5 * ASPECT + (p[1] - (min(ys) + max(ys)) / 2) * scale) / ASPECT
+        pos[nid] = [x, y]
+
     # раздвижка перекрывшихся карточек по вертикали
     cw, ch = 215 / 960, 82 / CANVAS_H
     for _ in range(300):

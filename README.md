@@ -64,10 +64,13 @@ about your network — it just draws whatever is in the file:
 The whole map fits the window — no scrolling. There are no zones or
 bands: the layout is honest — every node's position comes from a force
 layout driven by link quality: the better a pair hears each other (the
-greener the leg), the closer their cards; unlinked pairs gently repel.
-Your own nodes are the blue cards with an IP, outside ones are black.
-The map does not jump between scans: previous positions seed the next
-layout.
+greener the leg), the closer their cards. Unlinked pairs repel actively —
+their distance is not measured by anything, so they spread into free
+space and de-clutter the picture. The result is rotated along its
+principal axis and fitted to the canvas with a single scale on both
+axes, so distance proportions are preserved. Your own nodes are the blue
+cards with an IP, outside ones are black. The map does not jump between
+scans: previous positions seed the next layout.
 
 Against arrow pile-up: the legs' endpoints fan out across the card edges
 (each arrow gets its own port), opposite legs of a pair run side by
