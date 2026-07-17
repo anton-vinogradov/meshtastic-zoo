@@ -156,30 +156,10 @@ def build(found, prev=None):
     for c in world:
         rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
-    # «Полка» внешней ноды — по тяге: кого слышат только верхние площадки,
-    # тот у верхней полосы (короткие плечи), только нижние — у нижней,
-    # смешанные — в середине. Так линии не тянутся через всю карту.
-    def pull(c):
-        ups = downs = 0
-        for h in c["hears"]:
-            if stat[h[1]]["subnet"] == subnets[0]:
-                ups += 1
-            else:
-                downs += 1
-        return (ups - downs) / max(1, ups + downs)
-
-    def shelf_of(c):
-        p = pull(c)
-        return "top" if p > 0.5 else "bottom" if p < -0.5 else "mid"
-
-    shelves = {"top": [], "mid": [], "bottom": []}
-    for c in world:
-        shelves[shelf_of(c)].append(c)
-    total_rows = sum(-(-len(v) // ROW) for v in shelves.values()) or 1
-
     # Зоны — только полосы подсетей; между первой и второй — свободная
-    # область (не рисуется), в ней живут внешние ноды. Высота — под полки.
-    gap_h = max(CFG["gapH"], 175 * total_rows + 170)
+    # область (не рисуется), в ней живут внешние ноды
+    rows_est = -(-len(world) // ROW) or 1
+    gap_h = max(CFG["gapH"], 175 * rows_est + 170)
     zones, zid = [], {}
     for i, s in enumerate(subnets):
         zid[s] = f"net{i}"
@@ -188,15 +168,16 @@ def build(found, prev=None):
             zones.append(dict(id="gap0", kind="gap", h=gap_h))
 
     # Стационарные: равномерно по полосе в порядке IP
-    nodes, xpos, by_sub = [], {}, {}
+    nodes, by_sub = [], {}
     for n in stat.values():
         by_sub.setdefault(n["subnet"], []).append(n)
     for s, ns in by_sub.items():
         ns.sort(key=lambda n: ipaddress.ip_address(n["ip"]))
         for i, n in enumerate(ns):
             x = (i + 1) / (len(ns) + 1)
-            xpos[n["id"]] = x
-            node = dict(id=n["id"], label=n["short"], sub=n["ip"], zone=zid[s], x=x,
+            label = n.get("long") or n["short"]
+            sub = n["ip"] if label == n["short"] else f'{n["short"]} · {n["ip"]}'
+            node = dict(id=n["id"], label=label, sub=sub, zone=zid[s], x=x,
                         online=True, heard=int(now))
             if n.get("hw"):
                 node["hw"] = n["hw"]
@@ -207,32 +188,47 @@ def build(found, prev=None):
                 node.update(mobile=True, hint="кочующая нода, IP меняется")
             nodes.append(node)
 
-    # Внешние ноды — по полкам, в полке ряды по ROW штук со сдвигом
-    # в шахматном порядке; правый коридор оставлен межплощадочным плечам
-    def avg_x(c):
-        return sum(xpos.get(h[1], 0.5) for h in c["hears"]) / len(c["hears"])
-    for name, base, step in (("top", 0.06, 1), ("mid", 0.5, 1), ("bottom", 0.94, -1)):
-        lst = sorted(shelves[name], key=avg_x)
-        rows = -(-len(lst) // ROW)
-        for j, c in enumerate(lst):
-            row, col = divmod(j, ROW)
-            in_row = min(ROW, len(lst) - row * ROW)
-            x = 0.10 + (row % 2) * 0.06 + (0.48 * col / (in_row - 1) if in_row > 1 else 0.22)
-            if name == "mid":
-                y = base + (row - (rows - 1) / 2) * 0.16
-            else:
-                y = base + step * row * 0.16
-            label = c.get("long") or c["short"]
-            sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
-            node = dict(id=c["id"], label=label, sub=sub, zone="gap0",
-                        x=round(min(x, 0.64), 3), y=round(min(0.96, max(0.04, y)), 3),
-                        heard=c["heard"] or None)
-            if c.get("hw"):
-                node["hw"] = c["hw"]
-            info = node_info(c)
-            if info:
-                node["info"] = info
-            nodes.append(node)
+    # Внешние ноды: расстояние до полосы кодирует качество — чем лучше
+    # (зеленее) её слышно, тем ближе к площадке-слушателю; кого слышат обе
+    # площадки — между ними, со сдвигом к той, что слышит громче.
+    # Колонки по кругу + раздвижка по вертикали, чтобы карточки не легли
+    # друг на друга; правый коридор оставлен межплощадочным плечам.
+    S = CFG["snrScale"]
+
+    def pct(snr):
+        return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
+
+    ext = []
+    for c in world:
+        top = [pct(s) for _, h, s, _ in c["hears"] if stat[h]["subnet"] == subnets[0]]
+        bot = [pct(s) for _, h, s, _ in c["hears"] if stat[h]["subnet"] != subnets[0]]
+        if top and not bot:
+            y = 0.05 + (1 - max(top)) * 0.40
+        elif bot and not top:
+            y = 0.95 - (1 - max(bot)) * 0.40
+        else:
+            y = 0.5 - (max(top) - max(bot)) * 0.35
+        ext.append((y, c))
+    ext.sort(key=lambda t: t[0])
+
+    col_x = [0.10, 0.34, 0.58]
+    col_last = {}
+    for i, (y, c) in enumerate(ext):
+        col = i % len(col_x)
+        if col in col_last:
+            y = max(y, col_last[col] + 0.115)
+        y = min(0.96, max(0.04, y))
+        col_last[col] = y
+        label = c.get("long") or c["short"]
+        sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
+        node = dict(id=c["id"], label=label, sub=sub, zone="gap0",
+                    x=col_x[col], y=round(y, 3), heard=c["heard"] or None)
+        if c.get("hw"):
+            node["hw"] = c["hw"]
+        info = node_info(c)
+        if info:
+            node["info"] = info
+        nodes.append(node)
 
     # Кэш: плечи из прошлого live.json, которых не хватило в этом скане
     # (нода могла отдаться лёгким хендшейком без своей базы)

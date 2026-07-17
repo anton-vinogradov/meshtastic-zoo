@@ -65,10 +65,11 @@ about your network — it just draws whatever is in the file:
 
 Three tricks keep the arrows from piling up: inter-site legs run along a
 dedicated right-hand corridor (a lane per pair, both directions side by
-side); outside nodes settle onto "shelves" by pull — those heard only by
-the top sites sit near the top band, only by the bottom ones near the
-bottom, mixed ones in the middle; and the legs' endpoints fan out across
-the card edges, each arrow getting its own port. The outside nodes' legs
+side); outside nodes are placed the closer to a site's band the better
+(greener) they are heard — distance encodes quality, and those heard by
+both sites settle between the bands, shifted towards the louder side;
+and the legs' endpoints fan out across the card edges, each arrow
+getting its own port. The outside nodes' legs
 are dimmed and light up on hover. Hovering over a node highlights its
 legs and neighbors; **clicking opens a details panel**: device photo,
 ID, IP, model, battery, uptime, channel utilization, and every leg with
