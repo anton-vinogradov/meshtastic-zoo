@@ -7,7 +7,6 @@
   "worldMaxAgeH": 6,
   "cacheMaxAgeH": 24,
   "worldTopN": 0,
-  "gapH": 760,
   "snrScale": { "floor": -20, "ideal": 10 },
   "mobile": ["!702bde48"],
   "known": {

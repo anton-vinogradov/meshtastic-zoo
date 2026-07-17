@@ -2,34 +2,19 @@
    Единственный источник данных: data/live.json от сборщика
    (collector/scan.py), перечитывается раз в минуту. */
 (function () {
-  const W = 960, M = 18;
-  const GAP = 26, DEF_H = { subnet: 150, gap: 640 };
+  const W = 960;
   const CARD = { w: 190, h: 64, r: 11 };
   const WCARD = { w: 200, h: 62, r: 11 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
   function render(D) {
-    // Вертикальная раскладка: зоны стопкой в порядке из данных, число зон любое.
-    // Высота зоны — z.h из данных, иначе дефолт по типу; высота холста считается сама.
-    const zoneBoxes = {};
-    let H = M;
-    for (const z of D.zones) {
-      const h = z.h ?? DEF_H[z.kind] ?? DEF_H.gap;
-      zoneBoxes[z.id] = { x: M, y: H, w: W - M * 2, h, ...z };
-      H += h + GAP;
-    }
-    H += M - GAP;
-
-    // Позиции нод
+    // Зон нет: x/y — доли холста, честная силовая раскладка от сборщика
+    const H = D.meta.canvasH ?? 1150;
     const nodes = {};
     for (const n of D.nodes) {
-      const z = zoneBoxes[n.zone];
-      if (!z) continue;
-      const world = z.kind !== "subnet";
+      const world = !n.own;
       const c = world ? WCARD : CARD;
-      const cx = z.x + 40 + n.x * (z.w - 80);
-      const cy = world ? z.y + 30 + (n.y ?? 0.5) * (z.h - 60) : z.y + z.h / 2;
-      nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
+      nodes[n.id] = { ...n, cx: n.x * W, cy: n.y * H, w: c.w, h: c.h, r: c.r, world };
     }
 
     // % от идеала по SNR и непрерывный цвет: 0% — красный (hue 0), 100% — зелёный (hue 140)
@@ -68,24 +53,12 @@
     }
 
     let out = [];
-
-    // Полосы площадок; gap-области не рисуются — это просто свободное место
-    for (const z of Object.values(zoneBoxes)) {
-      if (z.kind !== "subnet") continue;
-      out.push(`<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="16"
-        fill="var(--zone-bg)" stroke="var(--zone-stroke)"/>`);
-      out.push(`<text x="${z.x + 22}" y="${z.y + 34}" fill="var(--text)"
-        font-size="17" font-weight="700">${esc(z.label)}</text>`);
-    }
-
     const lbl2 = (id) => (nodes[id] || { label: id }).label;
 
     // Рёбра (под карточками); маркеры стрелок копятся сюда — свой цвет на каждое плечо.
     // Встречные плечи одной пары разносим перпендикулярно, чтобы не слипались.
     const edgeSvg = [], rfMarkers = [];
     const pairCount = {}, pairSeen = {};
-    const crossLane = {};
-    let laneN = 0;
     for (const l of D.links) {
       if (l.type !== "rf") continue;
       const k = [l.from, l.to].sort().join("|");
@@ -98,7 +71,7 @@
     D.links.forEach((l, li) => {
       if (l.type !== "rf") return;
       const a = nodes[l.from], b = nodes[l.to];
-      if (!a || !b || (!a.world && !b.world && a.zone !== b.zone)) return; // коридорные мимо
+      if (!a || !b) return;
       for (const [n, o] of [[a, b], [b, a]]) {
         const side = o.cy < n.cy - n.h / 2 ? "top" : o.cy > n.cy + n.h / 2 ? "bottom"
           : o.cx < n.cx ? "left" : "right";
@@ -138,29 +111,6 @@
         ? `${l.from} → ${l.to}: нет данных — ${lbl2(l.to)} не слышала ${lbl2(l.from)} напрямую (ни в скане, ни в кэше)`
         : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% от идеала`)
         + (l.heard ? ` · слышно ${fmtAgo(l.heard)}` : "");
-
-      if (!a.world && !b.world && a.zone !== b.zone) {
-        // Межплощадочное плечо — обходом по правому коридору, чтобы не
-        // тонуло среди внешних нод: дорожка на пару, туда и обратно рядом
-        if (!(k in crossLane)) crossLane[k] = laneN++;
-        const dir = (pairSeen[k] = (pairSeen[k] || 0) + 1); // 1 туда, 2 обратно
-        const bx = W - M - 20 - crossLane[k] * 34 - (dir - 1) * 9;
-        const gd = a.cy < b.cy ? 1 : -1;
-        const sx = a.cx + a.w / 2 - 22 - (dir - 1) * 12;
-        const sy = a.cy + gd * a.h / 2;
-        const runY = sy + gd * (16 + (dir - 1) * 10);
-        const ey = b.cy - 6 + (dir - 1) * 12;
-        const ex = b.cx + b.w / 2 + 14;
-        const labY = (runY + ey) / 2 + (dir === 1 ? -6 : 16);
-        edgeSvg.push(`<g class="${cls}"><title>${esc(tip)}</title>
-          <path d="M ${sx} ${sy} V ${runY} H ${bx} V ${ey} H ${ex}" fill="none"
-            stroke="${col}" stroke-width="2.5" stroke-dasharray="7 5"
-            stroke-linejoin="round" marker-end="url(#${mid})"/>
-          <text x="${bx - 10}" y="${labY}" text-anchor="end" fill="${col}" font-size="14.5"
-            font-weight="600" paint-order="stroke" stroke="var(--bg)"
-            stroke-width="5">${esc(label)}</text></g>`);
-        continue;
-      }
 
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
       const dim = a.world || b.world ? " dim" : "";

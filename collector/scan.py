@@ -10,6 +10,7 @@ data/topology.js; фронтенд подхватывает файл сам ра
 import asyncio
 import ipaddress
 import json
+import math
 import sys
 import threading
 import time
@@ -19,7 +20,68 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
-ROW = 3  # внешних нод в ряду (шире — карточки начнут перекрываться)
+CANVAS_H = 1150  # холст рендера 960×CANVAS_H; x/y нод — доли холста
+ASPECT = CANVAS_H / 960
+
+
+def layout(ids, des, seed):
+    """Силовая укладка без зон. des: {(a,b): желаемая дистанция в долях
+    ширины холста} — из качества плеч; seed: стартовые позиции (прошлый
+    прогон — карта не скачет между сканами). Несвязанные пары мягко
+    отталкиваются, в конце — раздвижка перекрывшихся карточек."""
+    pos = {}
+    for nid in ids:
+        x, y = seed.get(nid, (0.5, 0.5))
+        pos[nid] = [x, y * ASPECT]
+    idl = list(ids)
+    steps = 600
+    for it in range(steps):
+        t = 1.0 - it / steps
+        for (a, b), d in des.items():
+            if a not in pos or b not in pos:
+                continue
+            dx = pos[b][0] - pos[a][0]
+            dy = pos[b][1] - pos[a][1]
+            dist = math.hypot(dx, dy) or 1e-6
+            mv = (dist - d) / dist * 0.2 * t
+            pos[a][0] += dx * mv; pos[a][1] += dy * mv
+            pos[b][0] -= dx * mv; pos[b][1] -= dy * mv
+        for i in range(len(idl)):
+            for j in range(i + 1, len(idl)):
+                a, b = idl[i], idl[j]
+                if (a, b) in des or (b, a) in des:
+                    continue
+                dx = pos[b][0] - pos[a][0]
+                dy = pos[b][1] - pos[a][1]
+                dist = math.hypot(dx, dy) or 1e-6
+                if dist < 0.3:
+                    mv = (0.3 - dist) / dist * 0.15 * t
+                    pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
+                    pos[b][0] += dx * mv; pos[b][1] += dy * mv
+    # нормировка в поля холста (запас по краям под карточки)
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    for p in pos.values():
+        p[0] = 0.13 + (p[0] - x0) / ((x1 - x0) or 1) * 0.74
+        p[1] = 0.06 + (p[1] - y0) / ((y1 - y0) or 1) * 0.88
+    # раздвижка перекрывшихся карточек по вертикали
+    cw, ch = 215 / 960, 82 / CANVAS_H
+    for _ in range(300):
+        moved = False
+        for i in range(len(idl)):
+            for j in range(i + 1, len(idl)):
+                a, b = pos[idl[i]], pos[idl[j]]
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                if abs(dx) < cw and abs(dy) < ch:
+                    over = (ch - abs(dy)) / 2
+                    s = 1 if dy >= 0 else -1
+                    a[1] = max(0.05, min(0.95, a[1] - s * over))
+                    b[1] = max(0.05, min(0.95, b[1] + s * over))
+                    moved = True
+        if not moved:
+            break
+    return {nid: (p[0], p[1]) for nid, p in pos.items()}
 
 
 def log(msg):
@@ -156,127 +218,9 @@ def build(found, prev=None):
     for c in world:
         rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
-    # Порядок площадок — по силе межплощадочных линков: сильнее связанные
-    # рисуются соседями (жадная цепочка). Для ≤2 площадок — порядок конфига.
-    inter = {}
-    for l in rf:
-        a, b = l.get("frm"), l.get("to")
-        if (a in stat and b in stat and l.get("snr") is not None
-                and stat[a]["subnet"] != stat[b]["subnet"]):
-            key = frozenset((stat[a]["subnet"], stat[b]["subnet"]))
-            inter[key] = max(inter.get(key, -199), l["snr"])
-    ordered = list(subnets)
-    if len(subnets) > 2 and inter:
-        chain = list(max(inter, key=inter.get))
-        rest = [s for s in subnets if s not in chain]
-        while rest:
-            def endgain(s):
-                return max(inter.get(frozenset((s, chain[0])), -199),
-                           inter.get(frozenset((s, chain[-1])), -199))
-            s = max(rest, key=endgain)
-            if (inter.get(frozenset((s, chain[0])), -199)
-                    >= inter.get(frozenset((s, chain[-1])), -199)):
-                chain.insert(0, s)
-            else:
-                chain.append(s)
-            rest.remove(s)
-        ordered = chain
-    band_of = {s: i for i, s in enumerate(ordered)}
-
-    # Внешние ноды — по «карманам» между полосами: карман рядом с самым
-    # громким слушателем; если слушатели с двух сторон — карман между ними
-    S = CFG["snrScale"]
-
-    def pct(snr):
-        return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
-
-    n_gaps = max(1, len(ordered) - 1)
-    pockets = {i: [] for i in range(n_gaps)}
-    for c in world:
-        hb = {}  # индекс полосы -> лучший % от идеала
-        for _, h, s, _ in c["hears"]:
-            bi = band_of[stat[h]["subnet"]]
-            hb[bi] = max(hb.get(bi, 0.0), pct(s))
-        loud = max(hb, key=hb.get)
-        below = any(b > loud for b in hb)
-        above = any(b < loud for b in hb)
-        if below or (not above and loud < n_gaps):
-            g = min(loud, n_gaps - 1)
-        else:
-            g = max(loud - 1, 0)
-        pockets[g].append((c, hb))
-
-    # Зоны: полосы в выбранном порядке, карман между каждой парой
-    # (и под единственной полосой); высота кармана — под его население
-    zones, zid = [], {}
-    for i, s in enumerate(ordered):
-        zid[s] = f"net{i}"
-        zones.append(dict(id=f"net{i}", kind="subnet", label=s))
-        if i < n_gaps:
-            rows = -(-len(pockets[i]) // ROW) or 1
-            zones.append(dict(id=f"gap{i}", kind="gap",
-                              h=max(CFG["gapH"], 175 * rows + 170)))
-
-    # Стационарные: равномерно по полосе в порядке IP
-    nodes, by_sub = [], {}
-    for n in stat.values():
-        by_sub.setdefault(n["subnet"], []).append(n)
-    for s, ns in by_sub.items():
-        ns.sort(key=lambda n: ipaddress.ip_address(n["ip"]))
-        for i, n in enumerate(ns):
-            x = (i + 1) / (len(ns) + 1)
-            label = n.get("long") or n["short"]
-            sub = n["ip"] if label == n["short"] else f'{n["short"]} · {n["ip"]}'
-            node = dict(id=n["id"], label=label, sub=sub, zone=zid[s], x=x,
-                        online=True, heard=int(now))
-            if n.get("hw"):
-                node["hw"] = n["hw"]
-            info = node_info(n)
-            if info:
-                node["info"] = info
-            if n["id"] in CFG.get("mobile", []):
-                node.update(mobile=True, hint="кочующая нода, IP меняется")
-            nodes.append(node)
-
-    # Внешние ноды в своих карманах: расстояние до полосы кодирует качество —
-    # чем лучше (зеленее) слышно, тем ближе к площадке-слушателю; кого слышат
-    # с двух сторон — между полосами со сдвигом к более громкой. Колонки по
-    # кругу + вертикальная раздвижка; правый коридор — межплощадочным плечам.
-    col_x = [0.10, 0.34, 0.58]
-    for g, lst in pockets.items():
-        items = []
-        for c, hb in lst:
-            top = [p for b, p in hb.items() if b <= g]
-            bot = [p for b, p in hb.items() if b > g]
-            if top and not bot:
-                y = 0.05 + (1 - max(top)) * 0.40
-            elif bot and not top:
-                y = 0.95 - (1 - max(bot)) * 0.40
-            else:
-                y = 0.5 - (max(top) - max(bot)) * 0.35
-            items.append((y, c))
-        items.sort(key=lambda t: t[0])
-        col_last = {}
-        for i, (y, c) in enumerate(items):
-            col = i % len(col_x)
-            if col in col_last:
-                y = max(y, col_last[col] + 0.115)
-            y = min(0.96, max(0.04, y))
-            col_last[col] = y
-            label = c.get("long") or c["short"]
-            sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
-            node = dict(id=c["id"], label=label, sub=sub, zone=f"gap{g}",
-                        x=col_x[col], y=round(y, 3), heard=c["heard"] or None)
-            if c.get("hw"):
-                node["hw"] = c["hw"]
-            info = node_info(c)
-            if info:
-                node["info"] = info
-            nodes.append(node)
-
     # Кэш: плечи из прошлого live.json, которых не хватило в этом скане
     # (нода могла отдаться лёгким хендшейком без своей базы)
-    node_ids = {n["id"] for n in nodes}
+    node_ids = set(stat) | {c["id"] for c in world}
     have = {(l["frm"], l["to"]) for l in rf}
     if prev:
         ttl = CFG.get("cacheMaxAgeH", 24) * 3600
@@ -289,7 +233,7 @@ def build(found, prev=None):
             rf.append(dict(frm=key[0], to=key[1], snr=l["snr"], heard=l["heard"]))
             have.add(key)
 
-    # Между своими нодами всегда обе стрелки: недостающее направление — «не изм.»
+    # Между своими нодами всегда обе стрелки: недостающее направление — «нет данных»
     sids = sorted(stat)
     for i1, a in enumerate(sids):
         for b in sids[i1 + 1:]:
@@ -297,6 +241,70 @@ def build(found, prev=None):
             if fwd != rev:
                 frm, to = ((b, a) if fwd else (a, b))
                 rf.append(dict(frm=frm, to=to, snr=None, heard=None))
+
+    # Честная раскладка без зон: желаемая дистанция пары — из лучшего
+    # качества её плеч (чем зеленее, тем ближе друг к другу)
+    S = CFG["snrScale"]
+
+    def pct(snr):
+        return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
+
+    des = {}
+    for l in rf:
+        if l["snr"] is None:
+            continue
+        key = tuple(sorted((l["frm"], l["to"])))
+        des[key] = min(des.get(key, 9), 0.16 + (1 - pct(l["snr"])) * 0.60)
+
+    # Затравка позиций: прошлый прогон; новичкам — свои ноды по площадкам
+    # сверху вниз, внешние возле самого громкого слушателя
+    seed = {}
+    if prev:
+        for n in prev.get("nodes", []):
+            if n.get("x") is not None and n.get("y") is not None:
+                seed[n["id"]] = (n["x"], n["y"])
+    site_y = {s: 0.14 + 0.72 * i / max(1, len(subnets) - 1)
+              for i, s in enumerate(subnets)}
+    for i, nid in enumerate(sorted(stat)):
+        seed.setdefault(nid, (0.25 + 0.25 * (i % 3), site_y[stat[nid]["subnet"]]))
+    for c in world:
+        if c["id"] in seed:
+            continue
+        loud = max(c["hears"], key=lambda h: h[2])[1]
+        lx, ly = seed.get(loud, (0.5, 0.5))
+        j = int(c["id"][1:], 16) % 97 / 97
+        seed[c["id"]] = (min(0.9, max(0.1, lx + (j - 0.5) * 0.5)), ly)
+    pos = layout(sorted(node_ids), des, seed)
+
+    # Карточки нод
+    nodes = []
+    for nid in sorted(stat):
+        n = stat[nid]
+        label = n.get("long") or n["short"]
+        sub = n["ip"] if label == n["short"] else f'{n["short"]} · {n["ip"]}'
+        x, y = pos[nid]
+        node = dict(id=nid, label=label, sub=sub, own=True,
+                    x=round(x, 4), y=round(y, 4), online=True, heard=int(now))
+        if n.get("hw"):
+            node["hw"] = n["hw"]
+        info = node_info(n)
+        if info:
+            node["info"] = info
+        if nid in CFG.get("mobile", []):
+            node.update(mobile=True, hint="кочующая нода, IP меняется")
+        nodes.append(node)
+    for c in world:
+        label = c.get("long") or c["short"]
+        sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
+        x, y = pos[c["id"]]
+        node = dict(id=c["id"], label=label, sub=sub,
+                    x=round(x, 4), y=round(y, 4), heard=c["heard"] or None)
+        if c.get("hw"):
+            node["hw"] = c["hw"]
+        info = node_info(c)
+        if info:
+            node["info"] = info
+        nodes.append(node)
 
     out_links = []
     for l in rf:
@@ -308,9 +316,9 @@ def build(found, prev=None):
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
+                  canvasH=CANVAS_H,
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                   updatedTs=int(now * 1000)),
-        zones=zones,
         nodes=nodes,
         links=out_links,
     )
