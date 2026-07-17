@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
-PER_COL = 6  # внешних нод в колонке сетки
+ROW = 3  # внешних нод в ряду (шире — карточки начнут перекрываться)
 
 
 def log(msg):
@@ -136,9 +136,30 @@ def build(found):
     for c in world:
         links.extend(dict(link=(o, n), snr=s) for o, n, s in c["hears"])
 
+    # «Полка» внешней ноды — по тяге: кого слышат только верхние площадки,
+    # тот у верхней полосы (короткие плечи), только нижние — у нижней,
+    # смешанные — в середине. Так линии не тянутся через всю карту.
+    def pull(c):
+        ups = downs = 0
+        for _, hearer, _ in c["hears"]:
+            if stat[hearer]["subnet"] == subnets[0]:
+                ups += 1
+            else:
+                downs += 1
+        return (ups - downs) / max(1, ups + downs)
+
+    def shelf_of(c):
+        p = pull(c)
+        return "top" if p > 0.5 else "bottom" if p < -0.5 else "mid"
+
+    shelves = {"top": [], "mid": [], "bottom": []}
+    for c in world:
+        shelves[shelf_of(c)].append(c)
+    total_rows = sum(-(-len(v) // ROW) for v in shelves.values()) or 1
+
     # Зоны — только полосы подсетей; между первой и второй — свободная
-    # область (не рисуется), в ней живут внешние ноды. Высота — под сетку.
-    gap_h = max(CFG["gapH"], 130 * min(PER_COL, max(len(world), 1)) + 130)
+    # область (не рисуется), в ней живут внешние ноды. Высота — под полки.
+    gap_h = max(CFG["gapH"], 175 * total_rows + 170)
     zones, zid = [], {}
     for i, s in enumerate(subnets):
         zid[s] = f"net{i}"
@@ -162,22 +183,26 @@ def build(found):
                 node.update(mobile=True, hint="кочующая нода, IP меняется")
             nodes.append(node)
 
-    # Внешние ноды — сеткой в левой/центральной части свободной области;
-    # правый коридор оставлен межплощадочным плечам
+    # Внешние ноды — по полкам, в полке ряды по ROW штук со сдвигом
+    # в шахматном порядке; правый коридор оставлен межплощадочным плечам
     def avg_x(c):
         return sum(xpos.get(h[1], 0.5) for h in c["hears"]) / len(c["hears"])
-    ext = sorted(world, key=avg_x)
-    cols = max(1, -(-len(ext) // PER_COL))
-    for j, c in enumerate(ext):
-        col, row = divmod(j, PER_COL)
-        rows = min(PER_COL, len(ext) - col * PER_COL)
-        x = 0.14 + (0.48 * col / (cols - 1) if cols > 1 else 0.22)
-        y = 0.07 + (0.86 * row / (rows - 1) if rows > 1 else 0.35)
-        node = dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
-                    x=round(x, 3), y=round(y, 3))
-        if c.get("hw"):
-            node["hw"] = c["hw"]
-        nodes.append(node)
+    for name, base, step in (("top", 0.06, 1), ("mid", 0.5, 1), ("bottom", 0.94, -1)):
+        lst = sorted(shelves[name], key=avg_x)
+        rows = -(-len(lst) // ROW)
+        for j, c in enumerate(lst):
+            row, col = divmod(j, ROW)
+            in_row = min(ROW, len(lst) - row * ROW)
+            x = 0.10 + (row % 2) * 0.06 + (0.48 * col / (in_row - 1) if in_row > 1 else 0.22)
+            if name == "mid":
+                y = base + (row - (rows - 1) / 2) * 0.16
+            else:
+                y = base + step * row * 0.16
+            node = dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
+                        x=round(min(x, 0.64), 3), y=round(min(0.96, max(0.04, y)), 3))
+            if c.get("hw"):
+                node["hw"] = c["hw"]
+            nodes.append(node)
 
     # LAN-цепочки внутри полос
     lan = [dict(link=(a["id"], b["id"]), lan=True)

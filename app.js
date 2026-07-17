@@ -72,7 +72,36 @@
       pairCount[k] = (pairCount[k] || 0) + 1;
     }
 
-    for (const l of D.links) {
+    // Порты: точки входа плеч раскладываются веером по граням карточек,
+    // чтобы стрелки не слипались в одной точке
+    const ports = {}, portPt = {};
+    D.links.forEach((l, li) => {
+      if (l.type !== "rf") return;
+      const a = nodes[l.from], b = nodes[l.to];
+      if (!a || !b || (!a.world && !b.world && a.zone !== b.zone)) return; // коридорные мимо
+      for (const [n, o] of [[a, b], [b, a]]) {
+        const side = o.cy < n.cy - n.h / 2 ? "top" : o.cy > n.cy + n.h / 2 ? "bottom"
+          : o.cx < n.cx ? "left" : "right";
+        ((ports[n.id] ??= { top: [], bottom: [], left: [], right: [] })[side])
+          .push({ li, ox: o.cx, oy: o.cy });
+      }
+    });
+    for (const [nid, sides] of Object.entries(ports)) {
+      const n = nodes[nid];
+      for (const [side, list] of Object.entries(sides)) {
+        list.sort((p, q) => (side === "left" || side === "right") ? p.oy - q.oy : p.ox - q.ox);
+        list.forEach((p, i) => {
+          const f = (i + 1) / (list.length + 1);
+          portPt[`${p.li}:${nid}`] =
+            side === "top" ? [n.cx - n.w / 2 + f * n.w, n.cy - n.h / 2] :
+            side === "bottom" ? [n.cx - n.w / 2 + f * n.w, n.cy + n.h / 2] :
+            side === "left" ? [n.cx - n.w / 2, n.cy - n.h / 2 + f * n.h] :
+            [n.cx + n.w / 2, n.cy - n.h / 2 + f * n.h];
+        });
+      }
+    }
+
+    for (const [li, l] of D.links.entries()) {
       const a = nodes[l.from], b = nodes[l.to];
       if (!a || !b) continue;
       const cls = `edge e-${l.from} e-${l.to}`;
@@ -121,13 +150,11 @@
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
       const dim = a.world || b.world ? " dim" : "";
       const side = pairCount[k] > 1 ? ((pairSeen[k] = (pairSeen[k] || 0) + 1) === 1 ? 1 : -1) : 0;
-      let [x1, y1] = edgePoint(a, b.cx, b.cy);
-      let [x2, y2] = edgePoint(b, a.cx, a.cy, 14);
-      if (side) {
-        const len = Math.hypot(x2 - x1, y2 - y1) || 1;
-        const ox = (-(y2 - y1) / len) * 6 * side, oy = ((x2 - x1) / len) * 6 * side;
-        x1 += ox; y1 += oy; x2 += ox; y2 += oy;
-      }
+      let [x1, y1] = portPt[`${li}:${l.from}`] ?? edgePoint(a, b.cx, b.cy);
+      let [x2, y2] = portPt[`${li}:${l.to}`] ?? edgePoint(b, a.cx, a.cy, 14);
+      const dl = Math.hypot(x2 - x1, y2 - y1) || 1;
+      const ux = (x2 - x1) / dl, uy = (y2 - y1) / dl;
+      x1 += ux * 3; y1 += uy * 3; x2 -= ux * 11; y2 -= uy * 11;
       const t = l.labelT ?? (side === 1 ? 0.42 : side === -1 ? 0.58 : 0.5);
       const lx = x1 + (x2 - x1) * t, ly = y1 + (y2 - y1) * t;
       edgeSvg.push(`<g class="${cls}${dim}"><title>${esc(tip)}</title>

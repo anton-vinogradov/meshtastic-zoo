@@ -62,10 +62,14 @@ about your network — it just draws whatever is in the file:
   percentage, the label shows the SNR, and the exact % is in the leg's
   tooltip.
 
-Inter-site legs run along a dedicated right-hand corridor — a lane per
-pair, both directions side by side — so they never drown among the outside
-nodes; the outside nodes' legs are dimmed and light up on hover. Hovering
-over a node highlights its legs and neighbors.
+Three tricks keep the arrows from piling up: inter-site legs run along a
+dedicated right-hand corridor (a lane per pair, both directions side by
+side); outside nodes settle onto "shelves" by pull — those heard only by
+the top sites sit near the top band, only by the bottom ones near the
+bottom, mixed ones in the middle; and the legs' endpoints fan out across
+the card edges, each arrow getting its own port. The outside nodes' legs
+are dimmed and light up on hover. Hovering over a node highlights its
+legs and neighbors.
 
 ## Roadmap
 
