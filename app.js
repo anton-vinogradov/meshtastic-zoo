@@ -2,19 +2,75 @@
    Единственный источник данных: data/live.json от сборщика
    (collector/scan.py), перечитывается раз в минуту. */
 (function () {
-  const W = 960;
   const CARD = { w: 190, h: 64, r: 11 };
   const WCARD = { w: 200, h: 62, r: 11 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
   function render(D) {
-    // Зон нет: x/y — доли холста, честная силовая раскладка от сборщика
-    const H = D.meta.canvasH ?? 1150;
+    // Холст подстраивается под пропорции окна — свободного места не остаётся
+    const box = document.getElementById("map").getBoundingClientRect();
+    const H = 1150;
+    const W = Math.max(720, Math.min(3200,
+      Math.round(H * (box.width && box.height ? box.width / box.height : 0.84))));
+
+    // Посадка сырого облака позиций сборщика: PCA-поворот главной осью
+    // вдоль длинной стороны окна, ОДИН масштаб по обеим осям (пропорции
+    // дистанций честные), детерминированный выбор из 4 ориентаций
+    const ids = D.nodes.map(n => n.id);
+    const px = {};
+    if (ids.length) {
+      const pts = D.nodes.map(n => [n.x, n.y]);
+      const nN = pts.length;
+      const mx = pts.reduce((s, p) => s + p[0], 0) / nN;
+      const my = pts.reduce((s, p) => s + p[1], 0) / nN;
+      let sxx = 0, syy = 0, sxy = 0;
+      for (const [x, y] of pts) {
+        sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my);
+      }
+      const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+      const target = W >= H ? 0 : Math.PI / 2;
+      const cands = [];
+      for (const k of [0, 1]) for (const m of [1, -1]) {
+        const rot = target - theta + k * Math.PI;
+        const c = Math.cos(rot), s = Math.sin(rot);
+        cands.push(pts.map(([x, y]) =>
+          [(x - mx) * m * c - (y - my) * s, (x - mx) * m * s + (y - my) * c]));
+      }
+      const fi = ids.indexOf([...ids].sort()[0]);
+      cands.sort((A, B) => (A[fi][1] - B[fi][1]) || (A[fi][0] - B[fi][0]));
+      const P = cands[0];
+      const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
+      const spanX = (Math.max(...xs) - Math.min(...xs)) || 1e-6;
+      const spanY = (Math.max(...ys) - Math.min(...ys)) || 1e-6;
+      const scale = Math.min((W - 300) / spanX, (H - 190) / spanY);
+      const cx0 = (Math.max(...xs) + Math.min(...xs)) / 2;
+      const cy0 = (Math.max(...ys) + Math.min(...ys)) / 2;
+      ids.forEach((id, i) => {
+        px[id] = [W / 2 + (P[i][0] - cx0) * scale, H / 2 + (P[i][1] - cy0) * scale];
+      });
+      // раздвижка перекрывшихся карточек по вертикали
+      for (let r = 0; r < 300; r++) {
+        let moved = false;
+        for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+          const a = px[ids[i]], b = px[ids[j]];
+          const dx = b[0] - a[0], dy = b[1] - a[1];
+          if (Math.abs(dx) < 215 && Math.abs(dy) < 82) {
+            const over = (82 - Math.abs(dy)) / 2, s = dy >= 0 ? 1 : -1;
+            a[1] = Math.max(52, Math.min(H - 52, a[1] - s * over));
+            b[1] = Math.max(52, Math.min(H - 52, b[1] + s * over));
+            moved = true;
+          }
+        }
+        if (!moved) break;
+      }
+    }
+
     const nodes = {};
     for (const n of D.nodes) {
       const world = !n.own;
       const c = world ? WCARD : CARD;
-      nodes[n.id] = { ...n, cx: n.x * W, cy: n.y * H, w: c.w, h: c.h, r: c.r, world };
+      const [cx, cy] = px[n.id] ?? [W / 2, H / 2];
+      nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
     }
 
     // % от идеала по SNR и непрерывный цвет: 0% — красный (hue 0), 100% — зелёный (hue 140)
@@ -253,7 +309,13 @@
     } catch { return null; }
   }
 
-  let lastStamp = "", openId = null;
+  let lastStamp = "", openId = null, lastLive = null, rsTimer = null;
+  const refit = () => {
+    clearTimeout(rsTimer);
+    rsTimer = setTimeout(() => { if (lastLive) render(lastLive); }, 200);
+  };
+  window.addEventListener("resize", refit);
+  new ResizeObserver(refit).observe(document.getElementById("map"));
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#panel") && !e.target.closest(".node")) {
       document.getElementById("panel").classList.remove("open");
@@ -272,6 +334,7 @@
       return;
     }
     lastStamp = live.meta.updated;
+    lastLive = live;
     render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
   }
   tick();

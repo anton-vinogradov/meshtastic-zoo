@@ -20,21 +20,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
-CANVAS_H = 1150  # холст рендера 960×CANVAS_H; x/y нод — доли холста
-ASPECT = CANVAS_H / 960
 
 
 def layout(ids, des, seed):
-    """Силовая укладка без зон. des: {(a,b): желаемая дистанция в долях
-    ширины холста} — из качества плеч; seed: стартовые позиции (прошлый
-    прогон — карта не скачет между сканами). Несвязанные пары активно
-    расталкиваются (их дистанция ничем не измерена — можно занимать
-    свободное место), итог поворачивается по главной оси разброса и
-    вписывается в холст ОДНИМ масштабом — пропорции дистанций честные."""
-    pos = {}
-    for nid in ids:
-        x, y = seed.get(nid, (0.5, 0.5))
-        pos[nid] = [x, y * ASPECT]
+    """Силовая укладка без зон. des: {(a,b): желаемая дистанция} — из
+    качества плеч; seed: стартовые позиции (прошлый прогон — карта не
+    скачет между сканами). Несвязанные пары активно расталкиваются: их
+    дистанция ничем не измерена — можно занимать свободное место.
+    Возвращает СЫРЫЕ честные координаты; финальную посадку под размер
+    окна (поворот, единый масштаб, раздвижка карточек) делает рендерер."""
+    pos = {nid: list(seed.get(nid, (0.5, 0.5))) for nid in ids}
     idl = list(ids)
     steps = 600
     for it in range(steps):
@@ -60,68 +55,7 @@ def layout(ids, des, seed):
                     mv = (0.55 - dist) / dist * 0.22 * t
                     pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
                     pos[b][0] += dx * mv; pos[b][1] += dy * mv
-
-    # PCA-поворот: главная ось разброса — вдоль длинной (вертикальной)
-    # стороны холста; из четырёх ориентаций берём ближайшую к затравке
-    n = len(pos) or 1
-    mx = sum(p[0] for p in pos.values()) / n
-    my = sum(p[1] for p in pos.values()) / n
-    sxx = sum((p[0] - mx) ** 2 for p in pos.values())
-    syy = sum((p[1] - my) ** 2 for p in pos.values())
-    sxy = sum((p[0] - mx) * (p[1] - my) for p in pos.values())
-    theta = 0.5 * math.atan2(2 * sxy, sxx - syy)
-    base = math.pi / 2 - theta
-
-    def transformed(rot, mirror):
-        c, s = math.cos(rot), math.sin(rot)
-        out = {}
-        for nid, p in pos.items():
-            dx, dy = p[0] - mx, p[1] - my
-            if mirror:
-                dx = -dx
-            out[nid] = [dx * c - dy * s, dx * s + dy * c]
-        return out
-
-    def seed_cost(cand):
-        cost = c_n = 0
-        for nid, p in cand.items():
-            if nid in seed:
-                sx, sy = seed[nid]
-                cost += math.hypot(p[0] - (sx - 0.5), p[1] - (sy * ASPECT - 0.5 * ASPECT))
-                c_n += 1
-        return cost if c_n else 0
-
-    cands = [transformed(base + k * math.pi, m) for k in (0, 1) for m in (False, True)]
-    pts = min(cands, key=seed_cost)
-
-    # равномерное вписывание в поля холста (один масштаб по обеим осям)
-    xs = [p[0] for p in pts.values()]
-    ys = [p[1] for p in pts.values()]
-    dx_span = (max(xs) - min(xs)) or 1e-6
-    dy_span = (max(ys) - min(ys)) or 1e-6
-    scale = min(0.74 / dx_span, 0.88 * ASPECT / dy_span)
-    for nid, p in pts.items():
-        x = 0.5 + (p[0] - (min(xs) + max(xs)) / 2) * scale
-        y = (0.5 * ASPECT + (p[1] - (min(ys) + max(ys)) / 2) * scale) / ASPECT
-        pos[nid] = [x, y]
-
-    # раздвижка перекрывшихся карточек по вертикали
-    cw, ch = 215 / 960, 82 / CANVAS_H
-    for _ in range(300):
-        moved = False
-        for i in range(len(idl)):
-            for j in range(i + 1, len(idl)):
-                a, b = pos[idl[i]], pos[idl[j]]
-                dx, dy = b[0] - a[0], b[1] - a[1]
-                if abs(dx) < cw and abs(dy) < ch:
-                    over = (ch - abs(dy)) / 2
-                    s = 1 if dy >= 0 else -1
-                    a[1] = max(0.05, min(0.95, a[1] - s * over))
-                    b[1] = max(0.05, min(0.95, b[1] + s * over))
-                    moved = True
-        if not moved:
-            break
-    return {nid: (p[0], p[1]) for nid, p in pos.items()}
+    return {nid: (round(p[0], 4), round(p[1], 4)) for nid, p in pos.items()}
 
 
 def log(msg):
@@ -356,7 +290,6 @@ def build(found, prev=None):
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
-                  canvasH=CANVAS_H,
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                   updatedTs=int(now * 1000)),
         nodes=nodes,
