@@ -20,11 +20,19 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
-#map { width: min(960px, 100vw); }
-#map svg { display: block; width: 100%; height: auto; }
+/* Карта вписывается в окно целиком — прокрутка не нужна */
+#map {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+#map svg { display: block; height: 100%; width: 100%; }
 
 #legend {
   display: flex;

@@ -156,16 +156,66 @@ def build(found, prev=None):
     for c in world:
         rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
-    # Зоны — только полосы подсетей; между первой и второй — свободная
-    # область (не рисуется), в ней живут внешние ноды
-    rows_est = -(-len(world) // ROW) or 1
-    gap_h = max(CFG["gapH"], 175 * rows_est + 170)
+    # Порядок площадок — по силе межплощадочных линков: сильнее связанные
+    # рисуются соседями (жадная цепочка). Для ≤2 площадок — порядок конфига.
+    inter = {}
+    for l in rf:
+        a, b = l.get("frm"), l.get("to")
+        if (a in stat and b in stat and l.get("snr") is not None
+                and stat[a]["subnet"] != stat[b]["subnet"]):
+            key = frozenset((stat[a]["subnet"], stat[b]["subnet"]))
+            inter[key] = max(inter.get(key, -199), l["snr"])
+    ordered = list(subnets)
+    if len(subnets) > 2 and inter:
+        chain = list(max(inter, key=inter.get))
+        rest = [s for s in subnets if s not in chain]
+        while rest:
+            def endgain(s):
+                return max(inter.get(frozenset((s, chain[0])), -199),
+                           inter.get(frozenset((s, chain[-1])), -199))
+            s = max(rest, key=endgain)
+            if (inter.get(frozenset((s, chain[0])), -199)
+                    >= inter.get(frozenset((s, chain[-1])), -199)):
+                chain.insert(0, s)
+            else:
+                chain.append(s)
+            rest.remove(s)
+        ordered = chain
+    band_of = {s: i for i, s in enumerate(ordered)}
+
+    # Внешние ноды — по «карманам» между полосами: карман рядом с самым
+    # громким слушателем; если слушатели с двух сторон — карман между ними
+    S = CFG["snrScale"]
+
+    def pct(snr):
+        return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
+
+    n_gaps = max(1, len(ordered) - 1)
+    pockets = {i: [] for i in range(n_gaps)}
+    for c in world:
+        hb = {}  # индекс полосы -> лучший % от идеала
+        for _, h, s, _ in c["hears"]:
+            bi = band_of[stat[h]["subnet"]]
+            hb[bi] = max(hb.get(bi, 0.0), pct(s))
+        loud = max(hb, key=hb.get)
+        below = any(b > loud for b in hb)
+        above = any(b < loud for b in hb)
+        if below or (not above and loud < n_gaps):
+            g = min(loud, n_gaps - 1)
+        else:
+            g = max(loud - 1, 0)
+        pockets[g].append((c, hb))
+
+    # Зоны: полосы в выбранном порядке, карман между каждой парой
+    # (и под единственной полосой); высота кармана — под его население
     zones, zid = [], {}
-    for i, s in enumerate(subnets):
+    for i, s in enumerate(ordered):
         zid[s] = f"net{i}"
         zones.append(dict(id=f"net{i}", kind="subnet", label=s))
-        if i == 0:
-            zones.append(dict(id="gap0", kind="gap", h=gap_h))
+        if i < n_gaps:
+            rows = -(-len(pockets[i]) // ROW) or 1
+            zones.append(dict(id=f"gap{i}", kind="gap",
+                              h=max(CFG["gapH"], 175 * rows + 170)))
 
     # Стационарные: равномерно по полосе в порядке IP
     nodes, by_sub = [], {}
@@ -188,47 +238,41 @@ def build(found, prev=None):
                 node.update(mobile=True, hint="кочующая нода, IP меняется")
             nodes.append(node)
 
-    # Внешние ноды: расстояние до полосы кодирует качество — чем лучше
-    # (зеленее) её слышно, тем ближе к площадке-слушателю; кого слышат обе
-    # площадки — между ними, со сдвигом к той, что слышит громче.
-    # Колонки по кругу + раздвижка по вертикали, чтобы карточки не легли
-    # друг на друга; правый коридор оставлен межплощадочным плечам.
-    S = CFG["snrScale"]
-
-    def pct(snr):
-        return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
-
-    ext = []
-    for c in world:
-        top = [pct(s) for _, h, s, _ in c["hears"] if stat[h]["subnet"] == subnets[0]]
-        bot = [pct(s) for _, h, s, _ in c["hears"] if stat[h]["subnet"] != subnets[0]]
-        if top and not bot:
-            y = 0.05 + (1 - max(top)) * 0.40
-        elif bot and not top:
-            y = 0.95 - (1 - max(bot)) * 0.40
-        else:
-            y = 0.5 - (max(top) - max(bot)) * 0.35
-        ext.append((y, c))
-    ext.sort(key=lambda t: t[0])
-
+    # Внешние ноды в своих карманах: расстояние до полосы кодирует качество —
+    # чем лучше (зеленее) слышно, тем ближе к площадке-слушателю; кого слышат
+    # с двух сторон — между полосами со сдвигом к более громкой. Колонки по
+    # кругу + вертикальная раздвижка; правый коридор — межплощадочным плечам.
     col_x = [0.10, 0.34, 0.58]
-    col_last = {}
-    for i, (y, c) in enumerate(ext):
-        col = i % len(col_x)
-        if col in col_last:
-            y = max(y, col_last[col] + 0.115)
-        y = min(0.96, max(0.04, y))
-        col_last[col] = y
-        label = c.get("long") or c["short"]
-        sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
-        node = dict(id=c["id"], label=label, sub=sub, zone="gap0",
-                    x=col_x[col], y=round(y, 3), heard=c["heard"] or None)
-        if c.get("hw"):
-            node["hw"] = c["hw"]
-        info = node_info(c)
-        if info:
-            node["info"] = info
-        nodes.append(node)
+    for g, lst in pockets.items():
+        items = []
+        for c, hb in lst:
+            top = [p for b, p in hb.items() if b <= g]
+            bot = [p for b, p in hb.items() if b > g]
+            if top and not bot:
+                y = 0.05 + (1 - max(top)) * 0.40
+            elif bot and not top:
+                y = 0.95 - (1 - max(bot)) * 0.40
+            else:
+                y = 0.5 - (max(top) - max(bot)) * 0.35
+            items.append((y, c))
+        items.sort(key=lambda t: t[0])
+        col_last = {}
+        for i, (y, c) in enumerate(items):
+            col = i % len(col_x)
+            if col in col_last:
+                y = max(y, col_last[col] + 0.115)
+            y = min(0.96, max(0.04, y))
+            col_last[col] = y
+            label = c.get("long") or c["short"]
+            sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
+            node = dict(id=c["id"], label=label, sub=sub, zone=f"gap{g}",
+                        x=col_x[col], y=round(y, 3), heard=c["heard"] or None)
+            if c.get("hw"):
+                node["hw"] = c["hw"]
+            info = node_info(c)
+            if info:
+                node["info"] = info
+            nodes.append(node)
 
     # Кэш: плечи из прошлого live.json, которых не хватило в этом скане
     # (нода могла отдаться лёгким хендшейком без своей базы)

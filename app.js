@@ -180,25 +180,6 @@
     }
     out.push(...edgeSvg);
 
-    // Мини-пиктограммы моделей железа (22×22, контурные)
-    const HW_ICONS = {
-      tbeam: '<rect x="1.5" y="8" width="19" height="9" rx="2"/><line x1="5" y1="8" x2="5" y2="2.5"/><circle cx="5" cy="2.5" r="1.2"/><circle cx="14.5" cy="12.5" r="2.2"/>',
-      chip: '<rect x="5" y="5" width="12" height="12" rx="2"/><path d="M8 5V2 M14 5V2 M8 20v-3 M14 20v-3 M5 8H2 M5 14H2 M20 8h-3 M20 14h-3"/>',
-      cardputer: '<rect x="2.5" y="3.5" width="17" height="15" rx="2"/><rect x="5" y="6" width="12" height="5" rx="1"/><path d="M6 14.5h.01 M9 14.5h.01 M12 14.5h.01 M15 14.5h.01 M7.5 16.5h.01 M10.5 16.5h.01 M13.5 16.5h.01"/>',
-      heltec: '<rect x="3" y="6" width="16" height="11" rx="2"/><rect x="6" y="8.5" width="7" height="6" rx="1"/><line x1="16.5" y1="6" x2="16.5" y2="2.5"/>',
-      rak: '<rect x="4" y="7" width="14" height="10" rx="2"/><line x1="7" y1="7" x2="7" y2="3"/><rect x="12.5" y="10" width="3.5" height="4"/>',
-      antenna: '<line x1="11" y1="19" x2="11" y2="8"/><circle cx="11" cy="5.5" r="1.6"/><path d="M7 2.5a6 6 0 0 0 0 7 M15 2.5a6 6 0 0 1 0 7 M7.5 19h7"/>',
-    };
-    const hwKey = (hw) => {
-      const h = String(hw || "").toUpperCase();
-      if (!h) return null;
-      if (h.includes("CARDPUTER")) return "cardputer";
-      if (h.includes("BEAM")) return h.includes("S3") ? "chip" : "tbeam";
-      if (h.includes("HELTEC")) return "heltec";
-      if (h.includes("RAK")) return "rak";
-      return "antenna";
-    };
-
     // Карточки нод (поверх рёбер)
     for (const n of Object.values(nodes)) {
       const x = n.cx - n.w / 2, y = n.cy - n.h / 2;
@@ -209,11 +190,6 @@
       const tipTxt = [long !== n.label ? long : null, n.hw, n.hint].filter(Boolean).join(" · ");
       const name = String(n.label);
       const nm = name.length > 18 ? name.slice(0, 17) + "…" : name;
-      // Пиктограмма — фолбэк, поверх неё фото девайса (если файл есть)
-      const ik = hwKey(n.hw);
-      const icon = ik ? `<g transform="translate(${x + 17}, ${n.cy - 11})" fill="none"
-          stroke="${n.world ? "#9d9da4" : "#cdcdf6"}" stroke-width="1.5"
-          stroke-linecap="round" stroke-linejoin="round">${HW_ICONS[ik]}</g>` : "";
       const photo = `<g transform="translate(${x + 7}, ${n.cy - 21})" clip-path="url(#ph)">
         <rect width="42" height="42" rx="8" fill="rgba(255,255,255,.06)"/>
         <image href="${hwImg(n.hw)}" width="42" height="42" preserveAspectRatio="xMidYMid meet"/></g>`;
@@ -226,7 +202,7 @@
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
-        ${icon}${photo}${badge}
+        ${photo}${badge}
         <text x="${n.cx + 14}" y="${n.cy - 6}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 13 ? 12.5 : nm.length > 9 ? 15 : 17}"
           font-weight="700">${esc(nm)}</text>

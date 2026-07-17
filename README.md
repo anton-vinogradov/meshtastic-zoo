@@ -63,12 +63,18 @@ about your network — it just draws whatever is in the file:
   percentage, the label shows the SNR, and the exact % is in the leg's
   tooltip.
 
+The whole map fits the window — no scrolling. Any number of site bands:
+their order is chosen by inter-site link strength (the strongest-linked
+sites end up adjacent), and there is a pocket for outside nodes between
+every pair of bands — a node lands in the pocket next to its loudest
+listener.
+
 Three tricks keep the arrows from piling up: inter-site legs run along a
 dedicated right-hand corridor (a lane per pair, both directions side by
 side); outside nodes are placed the closer to a site's band the better
-(greener) they are heard — distance encodes quality, and those heard by
-both sites settle between the bands, shifted towards the louder side;
-and the legs' endpoints fan out across the card edges, each arrow
+(greener) they are heard — distance encodes quality, and those heard
+from both sides settle between the bands, shifted towards the louder
+side; and the legs' endpoints fan out across the card edges, each arrow
 getting its own port. The outside nodes' legs
 are dimmed and light up on hover. Hovering over a node highlights its
 legs and neighbors; **clicking opens a details panel**: device photo,
