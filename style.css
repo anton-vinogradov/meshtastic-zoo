@@ -56,7 +56,9 @@ body {
 }
 #map .empty code { color: var(--text); }
 
-/* Подсветка при наведении на ноду */
+/* Подсветка при наведении на ноду; плечи внешних нод приглушены по умолчанию */
 svg .edge, svg .node { transition: opacity .15s ease; }
-svg.focus .edge:not(.lit), svg.focus .node:not(.lit) { opacity: 0.18; }
+svg .edge.dim { opacity: 0.5; }
+svg.focus .edge.lit, svg.focus .node.lit { opacity: 1; }
+svg.focus .edge:not(.lit), svg.focus .node:not(.lit) { opacity: 0.15; }
 svg .node { cursor: default; }

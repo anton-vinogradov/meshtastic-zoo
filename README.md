@@ -37,7 +37,7 @@ Settings live in [`collector/config.json`](collector/config.json): the
 subnet list (its order = the order of bands on the map), timeouts,
 "fragile" subnets (after two failed full handshakes a node there is
 queried with a light handshake, without downloading its nodeDB), the
-outside-world filter (freshness, max node count), known IP↔radio-id pairs
+outside-world filter (freshness; node cap, 0 = show everyone), known IP↔radio-id pairs
 for when a node is unreachable, and roaming nodes.
 
 ## Data format
@@ -50,6 +50,7 @@ about your network — it just draws whatever is in the file:
   for it, outside nodes simply live there), `h` — band height in px
   (optional);
 - `nodes` — `zone` — band id, `x`/`y` — position as fractions of the band,
+  `hw` — hardware model (drawn as a mini-icon, full name in the tooltip),
   `mobile: true` — roaming node (dashed frame), `hint` — tooltip;
 - `links` — `lan` (wire within a site) or `rf` (radio leg; `snr` in dB,
   `null` + `note` = not measured, `labelT` — label position along the
@@ -61,7 +62,10 @@ about your network — it just draws whatever is in the file:
   percentage, the label shows the SNR, and the exact % is in the leg's
   tooltip.
 
-Hovering over a node highlights its legs and neighbors.
+Inter-site legs run along a dedicated right-hand corridor — a lane per
+pair, both directions side by side — so they never drown among the outside
+nodes; the outside nodes' legs are dimmed and light up on hover. Hovering
+over a node highlights its legs and neighbors.
 
 ## Roadmap
 

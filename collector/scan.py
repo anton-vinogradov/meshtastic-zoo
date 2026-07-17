@@ -19,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
+PER_COL = 6  # внешних нод в колонке сетки
 
 
 def log(msg):
@@ -57,7 +58,7 @@ def query(ip, no_nodes):
                 user = my.get("user") or {}
                 num = getattr(getattr(iface, "myInfo", None), "my_node_num", None) or my.get("num")
                 res.update(num=num, id=user.get("id"), short=user.get("shortName"),
-                           db=dict(iface.nodes or {}))
+                           hw=user.get("hwModel"), db=dict(iface.nodes or {}))
             finally:
                 iface.close()
         except Exception as e:
@@ -105,7 +106,7 @@ def build(found):
             continue
         stat[nid] = dict(id=nid, ip=ip, subnet=subnet_of(ip),
                          short=(info or {}).get("short") or names.get(nid, nid[-4:]),
-                         db=(info or {}).get("db") or {})
+                         hw=(info or {}).get("hw"), db=(info or {}).get("db") or {})
 
     # Линки: запись в nodeDB ноды N про ноду X = «N слышит X» → плечо X→N.
     # Берём только прямые (hopsAway 0) и свежие.
@@ -125,21 +126,25 @@ def build(found):
                                                     short=u.get("shortName") or oid[-4:]))
                 c["best"] = max(c["best"], snr)
                 c["hears"].append((oid, nid, snr))
+                if u.get("hwModel") and not c.get("hw"):
+                    c["hw"] = u["hwModel"]
 
-    # Внешний мир: кого слышит больше стационарных нод и громче
+    # Внешний мир: кого слышит больше стационарных нод и громче; topN 0 = все
+    topn = CFG["worldTopN"] or len(world_cand)
     world = sorted(world_cand.values(),
-                   key=lambda c: (-len(c["hears"]), -c["best"]))[: CFG["worldTopN"]]
+                   key=lambda c: (-len(c["hears"]), -c["best"]))[:topn]
     for c in world:
         links.extend(dict(link=(o, n), snr=s) for o, n, s in c["hears"])
 
     # Зоны — только полосы подсетей; между первой и второй — свободная
-    # область (не рисуется), в ней живут внешние ноды
+    # область (не рисуется), в ней живут внешние ноды. Высота — под сетку.
+    gap_h = max(CFG["gapH"], 130 * min(PER_COL, max(len(world), 1)) + 130)
     zones, zid = [], {}
     for i, s in enumerate(subnets):
         zid[s] = f"net{i}"
         zones.append(dict(id=f"net{i}", kind="subnet", label=s))
         if i == 0:
-            zones.append(dict(id="gap0", kind="gap", h=CFG["gapH"]))
+            zones.append(dict(id="gap0", kind="gap", h=gap_h))
 
     # Стационарные: равномерно по полосе в порядке IP
     nodes, xpos, by_sub = [], {}, {}
@@ -151,17 +156,28 @@ def build(found):
             x = (i + 1) / (len(ns) + 1)
             xpos[n["id"]] = x
             node = dict(id=n["id"], label=n["short"], sub=n["ip"], zone=zid[s], x=x)
+            if n.get("hw"):
+                node["hw"] = n["hw"]
             if n["id"] in CFG.get("mobile", []):
                 node.update(mobile=True, hint="кочующая нода, IP меняется")
             nodes.append(node)
 
-    # Внешние ноды: x — среднее по слышащим их нодам, y — лесенкой
+    # Внешние ноды — сеткой в левой/центральной части свободной области;
+    # правый коридор оставлен межплощадочным плечам
     def avg_x(c):
         return sum(xpos.get(h[1], 0.5) for h in c["hears"]) / len(c["hears"])
-    for j, c in enumerate(sorted(world, key=avg_x)):
-        y = 0.12 + (0.72 * j / (len(world) - 1) if len(world) > 1 else 0.3)
-        nodes.append(dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
-                          x=min(0.9, max(0.1, avg_x(c))), y=round(y, 3)))
+    ext = sorted(world, key=avg_x)
+    cols = max(1, -(-len(ext) // PER_COL))
+    for j, c in enumerate(ext):
+        col, row = divmod(j, PER_COL)
+        rows = min(PER_COL, len(ext) - col * PER_COL)
+        x = 0.14 + (0.48 * col / (cols - 1) if cols > 1 else 0.22)
+        y = 0.07 + (0.86 * row / (rows - 1) if rows > 1 else 0.35)
+        node = dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
+                    x=round(x, 3), y=round(y, 3))
+        if c.get("hw"):
+            node["hw"] = c["hw"]
+        nodes.append(node)
 
     # LAN-цепочки внутри полос
     lan = [dict(link=(a["id"], b["id"]), lan=True)

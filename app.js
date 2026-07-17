@@ -64,6 +64,8 @@
     // Встречные плечи одной пары разносим перпендикулярно, чтобы не слипались.
     const edgeSvg = [], rfMarkers = [];
     const pairCount = {}, pairSeen = {};
+    const crossLane = {};
+    let laneN = 0;
     for (const l of D.links) {
       if (l.type !== "rf") continue;
       const k = [l.from, l.to].sort().join("|");
@@ -88,6 +90,36 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
+      const label = l.snr == null ? (l.note || "не изм.") : fmtSnr(l.snr);
+      const tip = l.snr == null
+        ? `${l.from} ↔ ${l.to}: не измерено`
+        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% от идеала`;
+
+      if (!a.world && !b.world && a.zone !== b.zone) {
+        // Межплощадочное плечо — обходом по правому коридору, чтобы не
+        // тонуло среди внешних нод: дорожка на пару, туда и обратно рядом
+        if (!(k in crossLane)) crossLane[k] = laneN++;
+        const dir = (pairSeen[k] = (pairSeen[k] || 0) + 1); // 1 туда, 2 обратно
+        const bx = W - M - 20 - crossLane[k] * 34 - (dir - 1) * 9;
+        const gd = a.cy < b.cy ? 1 : -1;
+        const sx = a.cx + a.w / 2 - 22 - (dir - 1) * 12;
+        const sy = a.cy + gd * a.h / 2;
+        const runY = sy + gd * (16 + (dir - 1) * 10);
+        const ey = b.cy - 6 + (dir - 1) * 12;
+        const ex = b.cx + b.w / 2 + 14;
+        const labY = (runY + ey) / 2 + (dir === 1 ? -6 : 16);
+        edgeSvg.push(`<g class="${cls}"><title>${esc(tip)}</title>
+          <path d="M ${sx} ${sy} V ${runY} H ${bx} V ${ey} H ${ex}" fill="none"
+            stroke="${col}" stroke-width="2.5" stroke-dasharray="7 5"
+            stroke-linejoin="round" marker-end="url(#${mid})"/>
+          <text x="${bx - 10}" y="${labY}" text-anchor="end" fill="${col}" font-size="14.5"
+            font-weight="600" paint-order="stroke" stroke="var(--bg)"
+            stroke-width="5">${esc(label)}</text></g>`);
+        continue;
+      }
+
+      // Плечи внешних нод — приглушённые, чтобы не забивали картину
+      const dim = a.world || b.world ? " dim" : "";
       const side = pairCount[k] > 1 ? ((pairSeen[k] = (pairSeen[k] || 0) + 1) === 1 ? 1 : -1) : 0;
       let [x1, y1] = edgePoint(a, b.cx, b.cy);
       let [x2, y2] = edgePoint(b, a.cx, a.cy, 14);
@@ -98,17 +130,32 @@
       }
       const t = l.labelT ?? (side === 1 ? 0.42 : side === -1 ? 0.58 : 0.5);
       const lx = x1 + (x2 - x1) * t, ly = y1 + (y2 - y1) * t;
-      const label = l.snr == null ? (l.note || "не изм.") : fmtSnr(l.snr);
-      const tip = l.snr == null
-        ? `${l.from} ↔ ${l.to}: не измерено`
-        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% от идеала`;
-      edgeSvg.push(`<g class="${cls}"><title>${esc(tip)}</title>
+      edgeSvg.push(`<g class="${cls}${dim}"><title>${esc(tip)}</title>
         <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
           stroke="${col}" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#${mid})"/>
-        <text x="${lx + 10}" y="${ly - 8}" fill="${col}" font-size="14.5"
+        <text x="${lx + 10}" y="${ly - 8}" fill="${col}" font-size="14"
           font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="5">${esc(label)}</text></g>`);
     }
     out.push(...edgeSvg);
+
+    // Мини-пиктограммы моделей железа (22×22, контурные)
+    const HW_ICONS = {
+      tbeam: '<rect x="1.5" y="8" width="19" height="9" rx="2"/><line x1="5" y1="8" x2="5" y2="2.5"/><circle cx="5" cy="2.5" r="1.2"/><circle cx="14.5" cy="12.5" r="2.2"/>',
+      chip: '<rect x="5" y="5" width="12" height="12" rx="2"/><path d="M8 5V2 M14 5V2 M8 20v-3 M14 20v-3 M5 8H2 M5 14H2 M20 8h-3 M20 14h-3"/>',
+      cardputer: '<rect x="2.5" y="3.5" width="17" height="15" rx="2"/><rect x="5" y="6" width="12" height="5" rx="1"/><path d="M6 14.5h.01 M9 14.5h.01 M12 14.5h.01 M15 14.5h.01 M7.5 16.5h.01 M10.5 16.5h.01 M13.5 16.5h.01"/>',
+      heltec: '<rect x="3" y="6" width="16" height="11" rx="2"/><rect x="6" y="8.5" width="7" height="6" rx="1"/><line x1="16.5" y1="6" x2="16.5" y2="2.5"/>',
+      rak: '<rect x="4" y="7" width="14" height="10" rx="2"/><line x1="7" y1="7" x2="7" y2="3"/><rect x="12.5" y="10" width="3.5" height="4"/>',
+      antenna: '<line x1="11" y1="19" x2="11" y2="8"/><circle cx="11" cy="5.5" r="1.6"/><path d="M7 2.5a6 6 0 0 0 0 7 M15 2.5a6 6 0 0 1 0 7 M7.5 19h7"/>',
+    };
+    const hwKey = (hw) => {
+      const h = String(hw || "").toUpperCase();
+      if (!h) return null;
+      if (h.includes("CARDPUTER")) return "cardputer";
+      if (h.includes("BEAM")) return h.includes("S3") ? "chip" : "tbeam";
+      if (h.includes("HELTEC")) return "heltec";
+      if (h.includes("RAK")) return "rak";
+      return "antenna";
+    };
 
     // Карточки нод (поверх рёбер)
     for (const n of Object.values(nodes)) {
@@ -116,10 +163,16 @@
       const fill = n.world ? "var(--world-card)" : "var(--card-fill)";
       const stroke = n.world ? "#3a3a3e" : "var(--card-stroke)";
       const subFill = n.world ? "var(--muted)" : "var(--card-sub)";
+      const tipTxt = [n.hw, n.hint].filter(Boolean).join(" · ");
+      const ik = hwKey(n.hw);
+      const icon = ik ? `<g transform="translate(${x + 9}, ${n.cy - 11})" fill="none"
+          stroke="${n.world ? "#9d9da4" : "#cdcdf6"}" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round">${HW_ICONS[ik]}</g>` : "";
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
-        ${n.hint ? `<title>${esc(n.hint)}</title>` : ""}
+        ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
+        ${icon}
         <text x="${n.cx}" y="${n.cy - 6}" text-anchor="middle" fill="var(--text)"
           font-size="17" font-weight="700">${esc(n.label)}</text>
         <text x="${n.cx}" y="${n.cy + 17}" text-anchor="middle" fill="${subFill}"

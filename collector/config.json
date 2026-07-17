@@ -5,7 +5,7 @@
   "queryTimeoutS": 45,
   "fragile": ["10.77.77."],
   "worldMaxAgeH": 6,
-  "worldTopN": 8,
+  "worldTopN": 0,
   "gapH": 760,
   "snrScale": { "floor": -20, "ideal": 10 },
   "mobile": ["!702bde48"],
