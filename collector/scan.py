@@ -58,7 +58,9 @@ def query(ip, no_nodes):
                 user = my.get("user") or {}
                 num = getattr(getattr(iface, "myInfo", None), "my_node_num", None) or my.get("num")
                 res.update(num=num, id=user.get("id"), short=user.get("shortName"),
-                           hw=user.get("hwModel"), db=dict(iface.nodes or {}))
+                           long=user.get("longName"), role=user.get("role"),
+                           hw=user.get("hwModel"), dm=my.get("deviceMetrics") or {},
+                           db=dict(iface.nodes or {}))
             finally:
                 iface.close()
         except Exception as e:
@@ -86,7 +88,19 @@ def query_with_retries(ip):
     return None
 
 
-def build(found):
+def node_info(src):
+    """Карточка телеметрии для панели подробностей."""
+    dm = src.get("dm") or {}
+    voltage = dm.get("voltage")
+    out = dict(long=src.get("long"), role=src.get("role"),
+               battery=dm.get("batteryLevel"),
+               voltage=voltage if voltage and voltage > 0 else None,
+               chUtil=dm.get("channelUtilization"), airTx=dm.get("airUtilTx"),
+               uptime=dm.get("uptimeSeconds"))
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def build(found, prev=None):
     """found: {ip: результат query или None} → структура для фронтенда."""
     now = time.time()
     max_age = CFG["worldMaxAgeH"] * 3600
@@ -104,13 +118,15 @@ def build(found):
         if not nid:
             log(f"  {ip}: порт открыт, но радио-id неизвестен — пропуск")
             continue
+        i = info or {}
         stat[nid] = dict(id=nid, ip=ip, subnet=subnet_of(ip),
-                         short=(info or {}).get("short") or names.get(nid, nid[-4:]),
-                         hw=(info or {}).get("hw"), db=(info or {}).get("db") or {})
+                         short=i.get("short") or names.get(nid, nid[-4:]),
+                         hw=i.get("hw"), long=i.get("long"), role=i.get("role"),
+                         dm=i.get("dm") or {}, db=i.get("db") or {})
 
     # Линки: запись в nodeDB ноды N про ноду X = «N слышит X» → плечо X→N.
     # Берём только прямые (hopsAway 0) и свежие.
-    links, world_cand = [], {}
+    rf, world_cand = [], {}
     for nid, n in stat.items():
         for oid, e in n["db"].items():
             if oid == nid or not isinstance(e, dict):
@@ -119,30 +135,34 @@ def build(found):
             if snr is None or e.get("hopsAway", 0) != 0 or now - heard > max_age:
                 continue
             if oid in stat:
-                links.append(dict(link=(oid, nid), snr=snr))
+                rf.append(dict(frm=oid, to=nid, snr=snr, heard=int(heard)))
             else:
                 u = e.get("user") or {}
-                c = world_cand.setdefault(oid, dict(id=oid, best=-99, hears=[],
+                c = world_cand.setdefault(oid, dict(id=oid, best=-99, heard=0, hears=[],
                                                     short=u.get("shortName") or oid[-4:]))
                 c["best"] = max(c["best"], snr)
-                c["hears"].append((oid, nid, snr))
-                if u.get("hwModel") and not c.get("hw"):
-                    c["hw"] = u["hwModel"]
+                c["hears"].append((oid, nid, snr, int(heard)))
+                if heard >= c["heard"]:
+                    c["heard"] = int(heard)
+                    for key, val in (("hw", u.get("hwModel")), ("long", u.get("longName")),
+                                     ("role", u.get("role")), ("dm", e.get("deviceMetrics"))):
+                        if val:
+                            c[key] = val
 
     # Внешний мир: кого слышит больше стационарных нод и громче; topN 0 = все
     topn = CFG["worldTopN"] or len(world_cand)
     world = sorted(world_cand.values(),
                    key=lambda c: (-len(c["hears"]), -c["best"]))[:topn]
     for c in world:
-        links.extend(dict(link=(o, n), snr=s) for o, n, s in c["hears"])
+        rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
     # «Полка» внешней ноды — по тяге: кого слышат только верхние площадки,
     # тот у верхней полосы (короткие плечи), только нижние — у нижней,
     # смешанные — в середине. Так линии не тянутся через всю карту.
     def pull(c):
         ups = downs = 0
-        for _, hearer, _ in c["hears"]:
-            if stat[hearer]["subnet"] == subnets[0]:
+        for h in c["hears"]:
+            if stat[h[1]]["subnet"] == subnets[0]:
                 ups += 1
             else:
                 downs += 1
@@ -176,9 +196,13 @@ def build(found):
         for i, n in enumerate(ns):
             x = (i + 1) / (len(ns) + 1)
             xpos[n["id"]] = x
-            node = dict(id=n["id"], label=n["short"], sub=n["ip"], zone=zid[s], x=x)
+            node = dict(id=n["id"], label=n["short"], sub=n["ip"], zone=zid[s], x=x,
+                        online=True, heard=int(now))
             if n.get("hw"):
                 node["hw"] = n["hw"]
+            info = node_info(n)
+            if info:
+                node["info"] = info
             if n["id"] in CFG.get("mobile", []):
                 node.update(mobile=True, hint="кочующая нода, IP меняется")
             nodes.append(node)
@@ -199,14 +223,49 @@ def build(found):
             else:
                 y = base + step * row * 0.16
             node = dict(id=c["id"], label=c["short"], sub=c["id"], zone="gap0",
-                        x=round(min(x, 0.64), 3), y=round(min(0.96, max(0.04, y)), 3))
+                        x=round(min(x, 0.64), 3), y=round(min(0.96, max(0.04, y)), 3),
+                        heard=c["heard"] or None)
             if c.get("hw"):
                 node["hw"] = c["hw"]
+            info = node_info(c)
+            if info:
+                node["info"] = info
             nodes.append(node)
 
+    # Кэш: плечи из прошлого live.json, которых не хватило в этом скане
+    # (нода могла отдаться лёгким хендшейком без своей базы)
+    node_ids = {n["id"] for n in nodes}
+    have = {(l["frm"], l["to"]) for l in rf}
+    if prev:
+        ttl = CFG.get("cacheMaxAgeH", 24) * 3600
+        for l in prev.get("links", []):
+            key = (l.get("from"), l.get("to"))
+            if (l.get("type") != "rf" or key in have or l.get("snr") is None
+                    or not l.get("heard") or now - l["heard"] > ttl
+                    or key[0] not in node_ids or key[1] not in node_ids):
+                continue
+            rf.append(dict(frm=key[0], to=key[1], snr=l["snr"], heard=l["heard"]))
+            have.add(key)
+
+    # Между своими нодами всегда обе стрелки: недостающее направление — «не изм.»
+    sids = sorted(stat)
+    for i1, a in enumerate(sids):
+        for b in sids[i1 + 1:]:
+            fwd, rev = (a, b) in have, (b, a) in have
+            if fwd != rev:
+                frm, to = ((b, a) if fwd else (a, b))
+                rf.append(dict(frm=frm, to=to, snr=None, heard=None))
+
     # LAN-цепочки внутри полос
-    lan = [dict(link=(a["id"], b["id"]), lan=True)
-           for ns in by_sub.values() for a, b in zip(ns, ns[1:])]
+    lan_pairs = [(a["id"], b["id"]) for ns in by_sub.values() for a, b in zip(ns, ns[1:])]
+
+    out_links = [{"from": a, "to": b, "type": "lan"} for a, b in lan_pairs]
+    for l in rf:
+        d = {"from": l["frm"], "to": l["to"], "type": "rf",
+             "snr": None if l["snr"] is None else round(l["snr"], 2)}
+        if l.get("heard"):
+            d["heard"] = l["heard"]
+        out_links.append(d)
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
@@ -214,14 +273,16 @@ def build(found):
                   updatedTs=int(now * 1000)),
         zones=zones,
         nodes=nodes,
-        links=[dict(**{"from": l["link"][0], "to": l["link"][1]},
-                    type="lan" if l.get("lan") else "rf",
-                    **({} if l.get("lan") else {"snr": round(l["snr"], 2)}))
-               for l in lan + links],
+        links=out_links,
     )
 
 
 def run_once():
+    prev = None
+    try:
+        prev = json.loads(OUT.read_text())
+    except Exception:
+        pass
     found = {}
     for s in CFG["subnets"]:
         log(f"скан {s} …")
@@ -234,7 +295,7 @@ def run_once():
         for ip in ips:
             log(f"  опрос {ip} …")
             found[ip] = query_with_retries(ip)
-    data = build(found)
+    data = build(found, prev)
     OUT.write_text(json.dumps(data, ensure_ascii=False, indent=1))
     log(f"→ data/live.json: нод {len(data['nodes'])}, линков {len(data['links'])}")
 

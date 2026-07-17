@@ -69,7 +69,20 @@ the top sites sit near the top band, only by the bottom ones near the
 bottom, mixed ones in the middle; and the legs' endpoints fan out across
 the card edges, each arrow getting its own port. The outside nodes' legs
 are dimmed and light up on hover. Hovering over a node highlights its
-legs and neighbors.
+legs and neighbors; **clicking opens a details panel**: device photo,
+ID, IP, model, battery, uptime, channel utilization, and every leg with
+its age.
+
+Between your own nodes (the ones found by IP) both arrows are always
+drawn: a direction missing from this scan is backfilled from the previous
+`live.json` (cache, TTL in `cacheMaxAgeH`), and if there is no data at
+all — a grey "not measured". Each card shows status: a green dot means
+the node answers over TCP, otherwise a "last heard" badge (orange when
+older than 3 h).
+
+Device images are the official renders from the
+[Meshtastic web-flasher](https://github.com/meshtastic/web-flasher)
+repository (`img/hw/`); an unknown model gets a placeholder image.
 
 ## Roadmap
 
@@ -77,5 +90,5 @@ legs and neighbors.
       removed at stage 2 — the scan is the single source of truth)
 - [x] Stage 2: collector — subnet scan + node queries over the TCP API,
       auto-generated `data/live.json`, live re-rendering
-- [ ] Stage 2.5: battery, uptime, online/offline on node cards
+- [x] Stage 2.5: battery, uptime, "last seen", click-through details panel
 - [ ] Stage 3: measurement history and link quality charts
