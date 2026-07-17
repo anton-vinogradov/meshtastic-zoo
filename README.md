@@ -80,7 +80,14 @@ side, and overlapping cards get pushed apart. The outside nodes' legs
 are dimmed and light up on hover. Hovering over a node highlights its
 legs and neighbors; **clicking opens a details panel**: device photo,
 ID, IP, model, battery, uptime, channel utilization, and every leg with
-its age.
+its age — two-way pairs are grouped into blocks, one-way legs listed
+separately, everything sorted by quality.
+
+Asymmetry also affects the layout: for a pair of your own nodes the
+quality is the mean of both directions, and a missing direction counts
+as zero — a "neighbor that cannot hear us back" is a dubious adjacency
+and is drawn farther away. Outside nodes are not penalized: their
+hearing is unknowable by design.
 
 Between your own nodes (the ones found by IP) both arrows are always
 drawn: a direction missing from this scan is backfilled from the previous

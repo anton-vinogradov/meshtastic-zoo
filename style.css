@@ -92,11 +92,26 @@ body {
   padding: 3.5px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
 #panel .prow span:first-child { color: var(--muted); }
 #panel .plegs { margin-top: 12px; }
-#panel .plegs > b { display: block; margin-bottom: 6px; }
+#panel .plegs > b { display: block; margin-bottom: 2px; }
+#panel .psub {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin: 10px 0 5px;
+}
+#panel .pair {
+  background: rgba(255, 255, 255, .045);
+  border-radius: 9px;
+  padding: 5px 9px 6px;
+  margin-bottom: 7px;
+}
+#panel .pair .pwho { font-weight: 600; margin-bottom: 2px; }
 #panel .leg { display: flex; align-items: center; gap: 7px; padding: 2.5px 0; }
 #panel .leg .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-#panel .leg .who { flex: 1; }
-#panel .leg .age { color: var(--muted); font-size: 11.5px; }
+#panel .leg .who { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#panel .leg .age { color: var(--muted); font-size: 11.5px; flex: none; }
+#panel .singles .leg { margin-bottom: 5px; }
 
 #map .empty {
   padding: 48px 24px;

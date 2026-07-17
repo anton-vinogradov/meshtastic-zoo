@@ -223,12 +223,23 @@ def build(found, prev=None):
     def pct(snr):
         return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
 
-    des = {}
+    # Качество пары. Для пары СВОИХ нод обратка знаема в принципе, поэтому
+    # берём среднее двух направлений, а отсутствующее направление считаем
+    # нулём — одностороннее «соседство» сомнительно и отъезжает дальше.
+    # У внешних нод их «слух» недоступен — там берём лучшее известное.
+    pair_pct = {}
     for l in rf:
         if l["snr"] is None:
             continue
         key = tuple(sorted((l["frm"], l["to"])))
-        des[key] = min(des.get(key, 9), 0.16 + (1 - pct(l["snr"])) * 0.60)
+        pair_pct.setdefault(key, []).append(pct(l["snr"]))
+    des = {}
+    for key, ps in pair_pct.items():
+        if key[0] in stat and key[1] in stat:
+            q = (max(ps) + (min(ps) if len(ps) > 1 else 0)) / 2
+        else:
+            q = max(ps)
+        des[key] = 0.16 + (1 - q) * 0.60
 
     # Затравка позиций: прошлый прогон; новичкам — свои ноды по площадкам
     # сверху вниз, внешние возле самого громкого слушателя

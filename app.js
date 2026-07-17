@@ -246,16 +246,34 @@
         ["Свой TX", i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
         ["Видели", n.online ? "онлайн (отвечает по TCP)" : n.heard ? fmtAgo(n.heard) : "—"],
       ].filter(([, v]) => v != null);
-      const legs = D.links
-        .filter(l => l.type === "rf" && (l.from === id || l.to === id))
-        .map(l => {
-          const col = colorOf(l);
-          const val = l.snr == null ? "нет данных" : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
-          const dirTxt = l.from === id ? `→ ${lbl(l.to)}` : `← ${lbl(l.from)}`;
-          return `<div class="leg"><span class="dot" style="background:${col}"></span>
-            <span class="who">${esc(dirTxt)}</span><span style="color:${col}">${val}</span>
-            ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}</div>`;
-        }).join("");
+      // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
+      // всё отсортировано по качеству
+      const byOther = {};
+      for (const l of D.links) {
+        if (l.type !== "rf" || (l.from !== id && l.to !== id)) continue;
+        const other = l.from === id ? l.to : l.from;
+        const r = (byOther[other] ??= { other });
+        r[l.from === id ? "out" : "in"] = l;
+      }
+      const qOf = (l) => (l && l.snr != null ? pctOf(l.snr) : -1);
+      const bestQ = (r) => Math.max(qOf(r.in), qOf(r.out));
+      const rel = Object.values(byOther);
+      const pairsL = rel.filter(r => r.in && r.out).sort((a, b) => bestQ(b) - bestQ(a));
+      const singles = rel.filter(r => !(r.in && r.out)).sort((a, b) => bestQ(b) - bestQ(a));
+      const legLine = (l, who) => {
+        const col = colorOf(l);
+        const val = l.snr == null ? "нет данных" : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
+        return `<div class="leg"><span class="dot" style="background:${col}"></span>
+          <span class="who">${who}</span><span style="color:${col}">${val}</span>
+          ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}</div>`;
+      };
+      const legs =
+        (pairsL.length ? `<div class="psub">двусторонние</div>` : "") +
+        pairsL.map(r => `<div class="pair"><div class="pwho">⇄ ${esc(lbl(r.other))}</div>
+          ${legLine(r.out, "→")}${legLine(r.in, "←")}</div>`).join("") +
+        (singles.length ? `<div class="psub">одиночные</div>` : "") +
+        `<div class="singles">${singles.map(r =>
+          legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(lbl(r.other)))).join("")}</div>`;
       panel.innerHTML = `
         <button id="pclose" aria-label="закрыть">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
