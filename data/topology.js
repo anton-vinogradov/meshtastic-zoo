@@ -5,8 +5,8 @@ window.MESHZOO_DATA = {
   meta: {
     title: "meshtastic-zoo",
     updated: "2026-07-18",
-    // Пороги раскраски RF-линков по SNR (dB)
-    thresholds: { good: 5, ok: -10 }, // >= good — зелёный, >= ok — оранжевый, ниже — красный
+    // Шкала «% от идеала» для раскраски RF-линков: floor → 0%, ideal → 100%
+    snrScale: { floor: -20, ideal: 10 }, // dB
   },
 
   zones: [
@@ -18,7 +18,8 @@ window.MESHZOO_DATA = {
   nodes: [
     // Подсеть 77 (верх)
     { id: "FCB",  label: "FCB",        sub: "10.77.77.40", zone: "net77", x: 0.16 },
-    { id: "FADV", label: "FADV",       sub: "10.77.77.42", zone: "net77", x: 0.50 },
+    { id: "FADV", label: "FADV",       sub: "10.77.77.42", zone: "net77", x: 0.50,
+      mobile: true, hint: "перемещается, IP меняется" },
     { id: "FC2",  label: "FC2 · P26",  sub: "10.77.77.41", zone: "net77", x: 0.84 },
 
     // Внешний мир (середина); x/y — доли от размеров зоны

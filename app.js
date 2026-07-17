@@ -31,11 +31,12 @@
     nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
   }
 
-  const colorOf = (l) => {
-    if (l.snr == null) return "var(--snr-na)";
-    const t = D.meta.thresholds;
-    return l.snr >= t.good ? "var(--snr-good)" : l.snr >= t.ok ? "var(--snr-ok)" : "var(--snr-bad)";
-  };
+  // % от идеала по SNR и непрерывный цвет: 0% — красный (hue 0), 100% — зелёный (hue 140)
+  const S = D.meta.snrScale;
+  const pctOf = (snr) => Math.round(
+    Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor))) * 100);
+  const hue = (pct) => pct * 1.4;
+  const colorOf = (l) => l.snr == null ? "#8a8a90" : `hsl(${hue(pctOf(l.snr))}, 62%, 55%)`;
   const fmtSnr = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
 
   // Точка на границе карточки по направлению к (tx,ty), с зазором
@@ -59,8 +60,8 @@
       font-size="17" font-weight="700">${esc(z.label)}</text>`);
   }
 
-  // Рёбра (под карточками)
-  const edgeSvg = [];
+  // Рёбра (под карточками); маркеры стрелок копятся сюда — свой цвет на каждое плечо
+  const edgeSvg = [], rfMarkers = [];
   for (const l of D.links) {
     const a = nodes[l.from], b = nodes[l.to];
     const cls = `edge e-${l.from} e-${l.to}`;
@@ -84,19 +85,25 @@
       continue;
     }
 
-    // RF: пунктир со стрелкой к стационарной ноде + подпись SNR
+    // RF: пунктир со стрелкой к стационарной ноде, цвет = % от идеала, подпись = SNR
     const col = colorOf(l);
+    const mid = `arr${rfMarkers.length}`;
+    rfMarkers.push(`<marker id="${mid}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+      markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
+
     const [x1, y1] = edgePoint(a, b.cx, b.cy);
     const [x2, y2] = edgePoint(b, a.cx, a.cy, 14);
-    edgeSvg.push(`<line class="${cls}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-      stroke="${col}" stroke-width="2" stroke-dasharray="6 6"
-      marker-end="url(#arr-${col.slice(4, -1)})"/>`);
-
     const t = l.labelT ?? 0.5;
     const lx = x1 + (x2 - x1) * t, ly = y1 + (y2 - y1) * t;
     const label = l.snr == null ? (l.note || "не изм.") : fmtSnr(l.snr);
-    edgeSvg.push(`<text class="${cls}" x="${lx + 10}" y="${ly - 8}" fill="${col}" font-size="14.5"
-      font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="5">${esc(label)}</text>`);
+    const tip = l.snr == null
+      ? `${l.from} ↔ ${l.to}: не измерено`
+      : `${l.from} ↔ ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% от идеала`;
+    edgeSvg.push(`<g class="${cls}"><title>${esc(tip)}</title>
+      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+        stroke="${col}" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#${mid})"/>
+      <text x="${lx + 10}" y="${ly - 8}" fill="${col}" font-size="14.5"
+        font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="5">${esc(label)}</text></g>`);
   }
   out.push(...edgeSvg);
 
@@ -107,8 +114,9 @@
     const stroke = n.world ? "#3a3a3e" : "var(--card-stroke)";
     const subFill = n.world ? "var(--muted)" : "var(--card-sub)";
     out.push(`<g class="node n-${n.id}" data-id="${n.id}">
+      ${n.hint ? `<title>${esc(n.hint)}</title>` : ""}
       <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
-        fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
+        fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
       <text x="${n.cx}" y="${n.cy - 6}" text-anchor="middle" fill="var(--text)"
         font-size="17" font-weight="700">${esc(n.label)}</text>
       <text x="${n.cx}" y="${n.cy + 17}" text-anchor="middle" fill="${subFill}"
@@ -116,12 +124,7 @@
     </g>`);
   }
 
-  // Стрелки под каждый цвет линка
-  const defs = ["--snr-good", "--snr-ok", "--snr-bad", "--snr-na"].map(v =>
-    `<marker id="arr-${v}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
-      markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="var(${v})"/>
-    </marker>`).join("");
+  const defs = rfMarkers.join("");
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
     role="img" aria-label="Карта mesh-сети"><defs>${defs}</defs>${out.join("\n")}</svg>`;
@@ -146,18 +149,14 @@
     });
   }
 
-  // Легенда
-  const legend = [
-    ["var(--snr-good)", true, `SNR ≥ ${fmtSnr(D.meta.thresholds.good)}`],
-    ["var(--snr-ok)", true, `SNR ≥ ${fmtSnr(D.meta.thresholds.ok)}`],
-    ["var(--snr-bad)", true, `SNR < ${fmtSnr(D.meta.thresholds.ok)}`],
-    ["var(--snr-na)", true, "не измерено"],
-    ["var(--lan)", false, "LAN"],
-    ["var(--bridge)", false, "радиомост"],
-  ];
-  document.getElementById("legend").innerHTML =
-    legend.map(([c, dash, t]) =>
-      `<span class="item"><span class="swatch${dash ? " dashed" : ""}"
-        style="border-color:${c}"></span>${t}</span>`).join("") +
-    `<span class="item">обновлено ${D.meta.updated}</span>`;
+  // Легенда: градиент «% от идеала» + прочие типы линий
+  const grad = `linear-gradient(90deg, ${[0, 25, 50, 75, 100]
+    .map(p => `hsl(${hue(p)}, 62%, 55%)`).join(", ")})`;
+  document.getElementById("legend").innerHTML = `
+    <span class="item">0%<span class="grad" style="background:${grad}"></span>
+      100% от идеала (SNR ${fmtSnr(S.floor)}…${fmtSnr(S.ideal)} dB)</span>
+    <span class="item"><span class="swatch dashed" style="border-color:var(--snr-na)"></span>не измерено</span>
+    <span class="item"><span class="swatch" style="border-color:var(--lan)"></span>LAN</span>
+    <span class="item"><span class="swatch" style="border-color:var(--bridge)"></span>радиомост</span>
+    <span class="item">обновлено ${D.meta.updated}</span>`;
 })();

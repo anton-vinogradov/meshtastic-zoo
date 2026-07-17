@@ -10,9 +10,6 @@
   --muted: #9a9aa0;
   --lan: #2fbf8f;
   --bridge: #d98a2b;
-  --snr-good: #35c98e;
-  --snr-ok: #e0a03c;
-  --snr-bad: #e05656;
   --snr-na: #8a8a90;
 }
 
@@ -43,6 +40,14 @@ body {
 #legend .item { display: flex; align-items: center; gap: 7px; }
 #legend .swatch { width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; }
 #legend .swatch.dashed { border-top-style: dashed; }
+#legend .grad {
+  display: inline-block;
+  width: 96px;
+  height: 8px;
+  border-radius: 4px;
+  margin: 0 7px;
+  vertical-align: middle;
+}
 
 /* Подсветка при наведении на ноду */
 svg .edge, svg .node { transition: opacity .15s ease; }
