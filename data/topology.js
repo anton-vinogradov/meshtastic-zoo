@@ -9,9 +9,11 @@ window.MESHZOO_DATA = {
     snrScale: { floor: -20, ideal: 10 }, // dB
   },
 
+  // Зон может быть сколько угодно, порядок в списке = порядок сверху вниз.
+  // kind: "subnet" (полоса площадки) | "world" (эфир между ними); h — высота в px (опц.).
   zones: [
     { id: "net77", kind: "subnet", label: "10.77.77.0/24" },
-    { id: "world", kind: "world", label: "Внешний мир" },
+    { id: "world", kind: "world", label: "Внешний мир", h: 900 },
     { id: "net88", kind: "subnet", label: "10.88.88.0/24" },
   ],
 

@@ -1,21 +1,19 @@
 /* meshtastic-zoo — рендер топологии из window.MESHZOO_DATA в SVG. */
 (function () {
   const D = window.MESHZOO_DATA;
-  const W = 960, H = 1300, M = 18;
+  const W = 960, M = 18;
 
-  // Вертикальная раскладка зон: подсети — узкие полосы, мир — всё остальное
-  const SUBNET_H = 150, GAP = 26;
+  // Вертикальная раскладка: зоны стопкой в порядке из данных, число зон любое.
+  // Высота зоны — z.h из данных, иначе дефолт по типу; высота холста считается сама.
+  const GAP = 26, DEF_H = { subnet: 150, world: 640 };
   const zoneBoxes = {};
-  {
-    let y = M;
-    for (const z of D.zones) {
-      const h = z.kind === "subnet" ? SUBNET_H
-        : H - M * 2 - SUBNET_H * D.zones.filter(q => q.kind === "subnet").length
-          - GAP * (D.zones.length - 1);
-      zoneBoxes[z.id] = { x: M, y, w: W - M * 2, h, ...z };
-      y += h + GAP;
-    }
+  let H = M;
+  for (const z of D.zones) {
+    const h = z.h ?? DEF_H[z.kind] ?? DEF_H.world;
+    zoneBoxes[z.id] = { x: M, y: H, w: W - M * 2, h, ...z };
+    H += h + GAP;
   }
+  H += M - GAP;
 
   const CARD = { w: 190, h: 64, r: 11 };
   const WCARD = { w: 200, h: 62, r: 11 };
@@ -62,6 +60,7 @@
 
   // Рёбра (под карточками); маркеры стрелок копятся сюда — свой цвет на каждое плечо
   const edgeSvg = [], rfMarkers = [];
+  let bridgeLane = 0;
   for (const l of D.links) {
     const a = nodes[l.from], b = nodes[l.to];
     const cls = `edge e-${l.from} e-${l.to}`;
@@ -73,14 +72,22 @@
     }
 
     if (l.type === "bridge") {
-      // Двойная вертикаль справа от обеих карточек
-      const bx = Math.max(a.cx, b.cx) + CARD.w / 2 - 28;
-      const y1 = Math.min(a.cy, b.cy), y2 = Math.max(a.cy, b.cy);
-      for (const off of [0, 9]) {
-        edgeSvg.push(`<line class="${cls}" x1="${bx + off}" y1="${y1}" x2="${bx + off}" y2="${y2}"
+      // Двойная вертикальная «шина» правее обеих карточек + отводы к ним.
+      // Работает между любыми парами нод; каждый следующий мост — в своей дорожке.
+      const bx = Math.min(
+        Math.max(a.cx + a.w / 2, b.cx + b.w / 2) + 16 + bridgeLane * 26, W - M - 18);
+      bridgeLane++;
+      const [top, bot] = a.cy < b.cy ? [a, b] : [b, a];
+      const seg = (x1, y1, x2, y2) =>
+        edgeSvg.push(`<line class="${cls}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
           stroke="var(--bridge)" stroke-width="3.5"/>`);
-      }
-      edgeSvg.push(`<text class="${cls}" x="${bx + 24}" y="${y1 + 88}" fill="var(--text)"
+      for (const off of [0, 9]) seg(bx + off, top.cy - 4.5, bx + off, bot.cy + 4.5);
+      for (const n of [top, bot])
+        for (const off of [-4.5, 4.5]) seg(n.cx + n.w / 2, n.cy + off, bx + 9, n.cy + off);
+
+      const fits = bx + 150 < W;
+      edgeSvg.push(`<text class="${cls}" x="${bx + (fits ? 24 : -14)}" y="${top.cy + 88}"
+        ${fits ? "" : 'text-anchor="end"'} fill="var(--text)"
         font-size="14">${esc(l.label || "мост")}</text>`);
       continue;
     }
