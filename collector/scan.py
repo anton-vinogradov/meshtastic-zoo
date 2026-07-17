@@ -258,10 +258,7 @@ def build(found, prev=None):
                 frm, to = ((b, a) if fwd else (a, b))
                 rf.append(dict(frm=frm, to=to, snr=None, heard=None))
 
-    # LAN-цепочки внутри полос
-    lan_pairs = [(a["id"], b["id"]) for ns in by_sub.values() for a, b in zip(ns, ns[1:])]
-
-    out_links = [{"from": a, "to": b, "type": "lan"} for a, b in lan_pairs]
+    out_links = []
     for l in rf:
         d = {"from": l["frm"], "to": l["to"], "type": "rf",
              "snr": None if l["snr"] is None else round(l["snr"], 2)}

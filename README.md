@@ -52,11 +52,12 @@ about your network — it just draws whatever is in the file:
 - `nodes` — `zone` — band id, `x`/`y` — position as fractions of the band,
   `hw` — hardware model (drawn as a mini-icon, full name in the tooltip),
   `mobile: true` — roaming node (dashed frame), `hint` — tooltip;
-- `links` — `lan` (wire within a site) or `rf` (radio leg; `snr` in dB,
-  `null` + `note` = not measured, `labelT` — label position along the
-  line, 0..1). A leg is directional: `to` is the node that heard the
-  other one; opposite legs of the same pair are drawn side by side.
-  There are no special "bridges" — an inter-site link is just another leg;
+- `links` — radio legs (`type: "rf"`): `snr` in dB (`null` = no data —
+  a grey arrow), `heard` — when it was heard (epoch), `labelT` — label
+  position along the line, 0..1. A leg is directional: `to` is the node
+  that heard the other one; opposite legs of the same pair are drawn side
+  by side. There are no special "bridges" or "LAN lines" — an inter-site
+  link is just another leg;
 - `meta.snrScale` — the "% of ideal" scale: `floor` dB → 0% (red),
   `ideal` dB → 100% (green); leg color is a continuous gradient over that
   percentage, the label shows the SNR, and the exact % is in the leg's

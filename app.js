@@ -78,6 +78,8 @@
         font-size="17" font-weight="700">${esc(z.label)}</text>`);
     }
 
+    const lbl2 = (id) => (nodes[id] || { label: id }).label;
+
     // Рёбра (под карточками); маркеры стрелок копятся сюда — свой цвет на каждое плечо.
     // Встречные плечи одной пары разносим перпендикулярно, чтобы не слипались.
     const edgeSvg = [], rfMarkers = [];
@@ -121,14 +123,8 @@
 
     for (const [li, l] of D.links.entries()) {
       const a = nodes[l.from], b = nodes[l.to];
-      if (!a || !b) continue;
+      if (!a || !b || l.type !== "rf") continue;
       const cls = `edge e-${l.from} e-${l.to}`;
-
-      if (l.type === "lan") {
-        edgeSvg.push(`<line class="${cls}" x1="${a.cx}" y1="${a.cy}" x2="${b.cx}" y2="${b.cy}"
-          stroke="var(--lan)" stroke-width="3"/>`);
-        continue;
-      }
 
       // RF: пунктир со стрелкой к услышавшей ноде, цвет = % от идеала, подпись = SNR
       const col = colorOf(l);
@@ -137,9 +133,9 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      const label = l.snr == null ? (l.note || "не изм.") : fmtSnr(l.snr);
+      const label = l.snr == null ? (l.note || "нет данных") : fmtSnr(l.snr);
       const tip = (l.snr == null
-        ? `${l.from} ↔ ${l.to}: не измерено`
+        ? `${l.from} → ${l.to}: нет данных — ${lbl2(l.to)} не слышала ${lbl2(l.from)} напрямую (ни в скане, ни в кэше)`
         : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% от идеала`)
         + (l.heard ? ` · слышно ${fmtAgo(l.heard)}` : "");
 
@@ -272,7 +268,7 @@
         .filter(l => l.type === "rf" && (l.from === id || l.to === id))
         .map(l => {
           const col = colorOf(l);
-          const val = l.snr == null ? "не изм." : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
+          const val = l.snr == null ? "нет данных" : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
           const dirTxt = l.from === id ? `→ ${lbl(l.to)}` : `← ${lbl(l.from)}`;
           return `<div class="leg"><span class="dot" style="background:${col}"></span>
             <span class="who">${esc(dirTxt)}</span><span style="color:${col}">${val}</span>
@@ -316,8 +312,7 @@
     document.getElementById("legend").innerHTML = `
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         100% от идеала (SNR ${fmtSnr(S.floor)}…${fmtSnr(S.ideal)} dB)</span>
-      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>не измерено</span>
-      <span class="item"><span class="swatch" style="border-color:var(--lan)"></span>LAN</span>
+      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>нет данных об SNR</span>
       <span class="item">скан · ${esc(D.meta.updated)}
         ${stale ? '<b style="color:#e0a03c">· устарело!</b>' : ""}</span>`;
 
