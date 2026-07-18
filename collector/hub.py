@@ -413,6 +413,33 @@ def keeper():
 
 # ---------- топология ----------
 
+def node_cfg(iface):
+    """Метаданные + LoRa/device-конфиг СВОЕЙ ноды с подключённого iface —
+    для раскрывающихся разделов в панели. Всё из памяти, без сети."""
+    from meshtastic import config_pb2
+    out = {}
+    try:
+        md = getattr(iface, "metadata", None)
+        if md and getattr(md, "firmware_version", ""):
+            out.update(fw=md.firmware_version, wifi=bool(md.hasWifi),
+                       bt=bool(md.hasBluetooth), pkc=bool(md.hasPKC))
+        lc = getattr(getattr(iface, "localNode", None), "localConfig", None)
+        if lc and lc.HasField("lora"):
+            lo, R = lc.lora, config_pb2.Config.LoRaConfig
+            out.update(hops=lo.hop_limit, region=R.RegionCode.Name(lo.region),
+                       preset=R.ModemPreset.Name(lo.modem_preset) if lo.use_preset else "custom",
+                       txPower=lo.tx_power, txEnabled=bool(lo.tx_enabled),
+                       boostedGain=bool(lo.sx126x_rx_boosted_gain))
+        if lc and lc.HasField("device"):
+            dv, D = lc.device, config_pb2.Config.DeviceConfig
+            out.update(deviceRole=D.Role.Name(dv.role),
+                       rebroadcast=D.RebroadcastMode.Name(dv.rebroadcast_mode),
+                       nodeInfoSecs=dv.node_info_broadcast_secs)
+    except Exception as e:
+        log(f"node_cfg: {e!r}")
+    return out
+
+
 def snapshot(ent):
     iface = ent["iface"]
     my = {}
@@ -424,7 +451,7 @@ def snapshot(ent):
     return dict(num=ent.get("num"), id=ent.get("id"), short=user.get("shortName"),
                 long=user.get("longName"), role=user.get("role"),
                 hw=user.get("hwModel"), dm=my.get("deviceMetrics") or {},
-                db=dict(iface.nodes or {}))
+                db=dict(iface.nodes or {}), cfg=node_cfg(iface))
 
 
 def topo_loop():

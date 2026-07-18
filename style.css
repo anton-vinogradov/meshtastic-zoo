@@ -403,6 +403,17 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #panel .prow { display: flex; justify-content: space-between; gap: 12px;
   padding: 3.5px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
 #panel .prow span:first-child { color: var(--muted); }
+/* раскрывающиеся разделы (прошивка/радио/устройство) */
+#panel .psec { margin-top: 6px; }
+#panel .psec > summary {
+  cursor: pointer; list-style: none; padding: 5px 0; font-weight: 600; font-size: 13px;
+  border-top: 1px solid rgba(255, 255, 255, .07); color: var(--text);
+  display: flex; align-items: center; gap: 6px;
+}
+#panel .psec > summary::-webkit-details-marker { display: none; }
+#panel .psec > summary::before { content: "▸"; color: var(--muted); font-size: 11px; transition: transform .15s; }
+#panel .psec[open] > summary::before { transform: rotate(90deg); }
+#panel .psec .prow { font-size: 13px; }
 #panel .plegs { margin-top: 12px; }
 #panel .plegs > b { display: block; margin-bottom: 2px; }
 #panel .psub {

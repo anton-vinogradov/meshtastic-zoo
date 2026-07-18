@@ -227,7 +227,7 @@ def build(found, prev=None):
         stat[nid] = dict(id=nid, ip=ip, subnet=subnet_of(ip),
                          short=i.get("short") or names.get(nid, nid[-4:]),
                          hw=i.get("hw"), long=i.get("long"), role=i.get("role"),
-                         dm=i.get("dm") or {}, db=i.get("db") or {})
+                         dm=i.get("dm") or {}, db=i.get("db") or {}, cfg=i.get("cfg") or {})
 
     # У каких СВОИХ нод есть публичный ключ каждой ноды. Ключ нужен именно
     # отправителю: без него его DM падает с PKI_SEND_FAIL_PUBLIC_KEY, даже
@@ -399,6 +399,8 @@ def build(found, prev=None):
         info = node_info(n)
         if info:
             node["info"] = info
+        if n.get("cfg"):
+            node["cfg"] = n["cfg"]
         if nid in CFG.get("mobile", []):
             node.update(mobile=True, hint="roaming node, IP changes")
         nodes.append(node)

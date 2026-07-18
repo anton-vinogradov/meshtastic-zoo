@@ -39,6 +39,27 @@
     r = Math.round(r + (255 - r) * f); g = Math.round(g + (255 - g) * f); b = Math.round(b + (255 - b) * f);
     return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
   };
+
+  // Актуальная версия прошивки Meshtastic (последний стабильный релиз с GitHub)
+  let latestFw = null;
+  const semver = (v) => (String(v || "").match(/\d+\.\d+\.\d+/) || [""])[0];
+  const fwStatus = (fw) => {
+    const cur = semver(fw);
+    if (!cur || !latestFw) return null;
+    const c = cur.split(".").map(Number), l = latestFw.split(".").map(Number);
+    let up = false;
+    for (let k = 0; k < 3; k++) { if (l[k] > c[k]) { up = true; break; } if (l[k] < c[k]) break; }
+    return up ? { text: t("fwUpdate", "v" + latestFw), color: "#e0a03c" }
+              : { text: t("fwCurrent"), color: "#35c98e" };
+  };
+  async function fetchLatestFw() {
+    try {
+      const r = await fetch("https://api.github.com/repos/meshtastic/firmware/releases/latest", { cache: "no-store" });
+      if (!r.ok) return;
+      latestFw = semver((await r.json()).tag_name);
+      if (latestFw && lastLive) render(lastLive);  // обновить открытую панель
+    } catch { }
+  }
   const T = {
     en: {
       callsign: "Callsign", model: "Model", role: "Role", battery: "Battery",
@@ -46,6 +67,12 @@
       chUtil: "Channel util", ownTx: "Own TX", lastSeen: "Last seen",
       online: "online (answers over TCP)", conversation: "Conversation",
       keyLabel: "Key", keyYes: "received", keyNo: "not received (can't DM)",
+      secFw: "Firmware", secRadio: "Radio", secDevice: "Device",
+      fwVer: "Version", fwLatest: "Latest", fwCurrent: "✓ up to date", fwUpdate: "update available: {0}",
+      cHops: "Hops (hop limit)", cRegion: "Region", cPreset: "Modem preset",
+      cTxPower: "TX power", cTxEnabled: "TX enabled", cBoosted: "RX boosted gain",
+      cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI keys", cRebroadcast: "Rebroadcast",
+      cNodeInfo: "NodeInfo interval",
       publicChannel: "Public channel", gotByLabel: "received by",
       chNoMsg: "no messages yet",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
@@ -79,6 +106,12 @@
       chUtil: "Загрузка эфира", ownTx: "Свой TX", lastSeen: "Видели",
       online: "онлайн (отвечает по TCP)", conversation: "Переписка",
       keyLabel: "Ключ", keyYes: "получен", keyNo: "не получен (DM нельзя)",
+      secFw: "Прошивка", secRadio: "Радио", secDevice: "Устройство",
+      fwVer: "Версия", fwLatest: "Актуальная", fwCurrent: "✓ актуальна", fwUpdate: "есть обновление: {0}",
+      cHops: "Прыжки (hop limit)", cRegion: "Регион", cPreset: "Пресет модема",
+      cTxPower: "Мощность TX", cTxEnabled: "TX включён", cBoosted: "Усиление RX",
+      cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI-ключи", cRebroadcast: "Ретрансляция",
+      cNodeInfo: "Интервал NodeInfo",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
       chNoMsg: "пока пусто",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
@@ -555,11 +588,6 @@
         ["IP", n.sub !== n.id ? n.sub : null],
         [t("model"), n.hw],
         [t("role"), i.role],
-        [t("battery"), i.battery == null ? null : i.battery > 100 ? t("wallPower") : i.battery + " %"],
-        [t("voltage"), i.voltage == null ? null : i.voltage.toFixed(2) + " V"],
-        [t("uptime"), i.uptime == null ? null : fmtUp(i.uptime)],
-        [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
-        [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
         [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—"],
         ...(() => {
           if (n.key == null) return [[null, null]];
@@ -572,6 +600,39 @@
           return [[t("keyLabel"), "✓ " + kb.map(shortName).join(", "), "#8fce6a"]];
         })(),
       ].filter(([, v]) => v != null);
+      // Раскрывающиеся разделы: прошивка / радио / устройство
+      const cfg = n.cfg || {};
+      const section = (title, rr) => {
+        const f = rr.filter(([, v]) => v != null);
+        if (!f.length) return "";
+        return `<details class="psec"><summary>${esc(title)}</summary>` + f.map(([k, v, c]) =>
+          `<div class="prow"><span>${esc(k)}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("") + `</details>`;
+      };
+      const yn = (b) => b == null ? null : (b ? "✓" : "✗");
+      const fs = fwStatus(cfg.fw);
+      const secFw = section(t("secFw"), [
+        [t("fwVer"), cfg.fw],
+        [t("fwLatest"), fs ? fs.text : (cfg.fw ? "…" : null), fs && fs.color],
+      ]);
+      const secRadio = section(t("secRadio"), [
+        [t("cHops"), cfg.hops],
+        [t("cRegion"), cfg.region],
+        [t("cPreset"), cfg.preset],
+        [t("cTxPower"), cfg.txPower == null ? null : cfg.txPower + " dBm"],
+        [t("cTxEnabled"), yn(cfg.txEnabled)],
+        [t("cBoosted"), yn(cfg.boostedGain)],
+      ]);
+      const secDev = section(t("secDevice"), [
+        [t("battery"), i.battery == null ? null : i.battery > 100 ? t("wallPower") : i.battery + " %"],
+        [t("voltage"), i.voltage == null ? null : i.voltage.toFixed(2) + " V"],
+        [t("uptime"), i.uptime == null ? null : fmtUp(i.uptime)],
+        [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
+        [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
+        [t("cWifi"), yn(cfg.wifi)], [t("cBt"), yn(cfg.bt)], [t("cPkc"), yn(cfg.pkc)],
+        [t("cRebroadcast"), cfg.rebroadcast],
+        [t("cNodeInfo"), cfg.nodeInfoSecs == null ? null : Math.round(cfg.nodeInfoSecs / 60) + " " + t("unitMin")],
+      ]);
+      const sections = secFw + secRadio + secDev;
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
       const byOther = {};
@@ -707,6 +768,7 @@
           <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
+        ${sections}
         ${msgHtml}
         ${composeHtml}
         ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;
@@ -1270,6 +1332,8 @@
 
   tick();
   refreshChan();
+  fetchLatestFw();
+  setInterval(fetchLatestFw, 6 * 3600e3);  // раз в 6ч сверять актуальную прошивку
   setInterval(tick, 60e3);
   setInterval(msgTick, 6e3);
 })();

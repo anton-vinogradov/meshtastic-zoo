@@ -66,8 +66,11 @@ stays put, and the details panel opens. Inside the panel, hovering a
 row in **Legs** outlines that neighbor in blue on the map, so you can
 tell which card a link goes to. The panel shows:
 
-- device photo and model, ID, callsign, IP;
-- battery, uptime, channel utilization, "last seen";
+- device photo and model, ID, callsign, IP, "last seen";
+- for your own nodes, collapsible **Firmware / Radio / Device** sections:
+  firmware version (with a check against the latest Meshtastic release),
+  hop limit, region, modem preset, TX power, battery, uptime, channel
+  utilization, WiFi/BT/PKI, rebroadcast mode and more;
 - **Conversation** — the full message history with this node: incoming
   on the left, your replies on the right. Outgoing messages show a
   delivery status: ⏳ on air → ✓ delivered, ✗ error (with the reason
