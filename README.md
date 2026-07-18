@@ -42,9 +42,9 @@ is a list in [`collector/config.json`](collector/config.json).
   couple of hops (a jump to 3+ right after being direct is routing noise,
   not a move). It keeps its place, drawn grey with a dashed frame, its
   leg showing the hop count (`1 hop`, `2 hops`…) instead of an SNR. It's
-  held for up to an hour of no direct contact, then forgotten. A checkbox
-  in the map's legend hides or shows these grey nodes (your choice is
-  remembered per browser).
+  held for up to an hour of no direct contact, then forgotten. A
+  **former neighbor** checkbox in the map's legend hides or shows these
+  grey nodes (your choice is remembered per browser).
 - **Arrows** show who hears whom: the head points at the listener.
   Color is link quality, from red (barely) to green (ideal); the label
   on the line is the SNR in dB; the exact percentage is in the tooltip.
