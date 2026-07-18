@@ -39,9 +39,11 @@ is a list in [`collector/config.json`](collector/config.json).
   place on the map but is drawn grey with a dashed frame, and its leg
   shows the hop count (`1 hop`, `2 hops`…) instead of an SNR — there is
   no direct link to measure. The more hops, the farther out it drifts.
-  Such a node is remembered by *when it was last heard directly*, so a
-  single missed scan won't drop it; once that last direct contact ages
-  past the memory window it's forgotten.
+  Only close relays count — 1–2 hops by default; a node bouncing to 3+
+  hops right after being direct is usually just mesh routing variance,
+  not a real move. Such a node is remembered for a few minutes after it
+  was last on the map, so a single missed scan won't drop it; once it's
+  been gone longer than that it's forgotten.
 - **Arrows** show who hears whom: the head points at the listener.
   Color is link quality, from red (barely) to green (ideal); the label
   on the line is the SNR in dB; the exact percentage is in the tooltip.
@@ -148,11 +150,12 @@ panel. Every field, top to bottom:
 
 Changes apply on the fly and are saved to `collector/config.json`.
 A few rarely-touched keys live in that file only: `port` (the node
-API port, 4403), the connect/query timeouts, `hopMemoryH` (how many
-hours a former direct neighbor is kept on the map as a grey multi-hop
-node after it was last heard directly — default 24), and `known` /
-`names` — fallback IP↔radio-id and name maps used when a node doesn't
-answer.
+API port, 4403), the connect/query timeouts, `hopMaxShow` (largest hop
+count a former neighbor may show at before it's treated as routing noise
+rather than a real move — default 2), `hopMemoryMin` (how many minutes a
+former neighbor is kept on the map after it was last seen there —
+default 5), and `known` / `names` — fallback IP↔radio-id and name maps
+used when a node doesn't answer.
 
 ## Roadmap
 
