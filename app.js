@@ -782,7 +782,11 @@
           || (ae && panel.contains(ae) && (ae.tagName === "INPUT" || ae.tagName === "SELECT"));
         if (busy) return;
       }
-      const n = nodes[id];
+      // nodes[] — только ноды карты связности; гео-маркер может указывать на
+      // ноду, отфильтрованную из неё (многохоп при выключенном тумблере, GPS-
+      // сосед без прямого линка — напр. Corretto). Тогда берём сырые данные из
+      // lastLive, чтобы панель всё равно показала свойства ноды.
+      const n = nodes[id] || (lastLive && lastLive.nodes || []).find(x => x.id === id);
       if (!n) { panel.classList.remove("open"); openId = null; return; }
       document.getElementById("settings").classList.remove("open"); // взаимоисключение
       openId = id;
