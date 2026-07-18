@@ -299,6 +299,19 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
   cursor: pointer;
 }
 #gear:hover { color: var(--text); }
+/* переключатель вида связность↔география */
+#viewtab {
+  position: fixed; top: 14px; right: 60px; z-index: 7;
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 1px solid var(--zone-stroke); background: var(--zone-bg);
+  color: var(--muted); font-size: 18px; cursor: pointer;
+}
+#viewtab:hover { color: var(--text); }
+/* гео-карта: тот же flex-слот, что и #map; показывается в гео-режиме */
+#geomap { flex: 1 1 auto; min-height: 0; width: 100%; display: none; background: #0b0b0d; z-index: 1; }
+body.geo-on #map { display: none; }
+body.geo-on #geomap { display: block; }
+.leaflet-container { background: #0b0b0d; }
 #settings {
   position: fixed;
   top: 60px;

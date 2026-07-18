@@ -1046,6 +1046,7 @@
       litNeighborhood(openId);
     };
     applySel = applySelection;
+    openPanel = showPanel;  // для клика по маркеру на гео-карте (showPanel — render-scoped)
     hlPeer = (pid, on) => svgEl.querySelector(`.n-${CSS.escape(pid)}`)?.classList.toggle("peerhi", on);
     for (const g of svgEl.querySelectorAll(".node")) {
       g.addEventListener("click", (ev) => { ev.stopPropagation(); showPanel(g.dataset.id, true); });
@@ -1101,7 +1102,7 @@
   }
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
-  let applySel = () => {}, hlPeer = () => {}; // подсветка выбора/наведения (устанавливаются в render)
+  let applySel = () => {}, hlPeer = () => {}, openPanel = () => {}; // ставятся в render
   let chan = [], chanSig = "", chanDraft = "";  // черновик канала переживает ре-рендеры
   async function refreshMsgs() {
     try {
@@ -1514,6 +1515,49 @@
     else openSettings();
   };
   document.getElementById("gear").title = t("settings");
+
+  // ---- Гео-карта (Фаза 3): реальные GPS-позиции на OSM (Leaflet вендорён локально) ----
+  let geoView = localStorage.getItem("mzGeoView") === "1";
+  let lmap = null, geoLayer = null;
+  function initGeo() {
+    if (lmap) return true;
+    if (typeof L === "undefined") return false;
+    lmap = L.map("geomap", { zoomControl: true }).setView([60.0, 30.3], 11);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(lmap);
+    geoLayer = L.layerGroup().addTo(lmap);
+    return true;
+  }
+  function renderGeo() {
+    if (!geoView || !lastLive || !initGeo()) return;
+    lmap.invalidateSize();
+    geoLayer.clearLayers();
+    const pts = [];
+    (lastLive.nodes || []).forEach(n => {
+      const i = n.info || {};
+      if (i.lat == null || i.lon == null) return;   // без GPS — не на гео-карте
+      pts.push([i.lat, i.lon]);
+      const m = L.circleMarker([i.lat, i.lon], {
+        radius: n.own ? 9 : 7, color: "#0b0b0d", weight: 1.5,
+        fillColor: n.own ? "#6ea8ff" : "#e0a03c", fillOpacity: 0.95,
+      });
+      m.bindTooltip(String(n.label || n.id), { direction: "top" });
+      m.on("click", () => openPanel(n.id, true));
+      m.addTo(geoLayer);
+    });
+    if (pts.length) lmap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+  }
+  function setGeoView(on) {
+    geoView = on;
+    localStorage.setItem("mzGeoView", on ? "1" : "0");
+    document.body.classList.toggle("geo-on", on);
+    const vt = document.getElementById("viewtab");
+    if (vt) vt.textContent = on ? "🕸" : "🗺";
+    if (on) setTimeout(renderGeo, 40);
+  }
+  document.getElementById("viewtab").onclick = () => setGeoView(!geoView);
+  setGeoView(geoView);  // применить сохранённое состояние вида
+
   async function tick() {
     await refreshMsgs();
     const live = await loadLive();
@@ -1530,6 +1574,7 @@
     lastLive = live;
     render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
     renderChannel(); // подхватить свежие имена/качество узлов в списке «приняли»
+    renderGeo(); // обновить маркеры на гео-карте (если включён гео-режим)
   }
 
   // Быстрый опрос почты и канала: статусы обновляются в течение секунд
