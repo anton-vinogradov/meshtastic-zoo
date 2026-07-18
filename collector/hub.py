@@ -839,6 +839,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"series": history.node_series(g("id"), hours=hours)})
             elif u.path.endswith("/link"):
                 self._json({"series": history.link_series(g("src"), g("dst"), hours=hours)})
+            elif u.path.endswith("/newnodes"):
+                self._json({"new": history.new_nodes(hours=hours, bins=int(float(g("bins", 24) or 24)))})
             elif u.path.endswith("/stats"):
                 self._json({"stats": history.stats()})
             else:

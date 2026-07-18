@@ -113,6 +113,27 @@ def uptime(hours=24):
             for r in rows}
 
 
+def new_nodes(hours=24, bins=24):
+    """Новые узлы по времени: для каждой ноды берём первое появление (MIN ts),
+    раскладываем те, что впервые замечены за последние hours, по bins корзинам."""
+    now = int(time.time())
+    since = now - int(hours) * 3600
+    bins = max(1, int(bins))
+    bw = max(1, int(hours) * 3600 // bins)
+    with _lock:
+        rows = _db().execute("SELECT MIN(ts) FROM node_hist GROUP BY id").fetchall()
+    buckets = [0] * bins
+    tot = 0
+    for (f,) in rows:
+        if f is None or f < since:
+            continue
+        b = int((f - since) / bw)
+        if 0 <= b < bins:
+            buckets[b] += 1
+            tot += 1
+    return dict(since=since, binSec=bw, bins=buckets, total=tot)
+
+
 def stats():
     """Сводка для здоровья/диагностики: объём БД, охват по времени."""
     with _lock:

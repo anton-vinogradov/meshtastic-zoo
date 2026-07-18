@@ -90,6 +90,7 @@
       close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
       nodeCount: "{0} nodes · {1} own · {2} neighbors",
+      newNodesTitle: "New nodes (last {0}h)", newNodesTotal: "{0} new", nowLabel: "now",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -138,6 +139,7 @@
       close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
       nodeCount: "узлов: {0} · свои {1} · соседи {2}",
+      newNodesTitle: "Новые узлы (за {0}ч)", newNodesTotal: "{0} новых", nowLabel: "сейчас",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -212,6 +214,22 @@
     const s = series.filter(p => p.online != null);
     return s.length ? Math.round(s.filter(p => p.online).length / s.length * 100) : null;
   };
+  // столбчатый график (новые узлы по корзинам времени)
+  function barChart(bins, { w = 300, h = 64, color = "#6ea8ff", since = 0, binSec = 3600 } = {}) {
+    const max = Math.max(1, ...bins), n = bins.length, bw = w / n, base = h - 11;
+    const pad = Math.min(1.5, bw * 0.18);
+    const bars = bins.map((v, i) => {
+      const bh = v ? Math.max(1.5, v / max * (base - 2)) : 0;
+      const t0 = new Date((since + i * binSec) * 1000).toLocaleString();
+      return `<rect x="${(i * bw + pad).toFixed(1)}" y="${(base - bh).toFixed(1)}" `
+        + `width="${(bw - 2 * pad).toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="${color}">`
+        + `<title>${v} · ${esc(t0)}</title></rect>`;
+    }).join("");
+    return `<svg class="barchart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+      + `<text x="1" y="9" font-size="9" fill="var(--muted)">${max}</text>`
+      + `<line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="var(--muted)" stroke-width="0.5" opacity="0.4"/>`
+      + `${bars}</svg>`;
+  }
 
   function render(D) {
     // Галочка «многохопы» снята → убираем серые hop-ноды и их плечи из данных
@@ -1381,9 +1399,27 @@
         : `<label class="srow"><span>${t(label)}</span>
             <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
       ).join("") +
-      `<button id="ssave">${t("save")}</button>
+      `<div class="srow scol"><span>${t("newNodesTitle", Math.round(cfg.worldMaxAgeH || 24))}</span>
+        <div id="nn-body" class="nn-body">…</div></div>
+       <button id="ssave">${t("save")}</button>
        <div class="shint">${t("storedHint")}</div>`;
     setEl.classList.add("open");
+    // График новых узлов за окно удержания (worldMaxAgeH) — асинхронно
+    (async () => {
+      const body = setEl.querySelector("#nn-body");
+      if (!body) return;
+      const hours = Math.round(cfg.worldMaxAgeH || 24);
+      let d = null;
+      try {
+        d = await (await fetch(`/api/history/newnodes?hours=${hours}&bins=24`, { cache: "no-store" })).json();
+      } catch { }
+      if (!setEl.classList.contains("open") || !setEl.querySelector("#nn-body")) return;
+      const nn = d && d.new;
+      if (!nn || !nn.bins || !nn.bins.some(v => v)) { body.innerHTML = `<div class="hist-none">${t("histNone")}</div>`; return; }
+      body.innerHTML = barChart(nn.bins, { since: nn.since, binSec: nn.binSec })
+        + `<div class="nn-cap"><span>−${hours}${t("unitH")}</span>`
+        + `<b>${t("newNodesTotal", nn.total)}</b><span>${t("nowLabel")}</span></div>`;
+    })();
     document.getElementById("panel").classList.remove("open");
     openId = null;
     setEl.querySelector("#sclose").onclick = () => setEl.classList.remove("open");

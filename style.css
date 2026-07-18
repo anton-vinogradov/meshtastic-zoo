@@ -453,6 +453,11 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #panel .hist-body .ustrip { width: 100%; height: 12px; border-radius: 3px; display: block; }
 #panel .leg .legspark { flex: none; display: inline-flex; align-items: center; opacity: .85; }
 #panel .leg .legspark .spark { width: 56px; height: 14px; }
+/* график новых узлов (в настройках) */
+#settings .nn-body { margin-top: 4px; }
+#settings .barchart { display: block; width: 100%; height: 64px; }
+#settings .nn-cap { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--muted); margin-top: 2px; }
+#settings .nn-cap b { color: var(--text); font-weight: 600; }
 
 #map .empty {
   padding: 48px 24px;
