@@ -14,6 +14,7 @@
 import asyncio
 import ipaddress
 import json
+import os
 import sys
 import threading
 import time
@@ -46,26 +47,49 @@ def log(msg):
     scan.log(msg)
 
 
+def atomic_write(path, text):
+    """Атомарная запись: temp рядом + fsync + os.replace. При краше/kill/reboot
+    в момент записи целевой файл НЕ бьётся — на диске остаётся прошлая целая
+    версия (или полностью новая). Без этого оборванный write_text давал пустой
+    JSON → load падал → история сообщений терялась при перезагрузке."""
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def load_list(path):
+    """Прочитать список из JSON; битый (напр. оборванный до атомарности) файл
+    не теряем и не затираем — откладываем в .corrupt и стартуем с пустого."""
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        try:
+            path.replace(path.with_name(path.name + ".corrupt"))
+            log(f"⚠ {path.name} повреждён ({e!r}) → отложен как {path.name}.corrupt")
+        except Exception:
+            pass
+        return []
+
+
 def load_messages():
     global messages, channel
-    try:
-        messages = json.loads(OUT_MSGS.read_text())
-    except Exception:
-        messages = []
-    try:
-        channel = json.loads(OUT_CHAN.read_text())
-    except Exception:
-        channel = []
+    messages = load_list(OUT_MSGS)
+    channel = load_list(OUT_CHAN)
 
 
 def save_messages():
     with lock:
-        OUT_MSGS.write_text(json.dumps(messages, ensure_ascii=False, indent=1))
+        atomic_write(OUT_MSGS, json.dumps(messages, ensure_ascii=False, indent=1))
 
 
 def save_channel():
     with lock:
-        OUT_CHAN.write_text(json.dumps(channel, ensure_ascii=False, indent=1))
+        atomic_write(OUT_CHAN, json.dumps(channel, ensure_ascii=False, indent=1))
 
 
 # ---------- связь с нодами ----------
@@ -305,7 +329,7 @@ def topo_loop():
                 except Exception:
                     pass
                 data = scan.build(found, prev)
-                OUT_LIVE.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+                atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
         except Exception as e:
             log(f"topo: {e!r}")
         # исходящие без квитанции дольше 90 с — помечаем честно
@@ -475,8 +499,8 @@ class Handler(SimpleHTTPRequestHandler):
                 except Exception:
                     disk = {}
                 disk.update(clean)
-                (ROOT / "config.json").write_text(
-                    json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
+                atomic_write(ROOT / "config.json",
+                             json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
             log(f"⚙ конфиг обновлён: {', '.join(clean)}")
             self._json({"ok": True})
         else:

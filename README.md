@@ -110,6 +110,9 @@ the tab remembers your choice.
   stale, a warning appears next to it.
 - Device photos are the official renders from the Meshtastic project
   (web-flasher); an unknown model gets a placeholder.
+- Your message history — both DMs and the channel — is kept on disk and
+  survives a hub restart or reboot. Writes are atomic, so a crash in the
+  middle of a save can't corrupt or wipe it.
 
 ## Settings
 
