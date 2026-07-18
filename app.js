@@ -75,7 +75,7 @@
       cNodeInfo: "NodeInfo interval",
       secMesh: "Mesh", secPos: "Position", cHopsAway: "Hops away", direct: "direct",
       cViaMqtt: "Via MQTT", cLicensed: "Licensed (ham)",
-      cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude",
+      cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude", openMap: "open on OpenStreetMap →",
       publicChannel: "Public channel", gotByLabel: "received by",
       chNoMsg: "no messages yet",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
@@ -118,7 +118,7 @@
       cNodeInfo: "Интервал NodeInfo",
       secMesh: "Сеть", secPos: "Позиция", cHopsAway: "Прыжков до неё", direct: "напрямую",
       cViaMqtt: "Через MQTT", cLicensed: "Лицензирована (ham)",
-      cLat: "Широта", cLon: "Долгота", cAlt: "Высота",
+      cLat: "Широта", cLon: "Долгота", cAlt: "Высота", openMap: "открыть на OpenStreetMap →",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
       chNoMsg: "пока пусто",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
@@ -647,11 +647,18 @@
         [t("cViaMqtt"), i.mqtt ? "✓" : null],
         [t("cLicensed"), i.licensed ? "✓" : null],
       ]);
-      const secPos = section(t("secPos"), [
-        [t("cLat"), i.lat == null ? null : i.lat.toFixed(5)],
-        [t("cLon"), i.lon == null ? null : i.lon.toFixed(5)],
-        [t("cAlt"), i.alt == null ? null : i.alt + " m"],
-      ]);
+      // Позиция — сразу миникартой (OSM-эмбед с маркером; грузится лениво,
+      // только когда раздел раскрыт). Координаты broadcast — приблизительные.
+      const secPos = i.lat == null ? "" : (() => {
+        const d = 0.008, bb = `${i.lon - d},${i.lat - d},${i.lon + d},${i.lat + d}`;
+        return `<details class="psec"><summary>${esc(t("secPos"))}</summary>
+          <iframe class="minimap" loading="lazy" referrerpolicy="no-referrer"
+            src="https://www.openstreetmap.org/export/embed.html?bbox=${bb}&layer=mapnik&marker=${i.lat},${i.lon}"></iframe>
+          <div class="prow"><span>${esc(t("cLat"))} / ${esc(t("cLon"))}</span><span>${i.lat.toFixed(5)}, ${i.lon.toFixed(5)}</span></div>
+          ${i.alt == null ? "" : `<div class="prow"><span>${esc(t("cAlt"))}</span><span>${i.alt} m</span></div>`}
+          <a class="osmlink" href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lon}#map=15/${i.lat}/${i.lon}" target="_blank" rel="noopener noreferrer">${esc(t("openMap"))}</a>
+        </details>`;
+      })();
       const sections = secFw + secRadio + secMesh + secDev + secPos;
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
@@ -786,6 +793,10 @@
           <button class="csend" title="${t("send")}">➤</button>
         </div></div>` : "";
 
+      // какие разделы были раскрыты — вернём после перерисовки (иначе миникарта
+      // и прочее схлопываются на каждом обновлении панели)
+      const openSecs = new Set([...panel.querySelectorAll(".psec[open] > summary")]
+        .map(s => s.textContent.trim()));
       panel.innerHTML = `
         <button id="pclose" aria-label="${t("close")}">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
@@ -796,6 +807,9 @@
         ${msgHtml}
         ${composeHtml}
         ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;
+      panel.querySelectorAll(".psec").forEach(d => {
+        if (openSecs.has(d.querySelector("summary").textContent.trim())) d.open = true;
+      });
       panel.classList.add("open");
       // переписка прокручивается к последнему сообщению
       const th = panel.querySelector(".thread");
