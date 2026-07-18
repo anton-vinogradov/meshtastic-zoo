@@ -338,7 +338,14 @@ def build(found, prev=None):
             if oid == nid or not isinstance(e, dict):
                 continue
             heard = e.get("lastHeard") or 0
-            if now - heard > max_age:
+            # lastHeard=0 = у слышащей ноды не выставлены часы (напр. после
+            # перепрошивки — как у FC1), а НЕ «древняя запись». Запись взята из
+            # живого nodeDB только что опрошенной ноды с валидным SNR/hops —
+            # значит текущая: штампуем now, иначе теряем все прямые связи такой
+            # ноды (A↔FC1 и т.п.). По возрасту фильтруем только реальные метки.
+            if not heard:
+                heard = int(now)
+            elif now - heard > max_age:
                 continue
             hops = e.get("hopsAway", 0) or 0
             snr = e.get("snr")
