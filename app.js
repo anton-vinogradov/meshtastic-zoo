@@ -12,6 +12,33 @@
   // Язык интерфейса выбирается в настройках, хранится локально
   let lang = localStorage.getItem("mzLang") || "en";
   let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
+
+  // Лимит текста Meshtastic (payload ~200 байт), Enter-отправка, авто-обрезка.
+  const MAX_MSG_BYTES = 200;
+  const byteLen = (s) => new TextEncoder().encode(s).length;
+  const setupInput = (inp, trigger) => {
+    if (!inp) return;
+    inp.maxLength = MAX_MSG_BYTES;              // грубый потолок по символам
+    inp.title = `≤ ${MAX_MSG_BYTES} B`;
+    inp.addEventListener("input", () => {       // точный лимит по БАЙТАМ (UTF-8)
+      while (byteLen(inp.value) > MAX_MSG_BYTES) inp.value = inp.value.slice(0, -1);
+    });
+    inp.addEventListener("keydown", (e) => {    // Enter — отправить
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); trigger(); }
+    });
+  };
+
+  // Цвет своих нод по подсети (палитра по умолчанию + выбор в настройках)
+  const SUB_PALETTE = ["#4f4fd0", "#2f9e6b", "#c07a2d", "#a04ec0", "#c0504e", "#2f8fb0"];
+  let subColors = {};
+  try { subColors = JSON.parse(localStorage.getItem("mzSubColors") || "{}"); } catch { subColors = {}; }
+  const subnetOf = (ip) => { const m = /^(\d+\.\d+\.\d+)\./.exec(ip || ""); return m ? m[1] : (ip || ""); };
+  const lighten = (hex, f) => {
+    const n = parseInt((hex || "#4f4fd0").slice(1), 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.round(r + (255 - r) * f); g = Math.round(g + (255 - g) * f); b = Math.round(b + (255 - b) * f);
+    return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+  };
   const T = {
     en: {
       callsign: "Callsign", model: "Model", role: "Role", battery: "Battery",
@@ -27,6 +54,7 @@
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read", resend: "resend",
+      reactPending: "sending…",
       sendFromWhich: "send from which node", message: "message…", send: "send",
       close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
@@ -43,6 +71,7 @@
       fCache: "Remember legs in cache, hours", fMap: "Map refresh, seconds",
       fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
       fFragile: "Slow subnets — polled lightly (prefix per line)",
+      fSubColor: "Color of subnet {0}",
     },
     ru: {
       callsign: "Позывной", model: "Модель", role: "Роль", battery: "Батарея",
@@ -58,6 +87,7 @@
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано", resend: "повторить",
+      reactPending: "отправляется…",
       sendFromWhich: "от лица какой ноды", message: "сообщение…", send: "отправить",
       close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
@@ -74,6 +104,7 @@
       fCache: "Помнить плечи в кэше, часов", fMap: "Обновление карты, секунд",
       fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
       fFragile: "Медленные подсети — лёгкий опрос (префикс на строке)",
+      fSubColor: "Цвет подсети {0}",
     },
   };
   const t = (k, ...a) => {
@@ -158,6 +189,9 @@
       const [cx, cy] = px[n.id] ?? [W / 2, H / 2];
       nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
     }
+    // подсети своих нод и их цвета (переопределение из настроек или палитра)
+    const ownSubnets = [...new Set(D.nodes.filter(n => n.own).map(n => subnetOf(n.sub)))].sort();
+    const scolOf = (p) => subColors[p] || SUB_PALETTE[Math.max(0, ownSubnets.indexOf(p)) % SUB_PALETTE.length];
 
     // Непрочитанные личные сообщения: счётчики для маркеров
     const unread = {};
@@ -444,9 +478,10 @@
     for (const n of Object.values(nodes)) {
       const x = n.cx - n.w / 2, y = n.cy - n.h / 2;
       const isHop = n.hop != null;
-      const fill = isHop ? "#24242a" : n.world ? "var(--world-card)" : "var(--card-fill)";
-      const stroke = isHop ? "#55555c" : n.world ? "#3a3a3e" : "var(--card-stroke)";
-      const subFill = isHop ? "#7a7a80" : n.world ? "var(--muted)" : "var(--card-sub)";
+      const scol = scolOf(subnetOf(n.sub));  // цвет своей ноды по её подсети
+      const fill = isHop ? "#24242a" : n.world ? "var(--world-card)" : scol;
+      const stroke = isHop ? "#55555c" : n.world ? "#3a3a3e" : lighten(scol, 0.35);
+      const subFill = isHop ? "#7a7a80" : n.world ? "var(--muted)" : lighten(scol, 0.72);
       const long = (n.info || {}).long;
       const tipTxt = [long !== n.label ? long : null, n.hw, n.hint].filter(Boolean).join(" · ");
       const name = String(n.label);
@@ -710,6 +745,7 @@
         row.querySelector(".mok").onclick = async () => {
           await markRead([mid]); await afterAction();
         };
+        setupInput(inp, () => row.querySelector(".msend").click());
       });
       // ручной повтор упавшего DM
       panel.querySelectorAll(".resend").forEach(btn => {
@@ -744,6 +780,7 @@
           if (res.ok) { inp.value = ""; replyDM = null; await afterAction(); }
           else alert(t("failedSend") + " " + (res.error || "?"));
         };
+        setupInput(cw.querySelector(".cmsg"), () => cw.querySelector(".csend").click());
       }
       // реакции/ответ на сообщения переписки
       const defSender = () => (owners[0] || {}).id;
@@ -751,6 +788,7 @@
         scope: "dm", to: id, sender: defSender,
         onReply: (pid, text) => { replyDM = { pid, text }; showPanel(id, true); panel.querySelector(".cmsg")?.focus(); },
         refresh: () => afterAction(),
+        rerender: () => showPanel(id, true),
       });
     }
 
@@ -863,10 +901,25 @@
     const txt = q ? esc((q.text || "").slice(0, 70)) : "…";
     return `<div class="quote">${who ? `<b>${who}</b> ` : ""}${txt}</div>`;
   };
+  // реакции «в процессе»: показываем сразу по клику (эфир медленный), пока не
+  // подтвердится реальными данными или не протухнет ~25с
+  const pendingReacts = new Map(); // `${pid}|${emoji}` -> ts
   const reactionsHtml = (m) => {
+    const pid = m.pid ?? m.pktId;
     const r = m.reactions || {};
-    return Object.entries(r).filter(([, w]) => w.length)
+    const now = Date.now();
+    for (const [k, ts] of pendingReacts) {   // снять подтверждённые/протухшие
+      const i = k.indexOf("|"), kp = +k.slice(0, i), ke = k.slice(i + 1);
+      if (kp === pid && ((r[ke] && r[ke].length) || now - ts > 25000)) pendingReacts.delete(k);
+    }
+    let html = Object.entries(r).filter(([, w]) => w.length)
       .map(([e, w]) => `<span class="rchip" data-emoji="${esc(e)}" title="${esc(w.map(shortName).join(", "))}">${esc(e)} ${w.length}</span>`).join("");
+    for (const k of pendingReacts.keys()) {   // эмодзи «в процессе» для этого сообщения
+      const i = k.indexOf("|"), kp = +k.slice(0, i), ke = k.slice(i + 1);
+      if (kp === pid && !(r[ke] && r[ke].length))
+        html += `<span class="rchip pending" data-emoji="${esc(ke)}" title="${esc(t("reactPending"))}">${esc(ke)} ⏳</span>`;
+    }
+    return html;
   };
   const msgActions = (m) => {
     const pid = m.pid ?? m.pktId;
@@ -888,15 +941,18 @@
       row.querySelectorAll(".pemoji, .rchip").forEach(el =>
         el.addEventListener("click", async (e) => {
           e.stopPropagation();
+          const emoji = el.dataset.emoji;
+          pendingReacts.set(pid + "|" + emoji, Date.now());
+          ctx.rerender();          // сразу показать «в процессе»
           try {
             await fetch("/api/react", {
               method: "POST", body: JSON.stringify({
-                node: ctx.sender(), replyId: pid, emoji: el.dataset.emoji,
+                node: ctx.sender(), replyId: pid, emoji,
                 channel: ctx.scope === "channel", to: ctx.to || null,
               }),
             });
           } catch { }
-          ctx.refresh();
+          ctx.refresh();           // подтянуть реальные данные
         }));
       row.querySelector(".doreply")?.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -908,6 +964,11 @@
   function renderChannel() {
     const el = document.getElementById("channel");
     if (!el) return;
+    // сохранить ввод/фокус: перерисовка канала не должна сбивать набор
+    const prevIn = el.querySelector(".chmsg-in");
+    const keepIn = prevIn && (document.activeElement === prevIn || prevIn.value)
+      ? { val: prevIn.value, foc: document.activeElement === prevIn,
+          s: prevIn.selectionStart, e: prevIn.selectionEnd } : null;
     const nodesById = {};
     (lastLive && lastLive.nodes || []).forEach(n => nodesById[n.id] = n);
     const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
@@ -943,6 +1004,13 @@
         <select class="chfrom">${composeSel}</select>
         <input class="chmsg-in" placeholder="${esc(t("message"))}">
         <button class="chsend" title="${esc(t("send"))}">➤</button></div></div>` : ""}`;
+    if (keepIn) {  // вернуть набранный текст и курсор
+      const inp = el.querySelector(".chmsg-in");
+      if (inp) {
+        inp.value = keepIn.val;
+        if (keepIn.foc) { inp.focus(); try { inp.setSelectionRange(keepIn.s, keepIn.e); } catch { } }
+      }
+    }
     const feedEl = el.querySelector(".chfeed");
     if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
     el.querySelector("#chclose").onclick = () => setChan(false);
@@ -952,6 +1020,7 @@
       sender: () => (owners[0] || {}).id,
       onReply: (pid, text) => { replyChan = { pid, text }; renderChannel(); el.querySelector(".chmsg-in")?.focus(); },
       refresh: refreshChan,
+      rerender: () => renderChannel(),
     });
     const cs = el.querySelector(".chsend");
     if (cs) cs.onclick = async () => {
@@ -972,6 +1041,7 @@
       if (res.ok) { inp.value = ""; replyChan = null; await refreshChan(); }
       else alert(t("failedSend") + " " + (res.error || "?"));
     };
+    setupInput(el.querySelector(".chmsg-in"), () => cs.click());
   }
   function setChan(open) {
     document.body.classList.toggle("chan-collapsed", !open);
@@ -1061,10 +1131,18 @@
       ? (cfg[k.split(".")[0]] || {})[k.split(".")[1]]
       : cfg[k];
     const langOpt = (v, name) => `<option value="${v}"${lang === v ? " selected" : ""}>${name}</option>`;
+    // пикеры цвета для каждой своей подсети (клиентские, в localStorage)
+    const ownSubs = [...new Set((lastLive && lastLive.nodes || [])
+      .filter(n => n.own).map(n => subnetOf(n.sub)))].sort();
+    const subColorRows = ownSubs.map((p, i) =>
+      `<label class="srow"><span>${t("fSubColor", p)}</span>
+        <input class="subcol" data-sub="${esc(p)}" type="color"
+          value="${subColors[p] || SUB_PALETTE[i % SUB_PALETTE.length]}"></label>`).join("");
     setEl.innerHTML = `<button id="sclose" aria-label="${t("close")}">×</button>
       <b class="stitle">${t("settings")}</b>
       <label class="srow"><span>${t("language")}</span>
-        <select id="sf-lang">${langOpt("en", "English")}${langOpt("ru", "Русский")}</select></label>` +
+        <select id="sf-lang">${langOpt("en", "English")}${langOpt("ru", "Русский")}</select></label>`
+      + subColorRows +
       SET_FIELDS.map(([k, label, kind]) => kind === "area"
         ? `<label class="srow"><span>${t(label)}</span>
             <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
@@ -1084,6 +1162,11 @@
       if (lastLive) render(lastLive);
       openSettings(); // перестроить настройки на новом языке
     };
+    setEl.querySelectorAll(".subcol").forEach(inp => inp.oninput = () => {
+      subColors[inp.dataset.sub] = inp.value;
+      localStorage.setItem("mzSubColors", JSON.stringify(subColors));
+      if (lastLive) render(lastLive);  // цвет применяется мгновенно
+    });
     setEl.querySelector("#ssave").onclick = async () => {
       const g = (k) => document.getElementById(sfId(k));
       const lines = (el) => el.value.split("\n").map(s => s.trim()).filter(Boolean);

@@ -19,9 +19,9 @@ is a list in [`collector/config.json`](collector/config.json).
 
 ## What's on the map
 
-- **Node tokens**: a device photo, name and address. Blue ones are your
-  nodes (reachable over the network), black ones are neighbors heard
-  over the radio.
+- **Node tokens**: a device photo, name and address. Your own nodes are
+  tinted **by subnet** — each site gets its own color, which you can
+  change in settings; black ones are neighbors heard over the radio.
 - **A green dot** — the node is online right now. A "N min / h" badge —
   how long ago it was last heard on the air (orange when older than
   3 hours).
@@ -120,6 +120,10 @@ remembers your choice and the width.
 - Your message history — both DMs and the channel — is kept on disk and
   survives a hub restart or reboot. Writes are atomic, so a crash in the
   middle of a save can't corrupt or wipe it.
+- In any message box, **Enter sends**; what you're typing survives live
+  updates (the field isn't cleared under your hands), and text is capped
+  at Meshtastic's ~200-byte limit. A reaction shows up immediately as
+  "⏳ sending…" and firms up once it's confirmed over the air.
 
 ## Settings
 
@@ -128,6 +132,9 @@ panel. Every field, top to bottom:
 
 - **Language** — interface language, English or Russian. Stored in your
   browser (not on the server), so each viewer picks their own.
+- **Subnet colors** — one color per site subnet for your own node cards.
+  Stored in your browser and applied instantly; each viewer picks their
+  own.
 - **Site subnets** — the IP subnets (CIDR, one per line, e.g.
   `10.88.88.0/24`) the collector scans for nodes. These are "your"
   nodes — they show up as blue cards. Order doesn't matter.

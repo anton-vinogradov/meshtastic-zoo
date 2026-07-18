@@ -204,6 +204,8 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
   background: rgba(255, 255, 255, .09); border-radius: 10px;
   padding: 0 7px; font-size: 12px; cursor: pointer; line-height: 18px;
 }
+.mact2 .rchip.pending { opacity: .6; font-style: italic; animation: rpulse 1s ease-in-out infinite; }
+@keyframes rpulse { 50% { opacity: .3; } }
 .mact2 .addreact, .mact2 .doreply {
   background: none; border: none; color: var(--muted);
   font-size: 13px; cursor: pointer; padding: 0 3px; line-height: 1;
