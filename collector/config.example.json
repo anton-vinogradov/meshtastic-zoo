@@ -10,7 +10,7 @@
   "cacheMaxAgeH": 6,
   "hopSettleMin": 3,
   "hopStaleMin": 60,
-  "hopMaxShow": 2,
+  "hopMaxShow": 7,
   "autoKeyRequest": true,
   "keyMaxTries": 12,
   "keyWaitMin": 120,

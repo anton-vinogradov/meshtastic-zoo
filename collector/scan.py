@@ -324,6 +324,32 @@ def build(found, prev=None):
     for c in hops_nodes:
         rf.append(dict(frm=c["id"], to=c["via"], snr=None, hops=c["hops"], heard=c["heard"]))
 
+    # Молчащие бывшие соседи: были прямыми (directSeen в окне settle..stale), но
+    # сейчас НЕ слышны никем (нет ни в world, ни в hop_cand) — часто это ноды, с
+    # которыми только что был контакт, и они не должны исчезать молча. Держим
+    # серыми, если в прошлом live.json есть их карточка (позиция) и свежее
+    # (≤cacheMaxAgeH) плечо к уже размещённой ноде — кладём по этому «якорю».
+    heard_now = {c["id"] for c in world} | set(hop_cand)
+    placed = set(stat) | {c["id"] for c in world} | {c["id"] for c in hops_nodes}
+    prev_nodes = {n["id"]: n for n in prev.get("nodes", [])} if prev else {}
+    ttl_c = CFG.get("cacheMaxAgeH", 6) * 3600
+    for x, ts in list(direct_seen.items()):
+        if x in placed or x in heard_now or not (settle <= now - ts <= stale):
+            continue
+        pn = prev_nodes.get(x)
+        if not pn or pn.get("x") is None:
+            continue
+        leg = next((l for l in prev.get("links", [])
+                    if l.get("from") == x and l.get("to") in placed
+                    and l.get("snr") is not None and l.get("heard")
+                    and now - l["heard"] <= ttl_c), None)
+        if not leg:
+            continue
+        hp = pn.get("hop") or 1
+        hops_nodes.append(dict(id=x, hops=hp, via=leg["to"], short=pn.get("short") or x[-4:],
+                               long=pn.get("label"), hw=pn.get("hw"), heard=ts, silent=True))
+        rf.append(dict(frm=x, to=leg["to"], snr=None, hops=hp, heard=ts))
+
     # Кэш: плечи из прошлого live.json, которых не хватило в этом скане
     # (нода могла отдаться лёгким хендшейком без своей базы)
     node_ids = direct_ids | {c["id"] for c in hops_nodes}
@@ -431,6 +457,8 @@ def build(found, prev=None):
         node = dict(id=c["id"], label=label, sub=c["id"], short=c["short"], hop=c["hops"],
                     x=round(x, 4), y=round(y, 4), heard=c["heard"] or None,
                     key=bool(keys_by.get(c["id"])), keyBy=sorted(keys_by.get(c["id"], ())))
+        if c.get("silent"):
+            node["silent"] = True
         if c.get("hw"):
             node["hw"] = c["hw"]
         info = node_info(c)
