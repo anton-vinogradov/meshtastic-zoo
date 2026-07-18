@@ -647,6 +647,22 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({k: CFG.get(k) for k in EDITABLE})
         elif self.path.startswith("/api/history/"):
             self._history()
+        elif self.path.startswith("/api/dbentry"):
+            # диагностика: как каждая своя нода ВИДИТ узел прямо сейчас (сырой nodeDB)
+            tid = (parse_qs(urlparse(self.path).query).get("id") or [""])[0]
+            out = {}
+            with lock:
+                live = [c for c in conns.values() if c.get("iface")]
+            for c in live:
+                try:
+                    e = dict(c["iface"].nodes or {}).get(tid)
+                except Exception:
+                    e = None
+                if isinstance(e, dict):
+                    lh = e.get("lastHeard") or 0
+                    out[c["id"]] = {"hopsAway": e.get("hopsAway"), "snr": e.get("snr"),
+                                    "lastHeard": lh, "ageMin": round((time.time() - lh) / 60, 1)}
+            self._json({"id": tid, "seenBy": out})
         else:
             super().do_GET()
 
