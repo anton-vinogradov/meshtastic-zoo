@@ -273,6 +273,24 @@ def ent_by_id(node_id):
                      if c.get("id") == node_id and c.get("iface")), None)
 
 
+def best_sender_for(to):
+    """Своя онлайн-нода, которая ЛУЧШЕ всех слышит адресата напрямую (из
+    live.json): у неё сильнее шанс, что запрос ключа/DM дойдёт и ответ
+    вернётся. Возвращает id ноды или None."""
+    try:
+        live = json.loads(OUT_LIVE.read_text())
+    except Exception:
+        return None
+    own = {n["id"] for n in live.get("nodes", []) if n.get("own")}
+    best, best_snr = None, -1e9
+    for l in live.get("links", []):
+        if (l.get("from") == to and l.get("to") in own and not l.get("hops")
+                and l.get("snr") is not None and l["snr"] > best_snr
+                and ent_by_id(l["to"])):
+            best, best_snr = l["to"], l["snr"]
+    return best
+
+
 def request_key(ent, to):
     """Солицит ключа адресата: шлём ему наш NodeInfo с want_response — он
     отвечает своим NodeInfo (в нём publicKey), и наша нода узнаёт его ключ."""
@@ -287,25 +305,30 @@ def request_key(ent, to):
 
 
 def resend(m, auto=False):
-    """Переслать исходящее сообщение с той же ноды тому же адресату (после того
-    как ключ, возможно, пришёл). Обновляем ту же запись, а не плодим новую."""
-    ent = ent_by_id(m.get("frm"))
+    """Переслать исходящее сообщение тому же адресату — но С ЛУЧШЕЙ ноды (кто
+    сильнее слышит адресата), а не обязательно с исходной. Обновляем ту же
+    запись (в т.ч. время — видно, что повтор реально ушёл), а не плодим новую."""
+    frm = best_sender_for(m.get("to")) or m.get("frm")
+    ent = ent_by_id(frm) or ent_by_id(m.get("frm"))
     if not ent:
         with lock:
             m["status"] = "failed"
         save_messages()
         return False
+    frm = ent["id"]
     try:
         pkt = ent["iface"].sendText(m["text"], destinationId=m["to"], wantAck=True,
                                     replyId=m.get("replyTo") or None)
         with lock:
+            m["frm"] = frm  # фактический отправитель
             m["pktId"] = getattr(pkt, "id", None)
             m["status"] = "sent"
+            m["ts"] = int(time.time())
             m.pop("detail", None)
             if not auto:
                 m.pop("keyRetry", None)  # ручной повтор → снова разрешить автозапрос
         save_messages()
-        log(f"{'🔁 авто-ретрай' if auto else '↻ ретрай'} {m['frm']} → {m['to']}: {m['text'][:40]!r}")
+        log(f"{'🔁 авто-ретрай' if auto else '↻ ретрай'} {frm} → {m['to']}: {m['text'][:40]!r}")
         return True
     except Exception as e:
         with lock:
@@ -316,8 +339,10 @@ def resend(m, auto=False):
 
 
 def auto_key_retry(m):
-    """Нет ключа адресата → запросить ключ и через keyRetryS повторить DM (раз)."""
-    ent = ent_by_id(m.get("frm"))
+    """Нет ключа адресата → запросить ключ (с ноды, что лучше его слышит) и
+    через keyRetryS повторить DM (раз)."""
+    frm = best_sender_for(m.get("to")) or m.get("frm")
+    ent = ent_by_id(frm) or ent_by_id(m.get("frm"))
     if not ent:
         with lock:
             m["status"], m["detail"] = "failed", "PKI_SEND_FAIL_PUBLIC_KEY"
@@ -328,7 +353,7 @@ def auto_key_retry(m):
     except Exception as e:
         log(f"🔑 запрос ключа не удался: {e!r}")
     delay = CFG.get("keyRetryS", 12)
-    log(f"🔑 нет ключа {m['to']} — запросил у адресата, ретрай DM через {delay}с")
+    log(f"🔑 нет ключа {m['to']} — запросил у адресата с {ent['id']}, ретрай DM через {delay}с")
     threading.Timer(delay, lambda: resend(m, auto=True)).start()
 
 
