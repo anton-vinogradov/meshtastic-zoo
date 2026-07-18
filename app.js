@@ -332,6 +332,7 @@
       }
       const n = nodes[id];
       if (!n) { panel.classList.remove("open"); openId = null; return; }
+      document.getElementById("settings").classList.remove("open"); // взаимоисключение
       openId = id;
       const i = n.info || {};
       const rows = [
