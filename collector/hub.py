@@ -259,6 +259,13 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def end_headers(self):
+        # статику отдаём без кэша, чтобы браузер всегда брал свежий app.js/css
+        # (API уже ставит no-store сам)
+        if not self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+        super().end_headers()
+
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
