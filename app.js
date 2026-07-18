@@ -381,19 +381,33 @@
       ids.forEach((id, i) => {
         px[id] = [W / 2 + (P[i][0] - cx0) * scale, H / 2 + (P[i][1] - cy0) * scale];
       });
-      // раздвижка перекрывшихся карточек по вертикали
-      for (let r = 0; r < 300; r++) {
+      // Раздвижка перекрывшихся карточек (2D, симметрично). Со-локация своих
+      // нод (одно железо → почти совпадающие точки в честной SNR-раскладке) плюс
+      // разворот geoOrient к краю раньше давали слипшийся, местами обрезанный
+      // кластер, по которому не попасть кликом. Разносим по более дешёвой оси и
+      // мягко держим в границах — кластер у края расползается внутрь карты.
+      const MINX = 114, MINY = 96;
+      const clX = (v) => Math.max(70, Math.min(W - 70, v));
+      const clY = (v) => Math.max(48, Math.min(H - 48, v));
+      for (let r = 0; r < 600; r++) {
         let moved = false;
         for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
           const a = px[ids[i]], b = px[ids[j]];
-          const dx = b[0] - a[0], dy = b[1] - a[1];
-          if (Math.abs(dx) < 114 && Math.abs(dy) < 94) {
-            const over = (94 - Math.abs(dy)) / 2, s = dy >= 0 ? 1 : -1;
-            a[1] = Math.max(48, Math.min(H - 48, a[1] - s * over));
-            b[1] = Math.max(48, Math.min(H - 48, b[1] + s * over));
-            moved = true;
+          let dx = b[0] - a[0], dy = b[1] - a[1];
+          if (Math.abs(dx) >= MINX || Math.abs(dy) >= MINY) continue;
+          // точное совпадение (co-located ноды) — детерминированно по диагонали
+          if (dx === 0 && dy === 0) { dx = (i - j) || 1; dy = (i + j) % 2 ? 1 : -1; }
+          const ox = MINX - Math.abs(dx), oy = MINY - Math.abs(dy);
+          if (oy <= ox) {                       // разносим по вертикали (дешевле)
+            const s = (dy >= 0 ? 1 : -1) * oy / 2;
+            a[1] -= s; b[1] += s;
+          } else {                              // по горизонтали
+            const s = (dx >= 0 ? 1 : -1) * ox / 2;
+            a[0] -= s; b[0] += s;
           }
+          moved = true;
         }
+        for (const id of ids) { const p = px[id]; p[0] = clX(p[0]); p[1] = clY(p[1]); }
         if (!moved) break;
       }
     }
@@ -690,8 +704,9 @@
     }
     out.push(...edgeSvg);
 
-    // Карточки нод (поверх рёбер)
-    for (const n of Object.values(nodes)) {
+    // Карточки нод (поверх рёбер). Свои — последними, чтобы рисовались ПОВЕРХ
+    // соседей и клик по своей ноде не перехватывался наложившимся соседом.
+    for (const n of Object.values(nodes).sort((a, b) => (a.world === b.world ? 0 : a.world ? -1 : 1))) {
       const x = n.cx - n.w / 2, y = n.cy - n.h / 2;
       const isHop = n.hop != null;
       const scol = scolOf(subnetOf(n.sub));  // цвет своей ноды по её подсети
