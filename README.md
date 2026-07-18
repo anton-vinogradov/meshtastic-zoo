@@ -78,7 +78,11 @@ nodes are the blue cards with an IP, outside ones are black.
 
 Against arrow pile-up: the legs' endpoints fan out across the card edges
 (each arrow gets its own port), opposite legs of a pair run side by
-side, and overlapping cards get pushed apart. The outside nodes' legs
+side, and overlapping cards get pushed apart. The SNR label is a pill
+sitting right on its own line, rotated along it — both the number and
+which leg it belongs to are obvious. Cards are square "tokens" (photo
+on top, name and caption below): a token's center is closer to a point,
+so distances read more honestly. The outside nodes' legs
 are dimmed and light up on hover. Hovering over a node highlights its
 legs and neighbors; **clicking opens a details panel**: device photo,
 ID, IP, model, battery, uptime, channel utilization, and every leg with
