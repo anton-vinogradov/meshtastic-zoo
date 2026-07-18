@@ -4,8 +4,10 @@
 Один проход:  python3 collector/scan.py
 Цикл:         python3 collector/scan.py --loop 300
 
-Ничего не пишет в ноды — только читает. Схема live.json та же, что у
-data/topology.js; фронтенд подхватывает файл сам раз в минуту.
+Читает ноды по TCP; единственная запись — выставление времени своей ноде со
+сбитыми часами (lastHeard=0 после ребута, GPS в помещении фикс не берёт).
+Схема live.json та же, что у data/topology.js; фронтенд подхватывает файл сам
+раз в минуту.
 """
 import asyncio
 import ipaddress
@@ -162,10 +164,27 @@ def query(ip, no_nodes):
                 my = iface.getMyNodeInfo() or {}
                 user = my.get("user") or {}
                 num = getattr(getattr(iface, "myInfo", None), "my_node_num", None) or my.get("num")
+                nodes_db = dict(iface.nodes or {})
                 res.update(num=num, id=user.get("id"), short=user.get("shortName"),
                            long=user.get("longName"), role=user.get("role"),
                            hw=user.get("hwModel"), dm=my.get("deviceMetrics") or {},
-                           db=dict(iface.nodes or {}))
+                           db=nodes_db)
+                # Автосведение часов: T-Beam после перезагрузки теряет время
+                # (GPS в помещении фикс не берёт), и тогда ВСЕ метки lastHeard в
+                # его nodeDB = 0 — метки времени сообщений/телеметрии кривые, а
+                # прямые связи такой ноды держатся лишь на подстраховке в build().
+                # Если видим сбитые часы — выставляем текущее (админ-сообщение по
+                # локальному TCP, в эфир не идёт). По TCP достижимы только свои
+                # ноды, так что пишем лишь в собственное железо.
+                heards = [e.get("lastHeard") or 0 for e in nodes_db.values()
+                          if isinstance(e, dict)]
+                if heards and max(heards) == 0:
+                    try:
+                        iface.localNode.setTime(int(time.time()))
+                        res["clockFixed"] = True
+                        log(f"    {ip}: часы были сбиты (lastHeard=0) — выставил время")
+                    except Exception as e2:
+                        log(f"    {ip}: setTime не удался: {e2!r}")
             finally:
                 iface.close()
         except Exception as e:
