@@ -2,10 +2,11 @@
    Единственный источник данных: data/live.json от сборщика
    (collector/scan.py), перечитывается раз в минуту. */
 (function () {
-  // Квадратные «жетоны»: фото сверху, имя и подпись под ним — центр
-  // карточки ближе к точке, дистанции читаются честнее
-  const CARD = { w: 120, h: 88, r: 11 };
-  const WCARD = { w: 120, h: 88, r: 11 };
+  // Компактные «жетоны»: фото сверху, имя и подпись под ним — центр
+  // карточки ближе к точке, а меньший размер даёт сильным связям сойтись
+  // ближе (дистанции честнее пропорциональны сигналу)
+  const CARD = { w: 102, h: 82, r: 10 };
+  const WCARD = { w: 102, h: 82, r: 10 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
   // Язык интерфейса выбирается в настройках, хранится локально
@@ -104,7 +105,7 @@
       const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
       const spanX = (Math.max(...xs) - Math.min(...xs)) || 1e-6;
       const spanY = (Math.max(...ys) - Math.min(...ys)) || 1e-6;
-      const scale = Math.min((W - 210) / spanX, (H - 230) / spanY);
+      const scale = Math.min((W - 180) / spanX, (H - 200) / spanY);
       const cx0 = (Math.max(...xs) + Math.min(...xs)) / 2;
       const cy0 = (Math.max(...ys) + Math.min(...ys)) / 2;
       ids.forEach((id, i) => {
@@ -116,10 +117,10 @@
         for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
           const a = px[ids[i]], b = px[ids[j]];
           const dx = b[0] - a[0], dy = b[1] - a[1];
-          if (Math.abs(dx) < 134 && Math.abs(dy) < 104) {
-            const over = (104 - Math.abs(dy)) / 2, s = dy >= 0 ? 1 : -1;
-            a[1] = Math.max(55, Math.min(H - 55, a[1] - s * over));
-            b[1] = Math.max(55, Math.min(H - 55, b[1] + s * over));
+          if (Math.abs(dx) < 114 && Math.abs(dy) < 94) {
+            const over = (94 - Math.abs(dy)) / 2, s = dy >= 0 ? 1 : -1;
+            a[1] = Math.max(48, Math.min(H - 48, a[1] - s * over));
+            b[1] = Math.max(48, Math.min(H - 48, b[1] + s * over));
             moved = true;
           }
         }
@@ -402,37 +403,37 @@
       const long = (n.info || {}).long;
       const tipTxt = [long !== n.label ? long : null, n.hw, n.hint].filter(Boolean).join(" · ");
       const name = String(n.label);
-      const nm = name.length > 15 ? name.slice(0, 14) + "…" : name;
+      const nm = name.length > 14 ? name.slice(0, 13) + "…" : name;
       const sub = String(n.sub);
-      const sb = sub.length > 17 ? sub.slice(0, 16) + "…" : sub;
-      const photo = `<g transform="translate(${n.cx - 20}, ${y + 6})" clip-path="url(#ph)">
-        <rect width="40" height="40" rx="7" fill="rgba(255,255,255,.06)"/>
-        <image href="${hwImg(n.hw)}" width="40" height="40" preserveAspectRatio="xMidYMid meet"/></g>`;
+      const sb = sub.length > 16 ? sub.slice(0, 15) + "…" : sub;
+      const photo = `<g transform="translate(${n.cx - 18}, ${y + 5})" clip-path="url(#ph)">
+        <rect width="36" height="36" rx="6" fill="rgba(255,255,255,.06)"/>
+        <image href="${hwImg(n.hw)}" width="36" height="36" preserveAspectRatio="xMidYMid meet"/></g>`;
       const stale = n.heard && !n.online && Date.now() / 1e3 - n.heard > 3 * 3600;
       const badge = n.online
-        ? `<circle cx="${x + n.w - 10}" cy="${y + 10}" r="3.5" fill="#35c98e"/>`
-        : n.heard ? `<text x="${x + n.w - 6}" y="${y + 13}" text-anchor="end" font-size="9.5"
+        ? `<circle cx="${x + n.w - 9}" cy="${y + 9}" r="3.5" fill="#35c98e"/>`
+        : n.heard ? `<text x="${x + n.w - 5}" y="${y + 12}" text-anchor="end" font-size="9"
             fill="${stale ? "#e0a03c" : "var(--muted)"}">${fmtAge(n.heard)}</text>` : "";
-      const mailBadge = unread[n.id] ? `<g transform="translate(${x + 5}, ${y + 5})">
-        <rect width="34" height="17" rx="8.5" fill="#e0a03c"/>
-        <text x="17" y="12.5" text-anchor="middle" font-size="10.5" font-weight="700"
+      const mailBadge = unread[n.id] ? `<g transform="translate(${x + 4}, ${y + 4})">
+        <rect width="32" height="16" rx="8" fill="#e0a03c"/>
+        <text x="16" y="12" text-anchor="middle" font-size="10" font-weight="700"
           fill="#141416">✉ ${unread[n.id]}</text></g>` : "";
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
         ${photo}${badge}${mailBadge}
-        <text x="${n.cx}" y="${y + 61}" text-anchor="middle" fill="var(--text)"
-          font-size="${nm.length > 11 ? 10.5 : 12}" font-weight="700">${esc(nm)}</text>
-        <text x="${n.cx}" y="${y + 77}" text-anchor="middle" fill="${subFill}"
-          font-size="9.5">${esc(sb)}</text>
+        <text x="${n.cx}" y="${y + 55}" text-anchor="middle" fill="var(--text)"
+          font-size="${nm.length > 10 ? 10 : 11.5}" font-weight="700">${esc(nm)}</text>
+        <text x="${n.cx}" y="${y + 71}" text-anchor="middle" fill="${subFill}"
+          font-size="9">${esc(sb)}</text>
       </g>`);
     }
 
     document.getElementById("map").innerHTML =
       `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
-        <clipPath id="ph"><rect width="40" height="40" rx="7"/></clipPath></defs>${out.join("\n")}</svg>`;
+        <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
 
     // Панель подробностей ноды (по клику)
     const panel = document.getElementById("panel");

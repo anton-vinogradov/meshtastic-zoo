@@ -35,7 +35,7 @@ def layout(ids, des):
     рендерер."""
     neigh = {}
     for (a, b), d in des.items():
-        q = max(0.0, 1 - (d - 0.16) / 0.60)
+        q = max(0.0, 1 - (d - 0.12) / 0.62)
         neigh.setdefault(a, {})
         neigh.setdefault(b, {})
         neigh[a][b] = max(neigh[a].get(b, 0.0), q)
@@ -76,8 +76,8 @@ def layout(ids, des):
                 s += w * (math.hypot(c[0] - ax, c[1] - ay) - d) ** 2
             for ox, oy in others:
                 dist = math.hypot(c[0] - ox, c[1] - oy)
-                if dist < 0.55:
-                    s += pen_w * (0.55 - dist) ** 2
+                if dist < 0.42:
+                    s += pen_w * (0.42 - dist) ** 2
             return s
 
         placed[nid] = min(cands, key=score)
@@ -85,18 +85,20 @@ def layout(ids, des):
     # Пружинная полировка: подтянуть точные дистанции, не разрушая композицию
     pos = {nid: list(p) for nid, p in placed.items()}
     idl = list(ids)
-    steps = 250
+    steps = 320
     for it in range(steps):
         t = 1.0 - it / steps
+        # пружины желаемых дистанций (сильнее — чтобы связи держались честно)
         for (a, b), d in des.items():
             if a not in pos or b not in pos:
                 continue
             dx = pos[b][0] - pos[a][0]
             dy = pos[b][1] - pos[a][1]
             dist = math.hypot(dx, dy) or 1e-6
-            mv = (dist - d) / dist * 0.15 * t
+            mv = (dist - d) / dist * 0.22 * t
             pos[a][0] += dx * mv; pos[a][1] += dy * mv
             pos[b][0] -= dx * mv; pos[b][1] -= dy * mv
+        # мягкое расталкивание несвязанных: только чтобы не наезжали, не раздувая
         for i in range(len(idl)):
             for j in range(i + 1, len(idl)):
                 a, b = idl[i], idl[j]
@@ -105,8 +107,8 @@ def layout(ids, des):
                 dx = pos[b][0] - pos[a][0]
                 dy = pos[b][1] - pos[a][1]
                 dist = math.hypot(dx, dy) or 1e-6
-                if dist < 0.58:
-                    mv = (0.58 - dist) / dist * 0.2 * t
+                if dist < 0.42:
+                    mv = (0.42 - dist) / dist * 0.14 * t
                     pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
                     pos[b][0] += dx * mv; pos[b][1] += dy * mv
     return {nid: (round(p[0], 4), round(p[1], 4)) for nid, p in pos.items()}
@@ -293,7 +295,7 @@ def build(found, prev=None):
             q = (max(ps) + (min(ps) if len(ps) > 1 else 0)) / 2
         else:
             q = max(ps)
-        des[key] = 0.16 + (1 - q) * 0.60
+        des[key] = 0.12 + (1 - q) * 0.62
 
     pos = layout(sorted(node_ids), des)
 
