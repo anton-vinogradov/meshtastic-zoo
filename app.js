@@ -94,6 +94,7 @@
       lblTotal: "total", lblOwn: "own",
       geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
       antOmni: "omni", antDir: "directional", antAzim: "az",
+      geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -146,6 +147,7 @@
       lblTotal: "всего", lblOwn: "свои",
       geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
       antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
+      geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -1526,6 +1528,7 @@
 
   // ---- Гео-карта (Фаза 3): реальные GPS-позиции на OSM (Leaflet вендорён локально) ----
   let geoView = localStorage.getItem("mzGeoView") === "1";
+  let geoEst = localStorage.getItem("mzGeoEst") !== "0";  // показывать оценённые позиции
   let lmap = null, geoLayer = null, geoCfg = {}, placing = null, geoFitted = false;
   const GEO_R = 2500;  // радиус визуализации покрытия антенны, м
   async function loadGeoCfg() {
@@ -1617,6 +1620,18 @@
       }).bindTooltip(`${km < 10 ? km.toFixed(2) : km.toFixed(1)} km`,
         { permanent: true, direction: "center", className: "km-label" }).addTo(geoLayer);
     });
+    // оценённые позиции GPS-less нод (мультилатерация по сигналу): пунктирный
+    // маркер + круг неопределённости — фиолетовым, чтобы отличать от точных
+    if (geoEst) (lastLive.nodes || []).forEach(n => {
+      if (!n.est || n.own) return;
+      const p = [n.est.lat, n.est.lon];
+      pts.push(p);
+      L.circle(p, { radius: Math.max(150, n.est.unc * 1000), color: "#b98bff", weight: 1, fillColor: "#b98bff", fillOpacity: 0.06, dashArray: "3 4" }).addTo(geoLayer);
+      const u = n.est.unc < 1 ? `${Math.round(n.est.unc * 1000)} m` : `${n.est.unc.toFixed(1)} km`;
+      L.circleMarker(p, { radius: 6, color: "#b98bff", weight: 2, fillColor: "#0b0b0d", fillOpacity: 0.55, dashArray: "3 3" })
+        .bindTooltip(`${String((byId[n.id] || {}).label || n.id)} · ~${u} (${n.est.by})`, { direction: "top" })
+        .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
+    });
     // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий
     (lastLive.nodes || []).forEach(n => {
       const i = n.info || {};
@@ -1642,7 +1657,9 @@
     const ctl = document.getElementById("geoctl");
     if (!ctl) return;
     const own = (lastLive && lastLive.nodes || []).filter(n => n.own);
-    ctl.innerHTML = `<div class="geoctl-h">${esc(t("geoPlaceHint"))}</div>` + own.map(n => {
+    ctl.innerHTML = `<label class="geo-est-tog" title="${esc(t("geoEstTip"))}">
+        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>`
+      + `<div class="geoctl-h">${esc(t("geoPlaceHint"))}</div>` + own.map(n => {
       const g = geoCfg[n.id] || {}, placed = g.lat != null;
       return `<div class="geo-node" data-id="${esc(n.id)}">
         <div class="geo-row1"><b>${esc(n.label || n.id)}</b>
@@ -1656,6 +1673,11 @@
             <input type="number" class="geo-azin" min="0" max="359" value="${g.dir || 0}">°</label>` : ""}
         </div>` : ""}</div>`;
     }).join("");
+    ctl.querySelector("#geo-est-cb")?.addEventListener("change", (e) => {
+      geoEst = e.target.checked;
+      localStorage.setItem("mzGeoEst", geoEst ? "1" : "0");
+      renderGeo();
+    });
     ctl.querySelectorAll(".geo-node").forEach(row => {
       const id = row.dataset.id, g = geoCfg[id] || {};
       row.querySelector(".geo-place").onclick = () => {
