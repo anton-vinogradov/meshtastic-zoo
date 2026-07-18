@@ -1205,6 +1205,13 @@
     const grad = `linear-gradient(90deg, ${[0, 25, 50, 75, 100]
       .map(p => `hsl(${hue(p)}, 62%, 55%)`).join(", ")})`;
     const stale = D.meta.updatedTs && Date.now() - D.meta.updatedTs > 15 * 60e3;
+    // время скана — в локальном поясе браузера (collector пишет строку в UTC,
+    // из-за чего казалось, что данные на 3 ч отстают); updatedTs — epoch ms
+    const scanLocal = D.meta.updatedTs
+      ? (() => { const d = new Date(D.meta.updatedTs), p = (n) => String(n).padStart(2, "0");
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+            + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; })()
+      : D.meta.updated;
     // загрузка канала: худшая chUtil среди своих нод (диагностика перегруза эфира)
     const chLoads = D.nodes.filter(n => n.own && n.info && n.info.chUtil != null).map(n => n.info.chUtil);
     const maxCh = chLoads.length ? Math.max(...chLoads) : null;
@@ -1219,7 +1226,7 @@
       ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,
         D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
-      <span class="item">${t("scan")} · ${esc(D.meta.updated)}
+      <span class="item">${t("scan")} · ${esc(scanLocal)}
         ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
 
     // Общий маркер непрочитанной почты
