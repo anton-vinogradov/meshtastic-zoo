@@ -276,7 +276,9 @@
     };
     const base = reach(null), crit = {};
     nodes.forEach(n => {
-      if (n.own || !base.has(n.id)) return;
+      // считаем и СВОИ ноды: в звезде own↔сосед именно свои — единые точки
+      // отказа (сосед, слышимый лишь одной своей нодой, теряется при её отказе)
+      if (!base.has(n.id)) return;
       const r = reach(n.id);
       let lost = 0;
       base.forEach(m => { if (m !== n.id && !r.has(m)) lost++; });
