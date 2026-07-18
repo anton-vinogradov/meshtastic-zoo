@@ -103,6 +103,10 @@
       fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
       fFragile: "Slow subnets — polled lightly (prefix per line)",
       fSubColor: "Color of subnet {0}", addSubnet: "add subnet", remove: "remove",
+      secHist: "History", histReach: "Reachability 24h", histHeard: "Heard 24h",
+      histBatt: "Battery 24h", histChUtil: "Channel util 24h", histNone: "not enough history yet",
+      histReachTip: "share of the last 24h this node answered over TCP",
+      histHeardTip: "share of the last 24h this node was heard on the air",
     },
     ru: {
       callsign: "Позывной", model: "Модель", role: "Роль", battery: "Батарея",
@@ -146,12 +150,65 @@
       fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
       fFragile: "Медленные подсети — лёгкий опрос (префикс на строке)",
       fSubColor: "Цвет подсети {0}", addSubnet: "добавить подсеть", remove: "удалить",
+      secHist: "История", histReach: "Достижимость 24ч", histHeard: "Слышно 24ч",
+      histBatt: "Батарея 24ч", histChUtil: "Загрузка эфира 24ч", histNone: "истории пока мало",
+      histReachTip: "доля последних 24ч, когда нода отвечала по TCP",
+      histHeardTip: "доля последних 24ч, когда ноду было слышно в эфире",
     },
   };
   const t = (k, ...a) => {
     let s = (T[lang] && T[lang][k]) ?? T.en[k] ?? k;
     a.forEach((v, i) => { s = s.split("{" + i + "}").join(v); });
     return s;
+  };
+
+  // ===== История (Фаза 1): мини-графики из /api/history (кэш 30 с гасит частые перерисовки) =====
+  const histCache = new Map();
+  async function histFetch(path) {
+    const c = histCache.get(path);
+    if (c && Date.now() - c.ts < 30000) return c.data;
+    let data = null;
+    try { data = await (await fetch("/api/history/" + path, { cache: "no-store" })).json(); }
+    catch { data = null; }
+    histCache.set(path, { ts: Date.now(), data });
+    return data;
+  }
+  // спарклайн-линия: pts=[{ts,v}], v==null рвёт линию на сегменты
+  function spark(pts, { w = 132, h = 30, color = "#7bb0ff", min = null, max = null } = {}) {
+    const vals = pts.map(p => p.v).filter(v => v != null);
+    if (vals.length < 2) return `<span class="spark-empty">${t("histNone")}</span>`;
+    const lo = min != null ? min : Math.min(...vals);
+    const hi = max != null ? max : Math.max(...vals);
+    const span = (hi - lo) || 1;
+    const t0 = pts[0].ts, tspan = (pts[pts.length - 1].ts - t0) || 1;
+    const X = ts => (1 + (ts - t0) / tspan * (w - 2)).toFixed(1);
+    const Y = v => (h - 2 - (v - lo) / span * (h - 4)).toFixed(1);
+    let d = "", pen = false;
+    for (const p of pts) {
+      if (p.v == null) { pen = false; continue; }
+      d += (pen ? "L" : "M") + X(p.ts) + " " + Y(p.v) + " "; pen = true;
+    }
+    return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+      + `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+  // полоса online/heard по 30-мин бинам: красный→зелёный = доля времени «на связи»
+  function upStrip(series, { hours = 24, w = 150, h = 12, bins = 48 } = {}) {
+    const now = Date.now() / 1000, t0 = now - hours * 3600, bw = hours * 3600 / bins;
+    const agg = Array.from({ length: bins }, () => ({ on: 0, n: 0 }));
+    for (const p of series) {
+      const b = Math.floor((p.ts - t0) / bw);
+      if (b < 0 || b >= bins) continue;
+      agg[b].n++; if (p.online) agg[b].on++;
+    }
+    const cw = w / bins;
+    const rects = agg.map((a, i) =>
+      `<rect x="${(i * cw).toFixed(2)}" y="0" width="${(cw + 0.4).toFixed(2)}" height="${h}" `
+      + `fill="${a.n ? `hsl(${Math.round(a.on / a.n * 120)} 55% 45%)` : "rgba(255,255,255,.08)"}"/>`).join("");
+    return `<svg class="ustrip" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${rects}</svg>`;
+  }
+  const pctOnline = (series) => {
+    const s = series.filter(p => p.online != null);
+    return s.length ? Math.round(s.filter(p => p.online).length / s.length * 100) : null;
   };
 
   function render(D) {
@@ -659,7 +716,10 @@
           <a class="osmlink" href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lon}#map=15/${i.lat}/${i.lon}" target="_blank" rel="noopener noreferrer">${esc(t("openMap"))}</a>
         </details>`;
       })();
-      const sections = secFw + secRadio + secMesh + secDev + secPos;
+      // История — наполняется асинхронно после отрисовки (fillHistory ниже)
+      const secHist = `<details class="psec" id="sec-hist"><summary>${esc(t("secHist"))}</summary>`
+        + `<div id="hist-body" class="hist-body">…</div></details>`;
+      const sections = secFw + secRadio + secMesh + secDev + secPos + secHist;
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
       const byOther = {};
@@ -682,7 +742,8 @@
         return `<div class="leg"><span class="dot" style="background:${col}"></span>
           <span class="who"${ttl ? ` title="${esc(ttl)}"` : ""}>${who}</span>
           <span style="color:${col}">${val}</span>
-          ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}</div>`;
+          ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}
+          ${l.snr != null ? `<span class="legspark" data-src="${esc(l.from)}" data-dst="${esc(l.to)}" data-col="${col}"></span>` : ""}</div>`;
       };
       const legs =
         (pairsL.length ? `<div class="psub">${t("twoWay")}</div>` : "") +
@@ -811,6 +872,44 @@
         if (openSecs.has(d.querySelector("summary").textContent.trim())) d.open = true;
       });
       panel.classList.add("open");
+      // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
+      (async () => {
+        const body = panel.querySelector("#hist-body");
+        if (body) {
+          const res = await histFetch("node?id=" + encodeURIComponent(id) + "&hours=24");
+          if (openId === id && panel.querySelector("#hist-body") === body) {
+            const series = (res && res.series) || [];
+            const hasUp = series.filter(p => p.online != null).length >= 2;
+            const hasBatt = series.some(p => p.batt != null);
+            if (!hasUp && !hasBatt) {
+              body.innerHTML = `<div class="hist-none">${t("histNone")}</div>`;
+            } else {
+              const up = pctOnline(series);
+              const tip = n.own ? t("histReachTip") : t("histHeardTip");
+              let html = `<div class="hist-row" title="${esc(tip)}"><span>${esc(n.own ? t("histReach") : t("histHeard"))}</span>`
+                + `<b class="hist-val">${up == null ? "—" : up + "%"}</b></div>${upStrip(series)}`;
+              if (n.own) {
+                const batt = series.map(p => ({ ts: p.ts, v: p.batt }));
+                if (batt.some(p => p.v != null))
+                  html += `<div class="hist-cap">${esc(t("histBatt"))}</div>` + spark(batt, { color: "#5bc98e", min: 0, max: 100 });
+                const chu = series.map(p => ({ ts: p.ts, v: p.chutil }));
+                if (chu.some(p => p.v != null))
+                  html += `<div class="hist-cap">${esc(t("histChUtil"))}</div>` + spark(chu, { color: "#e0a03c", min: 0 });
+              }
+              body.innerHTML = html;
+            }
+          }
+        }
+        // SNR-спарклайны в плечах (по каждому направлению)
+        for (const el of panel.querySelectorAll(".legspark[data-src]")) {
+          if (openId !== id) break;
+          const r = await histFetch("link?src=" + encodeURIComponent(el.dataset.src)
+            + "&dst=" + encodeURIComponent(el.dataset.dst) + "&hours=24");
+          const pts = ((r && r.series) || []).map(p => ({ ts: p.ts, v: p.snr }));
+          if (pts.filter(p => p.v != null).length >= 2)
+            el.innerHTML = spark(pts, { w: 56, h: 14, color: el.dataset.col || "#7bb0ff" });
+        }
+      })();
       // переписка прокручивается к последнему сообщению
       const th = panel.querySelector(".thread");
       if (th) th.scrollTop = th.scrollHeight;

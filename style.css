@@ -440,6 +440,17 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #panel .leg .age { color: var(--muted); font-size: 11.5px; flex: none; }
 #panel .singles .leg { margin-bottom: 5px; }
 
+/* графики истории (Фаза 1) */
+#panel .hist-body { display: flex; flex-direction: column; gap: 4px; padding: 3px 0 2px; }
+#panel .hist-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+#panel .hist-row .hist-val { color: var(--text); font-weight: 600; }
+#panel .hist-cap { color: var(--muted); font-size: 11px; margin-top: 4px; }
+#panel .hist-none, #panel .spark-empty { color: var(--muted); font-size: 12px; }
+#panel .hist-body .spark { width: 100%; height: 30px; display: block; }
+#panel .hist-body .ustrip { width: 100%; height: 12px; border-radius: 3px; display: block; }
+#panel .leg .legspark { flex: none; display: inline-flex; align-items: center; opacity: .85; }
+#panel .leg .legspark .spark { width: 56px; height: 14px; }
+
 #map .empty {
   padding: 48px 24px;
   color: var(--muted);
