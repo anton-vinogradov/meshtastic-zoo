@@ -100,6 +100,7 @@
       geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
+      mapSettings: "Weighted map", mapCliHint: "display options — this browser only",
       critLine: "single point of failure: −{0} node(s) if it drops",
       traceBtn: "🧭 trace route", traceRunning: "tracing… (sends a probe over the air)",
       traceFail: "no response (node silent or too far)", traceNoNode: "no online node to trace from",
@@ -159,6 +160,7 @@
       geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
+      mapSettings: "Карта весов", mapCliHint: "настройки отображения — только этот браузер",
       critLine: "единая точка отказа: −{0} нод при её отказе",
       traceBtn: "🧭 трассировка", traceRunning: "трассирую… (шлёт пробу в эфир)",
       traceFail: "нет ответа (нода молчит или далеко)", traceNoNode: "нет онлайн-ноды для запроса",
@@ -1213,13 +1215,7 @@
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
       <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
-      <label class="item toggle" title="${esc(t("showHopsTip"))}">
-        <input type="checkbox" id="hopToggle" ${showHops ? "checked" : ""}>
-        <span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</label>
-      <label class="item toggle" title="${esc(t("geoOrientTip"))}">
-        <input type="checkbox" id="geoOrientToggle" ${geoOrient ? "checked" : ""}>🧭 ${t("geoOrientLbl")}</label>
-      <label class="item toggle" title="${esc(t("critTip"))}">
-        <input type="checkbox" id="critToggle" ${showCrit ? "checked" : ""}>⚠ ${t("critLbl")}</label>
+      ${showHops ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
       ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,
         D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
@@ -1477,8 +1473,8 @@
   };
   window.addEventListener("resize", refit);
   new ResizeObserver(refit).observe(document.getElementById("map"));
-  // Галочка «многохопы» в легенде: делегируем на #legend (он пересобирается)
-  document.getElementById("legend").addEventListener("change", (e) => {
+  // Тумблеры отображения карты: делегируем на #settings (панель пересобирается)
+  document.getElementById("settings").addEventListener("change", (e) => {
     if (e.target.id === "hopToggle") {
       showHops = e.target.checked;
       localStorage.setItem("mzShowHops", showHops ? "1" : "0");
@@ -1540,13 +1536,32 @@
   const setEl = document.getElementById("settings");
   const sfId = (k) => "sf-" + k.replace(".", "-");
 
+  // Тумблеры отображения карты весов (клиентские, localStorage) — живут в ⚙,
+  // а не в легенде; показываем даже без хаба, т.к. от него не зависят.
+  const mapToggles = () => `
+    <div class="smap">
+      <b class="ssub">${t("mapSettings")}</b>
+      <label class="srow stog" title="${esc(t("showHopsTip"))}">
+        <span><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>
+        <input type="checkbox" id="hopToggle" ${showHops ? "checked" : ""}></label>
+      <label class="srow stog" title="${esc(t("geoOrientTip"))}">
+        <span>🧭 ${t("geoOrientLbl")}</span>
+        <input type="checkbox" id="geoOrientToggle" ${geoOrient ? "checked" : ""}></label>
+      <label class="srow stog" title="${esc(t("critTip"))}">
+        <span>⚠ ${t("critLbl")}</span>
+        <input type="checkbox" id="critToggle" ${showCrit ? "checked" : ""}></label>
+      <div class="shint">${t("mapCliHint")}</div>
+    </div>`;
+
   async function openSettings() {
     let cfg = {};
     try {
       cfg = await (await fetch("/api/config", { cache: "no-store" })).json();
     } catch {
-      setEl.innerHTML = `<b class='stitle'>${t("settings")}</b><div class='shint'>${t("hubUnavail")}</div>`;
+      setEl.innerHTML = `<button id="sclose" aria-label="${t("close")}">×</button>
+        <b class='stitle'>${t("settings")}</b>${mapToggles()}<div class='shint'>${t("hubUnavail")}</div>`;
       setEl.classList.add("open");
+      setEl.querySelector("#sclose").onclick = () => setEl.classList.remove("open");
       return;
     }
     const val = (k) => k.includes(".")
@@ -1565,8 +1580,9 @@
         subRowHtml(c, subColors[subnetOf(c)] || palAt(i))).join("")}</div>
       <button id="sub-add" type="button">+ ${t("addSubnet")}</button></div>`;
     setEl.innerHTML = `<button id="sclose" aria-label="${t("close")}">×</button>
-      <b class="stitle">${t("settings")}</b>
-      <label class="srow"><span>${t("language")}</span>
+      <b class="stitle">${t("settings")}</b>`
+      + mapToggles()
+      + `<label class="srow"><span>${t("language")}</span>
         <select id="sf-lang">${langOpt("en", "English")}${langOpt("ru", "Русский")}</select></label>`
       + subnetEditor +
       SET_FIELDS.map(([k, label, kind]) => kind === "area"

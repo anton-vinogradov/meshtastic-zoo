@@ -380,6 +380,28 @@ body:not(.geo-on) #geoctl { display: none; }
 }
 #settings .srow { display: block; margin-bottom: 10px; }
 #settings .srow span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+/* секция «карта весов»: клиентские тумблеры отображения */
+#settings .smap {
+  border: 1px solid var(--zone-stroke); border-radius: 8px;
+  padding: 9px 11px 7px; margin-bottom: 13px; background: rgba(255, 255, 255, .03);
+}
+#settings .ssub {
+  display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 7px;
+}
+#settings .srow.stog {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 6px; cursor: pointer; user-select: none;
+}
+#settings .srow.stog span {
+  display: inline; color: var(--text); font-size: 13px; margin: 0;
+}
+#settings .srow.stog span .swatch { margin-right: 6px; vertical-align: middle; }
+#settings .srow.stog input {
+  width: auto; flex: none; margin: 0; padding: 0; border: none; background: none;
+  accent-color: #8fce6a; cursor: pointer;
+}
+#settings .smap .shint { margin-top: 5px; }
 /* редактор подсетей: строка CIDR + цвет + удалить, кнопка «+» */
 #settings #sub-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 #settings .subrow { display: flex; gap: 6px; align-items: center; }
