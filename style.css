@@ -106,6 +106,39 @@ body {
 }
 #panel .msg .mact button:disabled { opacity: .4; cursor: default; }
 
+/* «Написать» этой ноде */
+#panel .pcompose { margin-top: 12px; }
+#panel .pcompose > b { display: block; margin-bottom: 5px; }
+#panel .pcompose .crow { display: flex; gap: 6px; }
+#panel .pcompose select {
+  background: var(--bg);
+  border: 1px solid var(--zone-stroke);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 5px 6px;
+  font-size: 12.5px;
+  max-width: 84px;
+}
+#panel .pcompose .cmsg {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--zone-stroke);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+}
+#panel .pcompose button {
+  background: rgba(255, 255, 255, .08);
+  border: none;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+#panel .pcompose button:disabled { opacity: .4; cursor: default; }
+
 /* Панель подробностей ноды */
 #panel {
   position: fixed;

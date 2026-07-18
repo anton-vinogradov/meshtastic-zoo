@@ -140,8 +140,11 @@
       const a = nodes[l.from], b = nodes[l.to];
       if (!a || !b) return;
       for (const [n, o] of [[a, b], [b, a]]) {
-        const side = o.cy < n.cy - n.h / 2 ? "top" : o.cy > n.cy + n.h / 2 ? "bottom"
-          : o.cx < n.cx ? "left" : "right";
+        // порт — на той грани, которую линия реально пересекает
+        const dx = o.cx - n.cx, dy = o.cy - n.cy;
+        const side = Math.abs(dx) / n.w > Math.abs(dy) / n.h
+          ? (dx < 0 ? "left" : "right")
+          : (dy < 0 ? "top" : "bottom");
         ((ports[n.id] ??= { top: [], bottom: [], left: [], right: [] })[side])
           .push({ li, ox: o.cx, oy: o.cy });
       }
@@ -296,8 +299,10 @@
     function showPanel(id, force) {
       // не перерисовывать панель под руками, пока пользователь пишет ответ
       if (!force) {
-        const typing = panel.querySelector(".reply");
-        if (typing && (typing.value || document.activeElement === typing)) return;
+        const ae = document.activeElement;
+        const busy = [...panel.querySelectorAll(".reply")].some(i => i.value)
+          || (ae && panel.contains(ae) && (ae.tagName === "INPUT" || ae.tagName === "SELECT"));
+        if (busy) return;
       }
       const n = nodes[id];
       if (!n) { panel.classList.remove("open"); openId = null; return; }
@@ -359,6 +364,29 @@
               <button class="mok" title="пометить прочитанным">✓</button></div>`}
           </div>`).join("") + `</div>` : "";
 
+      // «Написать»: этой ноде — от лица любой своей онлайн-ноды
+      // (по умолчанию та, что слышит адресата лучше всех)
+      const qTo = (ownId) => {
+        let best = -1;
+        for (const l of D.links) {
+          if (l.type !== "rf" || l.snr == null) continue;
+          if ((l.from === id && l.to === ownId) || (l.from === ownId && l.to === id)) {
+            best = Math.max(best, pctOf(l.snr));
+          }
+        }
+        return best;
+      };
+      const owners = Object.values(nodes)
+        .filter(v => v.own && v.online && v.id !== id)
+        .sort((a2, b2) => qTo(b2.id) - qTo(a2.id));
+      const composeHtml = owners.length ? `<div class="pcompose"><b>Написать</b>
+        <div class="crow">
+          <select class="cfrom" title="от лица какой ноды">${owners.map(o =>
+            `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>
+          <input class="reply cmsg" placeholder="сообщение…">
+          <button class="csend" title="отправить">➤</button>
+        </div></div>` : "";
+
       panel.innerHTML = `
         <button id="pclose" aria-label="закрыть">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
@@ -366,10 +394,11 @@
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v]) => `<div class="prow"><span>${k}</span><span>${esc(String(v))}</span></div>`).join("")}
         ${msgHtml}
+        ${composeHtml}
         ${legs ? `<div class="plegs"><b>Плечи</b>${legs}</div>` : ""}`;
       panel.classList.add("open");
       panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; };
-      panel.querySelectorAll(".mact").forEach(row => {
+      panel.querySelectorAll(".msg .mact").forEach(row => {
         const inp = row.querySelector(".reply");
         const mid = row.dataset.mid, to = row.dataset.to;
         row.querySelector(".msend").onclick = async () => {
@@ -393,6 +422,31 @@
           showPanel(id, true);
         };
       });
+      const cw = panel.querySelector(".pcompose");
+      if (cw) {
+        cw.querySelector(".csend").onclick = async () => {
+          const inp = cw.querySelector(".cmsg");
+          const text = inp.value.trim();
+          if (!text) { inp.focus(); return; }
+          const btn = cw.querySelector(".csend");
+          btn.disabled = true;
+          let res = { ok: false, error: "hub недоступен" };
+          try {
+            res = await (await fetch("/api/send", {
+              method: "POST",
+              body: JSON.stringify({ node: cw.querySelector(".cfrom").value, to: id, text }),
+            })).json();
+          } catch { }
+          btn.disabled = false;
+          if (res.ok) {
+            inp.value = "";
+            btn.textContent = "✓";
+            setTimeout(() => { btn.textContent = "➤"; }, 1500);
+          } else {
+            alert("Не отправилось: " + (res.error || "?"));
+          }
+        };
+      }
     }
 
     // Наведение на ноду — подсветить её линки и соседей; клик — панель
