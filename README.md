@@ -2,140 +2,86 @@
 
 **English** | [Русский](README.ru.md)
 
-A map of a Meshtastic node zoo: site subnets, the open ether around them,
-and radio link quality (SNR) between everyone heard in it. The number
-of sites and nodes is not hard-coded — everything comes from data; the
-current two subnets (`10.77.77.0/24` and `10.88.88.0/24`) are just one
-particular case.
+A live map of your Meshtastic node zoo: who is on the air, who hears
+whom and how well, and which node has unread mail. Everything updates
+by itself while the page is open.
 
-Static site with no build step and no dependencies: HTML + CSS + vanilla JS,
-rendered as SVG.
-
-## Viewing
+## Running
 
 ```sh
-python3 -m http.server 8814
-# → http://localhost:8814
+python3 collector/hub.py
+# the map: http://localhost:8814
 ```
 
-## Hub: the live center (recommended)
+One process does it all: keeps in touch with your nodes, listens to the
+air, refreshes the map and serves the site. Which subnets count as yours
+is a list in [`collector/config.json`](collector/config.json).
 
-```sh
-python3 collector/hub.py   # site + API + listeners on :8814
-```
+## What's on the map
 
-The hub keeps permanent TCP connections to your own nodes and does
-everything at once:
+- **Node tokens**: a device photo, name and address. Blue ones are your
+  nodes (reachable over the network), black ones are neighbors heard
+  over the radio.
+- **A green dot** — the node is online right now. A "N min / h" badge —
+  how long ago it was last heard on the air (orange when older than
+  3 hours).
+- **An envelope ✉** — the node has an unread direct message. The
+  overall mail counter sits in the top-left corner; clicking it opens
+  the node with the letter.
+- **Arrows** show who hears whom: the head points at the listener.
+  Color is link quality, from red (barely) to green (ideal); the label
+  on the line is the SNR in dB; the exact percentage is in the tooltip.
+  A grey "no data" arrow means that direction has never been caught.
+- **Distance = quality.** The better a pair hears each other, the
+  closer their tokens; nodes with no shared links drift apart. Roaming
+  nodes get a dashed frame. The map fits the window entirely and
+  re-lays itself out when the window is resized.
 
-- **mail**: direct messages to your nodes accumulate in
-  `data/messages.json`; the map shows a global "✉ N" marker in the
-  corner and an envelope on the node's token; the node panel shows the
-  messages themselves, a reply to the sender **from that node** (the ➤
-  button) and a "mark as read" (✓); every node also gets a **"Compose"**
-  block — with a choice of which of your own nodes to send from (the one
-  that hears the recipient best is preselected);
-- **topology**: every `topoEveryS` seconds `live.json` is rebuilt from
-  the live nodeDBs — no reconnects, which fragile nodes appreciate;
-- **API**: `GET /api/messages`, `POST /api/send {node, to, text}`,
-  `POST /api/read {ids}`;
-- new nodes in the subnets are picked up by a rescan every `rescanS`
-  seconds (the port scan never touches your live connections).
+## Hover and click
 
-## One-shot scan without the hub
+Hovering over a node highlights its links and dims everything else.
+Clicking opens the details panel:
 
-The collector discovers nodes by itself (scans the subnets for an open
-TCP API port), queries them, and assembles the map from their nodeDB —
-who each node hears directly, and at what SNR. It never writes to the nodes.
+- device photo and model, ID, callsign, IP;
+- battery, uptime, channel utilization, "last seen";
+- **Messages** — unread on top; a reply goes on the air from the very
+  node that was written to (➤), or just mark it as read (✓);
+- **Compose** — send a direct message to this node; a selector picks
+  which of your nodes speaks (the one that hears the recipient loudest
+  is preselected);
+- **Legs** — all the node's links: two-way ones grouped in "there and
+  back" pairs, one-way ones separately, everything sorted by quality
+  with the age of each measurement.
 
-```sh
-python3 collector/scan.py            # single pass → data/live.json
-python3 collector/scan.py --loop 300 # rescan every 5 minutes
-```
+## Nice little things
 
-The page re-reads `data/live.json` once a minute and re-renders; if the
-file is missing, it shows a hint to run the collector. The last scan time
-is shown in the legend; stale data (>15 min) gets flagged.
+- SNR labels sit right on their own lines — you can't mix up whose
+  number it is.
+- Lines try to go around other tokens with an arc; the endpoints stay
+  put, so the honesty of distances doesn't suffer.
+- There are always two arrows between your own nodes. If one direction
+  hasn't been caught for a while it is drawn as a grey "no data":
+  a one-way link is a suspicious link, and the map pushes such a pair
+  farther apart.
+- A neighbor silent for more than 6 hours leaves the map (the threshold
+  is configurable).
+- The last update time is in the bottom-right corner; if the data goes
+  stale, a warning appears next to it.
+- Device photos are the official renders from the Meshtastic project
+  (web-flasher); an unknown model gets a placeholder.
 
-Settings live in [`collector/config.json`](collector/config.json): the
-subnet list (its order = the order of bands on the map), timeouts,
-"fragile" subnets (after two failed full handshakes a node there is
-queried with a light handshake, without downloading its nodeDB), the
-outside-world filter (freshness; node cap, 0 = show everyone), known IP↔radio-id pairs
-for when a node is unreachable, and roaming nodes.
+## Settings (collector/config.json)
 
-## Data format
-
-`data/live.json` is generated by the collector; the renderer knows nothing
-about your network — it just draws whatever is in the file:
-
-- `nodes` — `x`/`y` — position as fractions of the canvas (produced by
-  the collector's force layout), `own: true` — your own node (blue card),
-  `hw` — hardware model (photo + name in the tooltip), `online`/`heard` —
-  status and "last seen", `mobile: true` — roaming node (dashed frame),
-  `hint` — tooltip;
-- `links` — radio legs (`type: "rf"`): `snr` in dB (`null` = no data —
-  a grey arrow), `heard` — when it was heard (epoch), `labelT` — label
-  position along the line, 0..1. A leg is directional: `to` is the node
-  that heard the other one; opposite legs of the same pair are drawn side
-  by side. There are no special "bridges" or "LAN lines" — an inter-site
-  link is just another leg;
-- `meta.snrScale` — the "% of ideal" scale: `floor` dB → 0% (red),
-  `ideal` dB → 100% (green); leg color is a continuous gradient over that
-  percentage, the label shows the SNR, and the exact % is in the leg's
-  tooltip.
-
-The whole map fits the window — no scrolling. There are no zones or
-bands: the layout is honest — node proximity is proportional to link
-quality (the greener the leg, the closer the cards). Placement is
-greedy, "most-connected first": the core is composed of the nodes with
-the highest connectivity (shared neighbors, good legs), the rest are
-added in decreasing connectivity order — candidate positions lie on
-circles of desired distances around already-placed neighbors, and the
-penalty for sitting close to strangers (nodes with no link) grows with
-every iteration; a short spring polish then tightens the exact
-distances. The final placement is done by the page for the window's
-real proportions: the cloud is rotated with its principal axis along
-the longer side, fitted with a single scale on both axes (distance
-proportions are preserved), and re-fitted on window resize. Your own
-nodes are the blue cards with an IP, outside ones are black.
-
-Against arrow pile-up: the legs' endpoints fan out across the card edges
-(each arrow gets its own port), opposite legs of a pair run side by
-side, and overlapping cards get pushed apart. The SNR label is a pill
-sitting right on its own line, rotated along it — both the number and
-which leg it belongs to are obvious. Cards are square "tokens" (photo
-on top, name and caption below): a token's center is closer to a point,
-so distances read more honestly. The outside nodes' legs
-are dimmed and light up on hover. Hovering over a node highlights its
-legs and neighbors; **clicking opens a details panel**: device photo,
-ID, IP, model, battery, uptime, channel utilization, and every leg with
-its age — two-way pairs are grouped into blocks, one-way legs listed
-separately, everything sorted by quality.
-
-Asymmetry also affects the layout: for a pair of your own nodes the
-quality is the mean of both directions, and a missing direction counts
-as zero — a "neighbor that cannot hear us back" is a dubious adjacency
-and is drawn farther away. Outside nodes are not penalized: their
-hearing is unknowable by design.
-
-Between your own nodes (the ones found by IP) both arrows are always
-drawn: a direction missing from this scan is backfilled from the previous
-`live.json` (cache, TTL in `cacheMaxAgeH`), and if there is no data at
-all — a grey "not measured". Each card shows status: a green dot means
-the node answers over TCP, otherwise a "last heard" badge (orange when
-older than 3 h).
-
-Device images are the official renders from the
-[Meshtastic web-flasher](https://github.com/meshtastic/web-flasher)
-repository (`img/hw/`); an unknown model gets a placeholder image.
+- `subnets` — your sites' subnets: where to look for nodes;
+- `snrScale` — the color scale: which SNR counts as zero and which as
+  ideal;
+- `worldMaxAgeH` — how many hours to keep a silent neighbor on the map;
+- `mobile` — roaming nodes (dashed frame on the map);
+- `known` / `names` — addresses and names as a fallback when a node
+  does not answer.
 
 ## Roadmap
 
-- [x] Stage 1: static map from a hand-written file (superseded and
-      removed at stage 2 — the scan is the single source of truth)
-- [x] Stage 2: collector — subnet scan + node queries over the TCP API,
-      auto-generated `data/live.json`, live re-rendering
-- [x] Stage 2.5: battery, uptime, "last seen", click-through details panel
-- [x] Stage 4: mail — unread direct messages on the nodes, markers on
-      the map, replying to the sender from the right node (hub)
-- [ ] Stage 3: measurement history and link quality charts
+- [x] Live map with honest distances and device photos
+- [x] Mail: unread markers, replying and sending from the right node
+- [ ] Measurement history and link quality charts

@@ -191,26 +191,30 @@
       const ux = (x2 - x1) / dl, uy = (y2 - y1) / dl;
       x1 += ux * 3; y1 += uy * 3; x2 -= ux * 11; y2 -= uy * 11;
 
-      // Объезд чужих карточек: линия, режущая карточку, гнётся дугой от неё
+      // Объезд чужих карточек: концы линии на месте (честная дистанция
+      // не меняется), но сама линия гнётся дугой в ту сторону, где
+      // помех меньше — с учётом всех карточек вдоль пути
       let bend = 0, nxv = 0, nyv = 0;
       {
         const ddx = x2 - x1, ddy = y2 - y1;
         const len2 = ddx * ddx + ddy * ddy || 1;
-        let worst = 0;
+        let needL = 0, needR = 0;
         for (const o of Object.values(nodes)) {
           if (o.id === l.from || o.id === l.to) continue;
           const tp = ((o.cx - x1) * ddx + (o.cy - y1) * ddy) / len2;
-          if (tp < 0.1 || tp > 0.9) continue;
+          if (tp < 0.08 || tp > 0.92) continue;
           const dxo = o.cx - (x1 + ddx * tp), dyo = o.cy - (y1 + ddy * tp);
-          const need = 90 - Math.hypot(dxo, dyo);
-          if (need > worst) {
-            worst = need;
-            const s = (dxo * ddy - dyo * ddx) >= 0 ? -1 : 1;
-            const ln = Math.sqrt(len2);
-            nxv = (-ddy / ln) * s; nyv = (ddx / ln) * s;
-          }
+          const need = 92 - Math.hypot(dxo, dyo);
+          if (need <= 0) continue;
+          if ((dxo * ddy - dyo * ddx) >= 0) needL = Math.max(needL, need);
+          else needR = Math.max(needR, need);
         }
-        bend = Math.max(0, Math.min(85, worst * 1.5));
+        if (needL || needR) {
+          const s = needL >= needR ? -1 : 1; // гнём от более мешающей стороны
+          bend = Math.min(90, (s === -1 ? needL : needR) * 1.5);
+          const ln = Math.sqrt(len2);
+          nxv = (-ddy / ln) * s; nyv = (ddx / ln) * s;
+        }
       }
       const qcx = (x1 + x2) / 2 + nxv * bend * 2;
       const qcy = (y1 + y2) / 2 + nyv * bend * 2;
