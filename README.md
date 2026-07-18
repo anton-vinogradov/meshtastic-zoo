@@ -60,8 +60,10 @@ Clicking opens the details panel:
 
 - SNR labels sit right on their own lines — you can't mix up whose
   number it is.
-- Lines try to go around other tokens with an arc; the endpoints stay
-  put, so the honesty of distances doesn't suffer.
+- Legs try to route around other tokens — bending into an arc and, if
+  that isn't enough, attaching at a different edge of the card. Node
+  positions never move, so distances stay honest; only the attachment
+  points do.
 - There are always two arrows between your own nodes. If one direction
   hasn't been caught for a while it is drawn as a grey "no data":
   a one-way link is a suspicious link, and the map pushes such a pair

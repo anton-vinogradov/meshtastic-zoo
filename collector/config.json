@@ -10,7 +10,7 @@
     "10.77.77."
   ],
   "worldMaxAgeH": 6,
-  "cacheMaxAgeH": 24,
+  "cacheMaxAgeH": 6,
   "topoEveryS": 30,
   "rescanS": 60,
   "worldTopN": 0,

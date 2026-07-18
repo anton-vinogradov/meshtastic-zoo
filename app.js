@@ -159,10 +159,18 @@
     const fmtAgo = (ts) => { const a = fmtAge(ts); return a === t("justNow") ? a : t("ago", a); };
 
     // Изображения девайсов (официальные рендеры из Meshtastic web-flasher)
+    // Порядок важен: специфичные модели — до общих
     const HW_IMG = [
       [/1_WATT/, "tbeam-1w.svg"], [/S3_CORE/, "tbeam-s3-core.svg"],
-      [/CARDPUTER/, "m5stack_cardputer.svg"], [/HELTEC_V3/, "heltec-v3.svg"],
-      [/HELTEC/, "heltec_v4.svg"], [/RAK/, "rak4631.svg"], [/BEAM/, "tbeam.svg"],
+      [/CARDPUTER/, "m5stack_cardputer.svg"], [/C6L/, "m5_c6l.svg"],
+      [/T_?DECK/, "t-deck.svg"], [/T_?ECHO/, "t-echo.svg"],
+      [/PROMICRO/, "promicro.svg"],
+      [/MESH_POCKET/, "heltec_mesh_pocket.svg"], [/T114/, "heltec-mesh-node-t114.svg"],
+      [/WIRELESS_PAPER|_PAPER/, "heltec-wireless-paper.svg"],
+      [/HELTEC_V3/, "heltec-v3.svg"], [/HELTEC/, "heltec_v4.svg"],
+      [/STATION_G2/, "station-g2.svg"], [/T1000/, "tracker-t1000-e.svg"],
+      [/NANO_G2/, "nano-g2-ultra.svg"], [/XIAO/, "seeed-xiao-s3.svg"],
+      [/RAK/, "rak4631.svg"], [/BEAM/, "tbeam.svg"], [/DIY/, "diy.svg"],
     ];
     const hwImg = (hw) => {
       const h = String(hw || "").toUpperCase();
@@ -246,6 +254,57 @@
       }
     }
 
+    // --- Маршрутизация плеч с обходом чужих карточек ---
+    // penAt: глубина проникновения точки в чужую карточку; segPen/curvePen —
+    // сумма по семплам вдоль прямой/дуги; bestArc — лучшая дуга (сторона+изгиб)
+    const PADX = 10, PADY = 8;
+    const rects = Object.values(nodes).map(o => ({
+      id: o.id, x0: o.cx - o.w / 2 - PADX, x1: o.cx + o.w / 2 + PADX,
+      y0: o.cy - o.h / 2 - PADY, y1: o.cy + o.h / 2 + PADY,
+    }));
+    const penAt = (x, y, exF, exT) => {
+      let s = 0;
+      for (const r of rects) {
+        if (r.id === exF || r.id === exT) continue;
+        if (x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1)
+          s += Math.min(x - r.x0, r.x1 - x, y - r.y0, r.y1 - y);
+      }
+      return s;
+    };
+    const segPen = (ax, ay, bx, by, exF, exT, N = 16) => {
+      let s = 0;
+      for (let i = 1; i < N; i++) { const tt = i / N; s += penAt(ax + (bx - ax) * tt, ay + (by - ay) * tt, exF, exT); }
+      return s;
+    };
+    const curvePen = (ax, ay, cx, cy, bx, by, exF, exT, N = 20) => {
+      let s = 0;
+      for (let i = 1; i < N; i++) {
+        const tt = i / N, mt = 1 - tt;
+        s += penAt(mt * mt * ax + 2 * mt * tt * cx + tt * tt * bx,
+          mt * mt * ay + 2 * mt * tt * cy + tt * tt * by, exF, exT);
+      }
+      return s;
+    };
+    const portCands = (n, near) => {
+      const hw = n.w / 2, hh = n.h / 2;
+      const all = [near, [n.cx, n.cy - hh], [n.cx, n.cy + hh], [n.cx - hw, n.cy], [n.cx + hw, n.cy]];
+      const uniq = [];
+      for (const p of all)
+        if (!uniq.some(q => Math.abs(q[0] - p[0]) < 6 && Math.abs(q[1] - p[1]) < 6)) uniq.push(p);
+      return uniq;
+    };
+    const bestArc = (ax, ay, bx, by, exF, exT, base) => {
+      const ddx = bx - ax, ddy = by - ay, ln = Math.hypot(ddx, ddy) || 1;
+      let bp = base, bb = 0, bs = 0;
+      for (const sgn of [1, -1]) for (const bnd of [24, 46, 74, 108]) {
+        const cx = (ax + bx) / 2 + (-ddy / ln) * sgn * bnd * 2;
+        const cy = (ay + by) / 2 + (ddx / ln) * sgn * bnd * 2;
+        const p = curvePen(ax, ay, cx, cy, bx, by, exF, exT);
+        if (p < bp - 0.5) { bp = p; bb = bnd; bs = sgn; }
+      }
+      return { bend: bb, sgn: bs, pen: bp, nx: -ddy / ln, ny: ddx / ln };
+    };
+
     for (const [li, l] of D.links.entries()) {
       const a = nodes[l.from], b = nodes[l.to];
       if (!a || !b || l.type !== "rf") continue;
@@ -267,37 +326,43 @@
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
       const dim = a.world || b.world ? " dim" : "";
       const side = pairCount[k] > 1 ? ((pairSeen[k] = (pairSeen[k] || 0) + 1) === 1 ? 1 : -1) : 0;
-      let [x1, y1] = portPt[`${li}:${l.from}`] ?? edgePoint(a, b.cx, b.cy);
-      let [x2, y2] = portPt[`${li}:${l.to}`] ?? edgePoint(b, a.cx, a.cy, 14);
+      // Маршрут: near-порты → при пересечении дуга-объезд → если и она не
+      // помогает, сменить точки старта/окончания на других гранях карточек
+      // (позиции узлов при этом неизменны — двигаются только точки крепления)
+      const exF = l.from, exT = l.to;
+      const nearA = portPt[`${li}:${l.from}`] ?? edgePoint(a, b.cx, b.cy);
+      const nearB = portPt[`${li}:${l.to}`] ?? edgePoint(b, a.cx, a.cy, 14);
+      let route = { pa: nearA, pb: nearB, bend: 0, nxv: 0, nyv: 0 };
+      const straight0 = segPen(nearA[0], nearA[1], nearB[0], nearB[1], exF, exT);
+      if (straight0 > 0) {
+        const a0 = bestArc(nearA[0], nearA[1], nearB[0], nearB[1], exF, exT, straight0);
+        let best = {
+          pa: nearA, pb: nearB, bend: a0.bend, nxv: a0.nx * a0.sgn, nyv: a0.ny * a0.sgn,
+          cost: a0.pen * 3 + a0.bend * 0.02,
+        };
+        if (a0.pen > 1) { // дуга не вычистила — перебрать другие порты
+          const candA = portCands(a, nearA), candB = portCands(b, nearB);
+          for (const pa of candA) for (const pb of candB) {
+            if (pa === nearA && pb === nearB) continue;
+            const dev = Math.hypot(pa[0] - nearA[0], pa[1] - nearA[1])
+              + Math.hypot(pb[0] - nearB[0], pb[1] - nearB[1]);
+            const st = segPen(pa[0], pa[1], pb[0], pb[1], exF, exT);
+            let bend = 0, nxv = 0, nyv = 0, pen = st;
+            if (st > 0) {
+              const ar = bestArc(pa[0], pa[1], pb[0], pb[1], exF, exT, st);
+              bend = ar.bend; nxv = ar.nx * ar.sgn; nyv = ar.ny * ar.sgn; pen = ar.pen;
+            }
+            const cost = pen * 3 + dev * 0.03 + bend * 0.02;
+            if (cost < best.cost) best = { pa, pb, bend, nxv, nyv, cost };
+          }
+        }
+        route = best;
+      }
+      let [x1, y1] = route.pa, [x2, y2] = route.pb;
       const dl = Math.hypot(x2 - x1, y2 - y1) || 1;
       const ux = (x2 - x1) / dl, uy = (y2 - y1) / dl;
       x1 += ux * 3; y1 += uy * 3; x2 -= ux * 11; y2 -= uy * 11;
-
-      // Объезд чужих карточек: концы линии на месте (честная дистанция
-      // не меняется), но сама линия гнётся дугой в ту сторону, где
-      // помех меньше — с учётом всех карточек вдоль пути
-      let bend = 0, nxv = 0, nyv = 0;
-      {
-        const ddx = x2 - x1, ddy = y2 - y1;
-        const len2 = ddx * ddx + ddy * ddy || 1;
-        let needL = 0, needR = 0;
-        for (const o of Object.values(nodes)) {
-          if (o.id === l.from || o.id === l.to) continue;
-          const tp = ((o.cx - x1) * ddx + (o.cy - y1) * ddy) / len2;
-          if (tp < 0.08 || tp > 0.92) continue;
-          const dxo = o.cx - (x1 + ddx * tp), dyo = o.cy - (y1 + ddy * tp);
-          const need = 92 - Math.hypot(dxo, dyo);
-          if (need <= 0) continue;
-          if ((dxo * ddy - dyo * ddx) >= 0) needL = Math.max(needL, need);
-          else needR = Math.max(needR, need);
-        }
-        if (needL || needR) {
-          const s = needL >= needR ? -1 : 1; // гнём от более мешающей стороны
-          bend = Math.min(90, (s === -1 ? needL : needR) * 1.5);
-          const ln = Math.sqrt(len2);
-          nxv = (-ddy / ln) * s; nyv = (ddx / ln) * s;
-        }
-      }
+      const bend = route.bend, nxv = route.nxv, nyv = route.nyv;
       const qcx = (x1 + x2) / 2 + nxv * bend * 2;
       const qcy = (y1 + y2) / 2 + nyv * bend * 2;
       const geom = bend
