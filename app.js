@@ -1772,8 +1772,15 @@
     if (!geoView || !lastLive || !initGeo()) return;
     lmap.invalidateSize();
     geoLayer.clearLayers();
+    // тумблер «бывшие соседи» действует и здесь: снят → прячем многохопы
+    // (n.hop != null) и их плечи, как на карте связности
+    const gnodes = showHops ? (lastLive.nodes || [])
+      : (lastLive.nodes || []).filter(n => n.hop == null);
+    const gdrop = new Set((lastLive.nodes || []).filter(n => n.hop != null).map(n => n.id));
+    const glinks = showHops ? (lastLive.links || [])
+      : (lastLive.links || []).filter(l => !gdrop.has(l.from) && !gdrop.has(l.to));
     const pts = [], byId = {};
-    (lastLive.nodes || []).forEach(n => byId[n.id] = n);
+    gnodes.forEach(n => byId[n.id] = n);
     const posOf = (id) => {                    // позиция ноды: своя размещённая / GPS соседа
       const g = geoCfg[id];
       if (g && g.lat != null) return [g.lat, g.lon];
@@ -1784,7 +1791,7 @@
     Object.entries(geoCfg).forEach(([id, g]) => { if (g.lat != null) coverage(g).addTo(geoLayer); });
     // RF-плечи между размещёнными нодами (неориентированные пары) с км
     const pairs = {};
-    (lastLive.links || []).forEach(l => {
+    glinks.forEach(l => {
       if (l.type !== "rf") return;
       const A = posOf(l.from), B = posOf(l.to);
       if (!A || !B) return;
@@ -1802,7 +1809,7 @@
     });
     // оценённые позиции GPS-less нод (мультилатерация по сигналу): пунктирный
     // маркер + круг неопределённости — фиолетовым, чтобы отличать от точных
-    if (geoEst) (lastLive.nodes || []).forEach(n => {
+    if (geoEst) gnodes.forEach(n => {
       if (!n.est || n.own) return;
       const p = [n.est.lat, n.est.lon];
       pts.push(p);
@@ -1814,7 +1821,7 @@
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
     // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий, с подписью
-    (lastLive.nodes || []).forEach(n => {
+    gnodes.forEach(n => {
       const i = n.info || {};
       if (n.own || i.lat == null || i.lon == null) return;
       pts.push([i.lat, i.lon]);
