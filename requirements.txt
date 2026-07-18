@@ -1,0 +1,3 @@
+# Единственная зависимость сборщика — meshtastic-python (тянет pypubsub,
+# protobuf, pyserial и пр.). Всё чтение узлов и HTTP-сервер — на нём + stdlib.
+meshtastic>=2.7,<3

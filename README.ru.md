@@ -8,14 +8,40 @@
 
 ## Запуск
 
+Быстро, посмотреть:
+
 ```sh
+pip install meshtastic
 python3 collector/hub.py
 # карта: http://localhost:8814
 ```
 
 Один процесс делает всё: держит связь с твоими нодами, слушает эфир,
 обновляет карту и отдаёт сайт. Какие подсети считать своими — списком
-в [`collector/config.json`](collector/config.json).
+в `collector/config.json`.
+
+### На сервере (systemd)
+
+Ставь на всегда-включённую машину, которая достаёт до нод (та же сеть).
+Клонируй репозиторий и запусти установщик — он сделает venv, поставит
+зависимость, при первом запуске скопирует `config.example.json` →
+`config.json` и зарегистрирует systemd-сервис `meshtastic-zoo`:
+
+```sh
+git clone <repo-url> meshtastic-zoo
+cd meshtastic-zoo
+./install.sh          # от обычного пользователя, не root; sudo вызовется сам
+```
+
+Обновление позже:
+
+```sh
+git pull && ./install.sh
+```
+
+`config.json` — свой на каждой установке (в .gitignore), так что обновления
+не затирают настройки, которые ты меняешь в панели ⚙.
+Логи: `journalctl -u meshtastic-zoo -f`.
 
 ## Что на карте
 

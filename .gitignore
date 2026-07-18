@@ -2,3 +2,7 @@
 data/live.json
 data/messages.json
 data/channel.json
+
+# рантайм-конфиг (копируется из config.example.json при установке)
+collector/config.json
+.venv/

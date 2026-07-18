@@ -8,14 +8,39 @@ by itself while the page is open.
 
 ## Running
 
+Quick, for a look:
+
 ```sh
+pip install meshtastic
 python3 collector/hub.py
 # the map: http://localhost:8814
 ```
 
 One process does it all: keeps in touch with your nodes, listens to the
 air, refreshes the map and serves the site. Which subnets count as yours
-is a list in [`collector/config.json`](collector/config.json).
+is a list in `collector/config.json`.
+
+### On a server (systemd)
+
+Put it on an always-on box that can reach your nodes (same LAN). Clone the
+repo and run the installer — it makes a venv, installs the dependency,
+copies `config.example.json` → `config.json` on first run, and registers a
+`meshtastic-zoo` systemd service:
+
+```sh
+git clone <repo-url> meshtastic-zoo
+cd meshtastic-zoo
+./install.sh          # run as your user, not root; it sudo's for systemd
+```
+
+To update later:
+
+```sh
+git pull && ./install.sh
+```
+
+`config.json` is per-install (git-ignored), so updates never clobber the
+settings you change from the ⚙ panel. Logs: `journalctl -u meshtastic-zoo -f`.
 
 ## What's on the map
 
