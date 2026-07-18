@@ -1519,7 +1519,11 @@
   if (localStorage.getItem("mzChanOpen") !== "1") document.body.classList.add("chan-collapsed");
   document.getElementById("chtab").onclick = () => setChan(true);
   document.addEventListener("click", (e) => {
-    if (!e.target.closest("#panel") && !e.target.closest(".node")) {
+    // клик вне панели/ноды закрывает панель — НО клик по гео-маркеру или его
+    // подписи (.leaflet-interactive) её как раз открывает: не считать «снаружи»,
+    // иначе тот же всплывающий клик мгновенно закрыл бы только что открытую панель
+    if (!e.target.closest("#panel") && !e.target.closest(".node")
+        && !e.target.closest(".leaflet-interactive")) {
       document.getElementById("panel").classList.remove("open");
       openId = null;
       applySel();
@@ -1802,7 +1806,7 @@
       const u = n.est.unc < 1 ? `${Math.round(n.est.unc * 1000)} m` : `${n.est.unc.toFixed(1)} km`;
       L.circleMarker(p, { radius: 6, color: "#b98bff", weight: 2, fillColor: "#0b0b0d", fillOpacity: 0.55, dashArray: "3 3" })
         .bindTooltip(`${esc(String((byId[n.id] || {}).label || n.id))} <span class="gl-sub">~${u}</span>`,
-          { permanent: true, direction: "bottom", className: "geo-lbl est", offset: [0, 2] })
+          { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl est", offset: [0, 2] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
     // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий, с подписью
@@ -1811,14 +1815,14 @@
       if (n.own || i.lat == null || i.lon == null) return;
       pts.push([i.lat, i.lon]);
       L.circleMarker([i.lat, i.lon], { radius: 7, color: "#0b0b0d", weight: 1.5, fillColor: "#e0a03c", fillOpacity: 0.95 })
-        .bindTooltip(esc(String(n.label || n.id)), { permanent: true, direction: "bottom", className: "geo-lbl", offset: [0, 3] })
+        .bindTooltip(esc(String(n.label || n.id)), { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl", offset: [0, 3] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
     Object.entries(geoCfg).forEach(([id, g]) => {
       if (g.lat == null) return;
       pts.push([g.lat, g.lon]);
       L.circleMarker([g.lat, g.lon], { radius: 9, color: "#0b0b0d", weight: 2, fillColor: "#6ea8ff", fillOpacity: 0.98 })
-        .bindTooltip(esc(String((byId[id] || {}).label || id)), { permanent: true, direction: "bottom", className: "geo-lbl own", offset: [0, 4] })
+        .bindTooltip(esc(String((byId[id] || {}).label || id)), { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl own", offset: [0, 4] })
         .on("click", () => openPanel(id, true)).addTo(geoLayer);
     });
     // вписываем ТОЛЬКО один раз при входе в гео-режим — иначе простановка ноды,
