@@ -272,7 +272,7 @@ def estimate_positions(nodes, links, geo):
         if nid in gps or nid in anchors or node.get("own"):
             continue
         hs = heard.get(nid, [])
-        if len(hs) < 3:
+        if len(hs) < 2:              # <2 якорей — точку не поставить (только «кольцо»)
             continue
         pts = [((anchors[a][1] - clon) * kmlon, (anchors[a][0] - clat) * kmlat,
                 snr_km(s), max(0.1, s + 21.0)) for a, s in hs]
@@ -290,6 +290,8 @@ def estimate_positions(nodes, links, geo):
             y -= 0.08 * gy / W
         res = math.sqrt(sum(w * (math.hypot(x - px, y - py) - r_) ** 2
                             for px, py, r_, w in pts) / W)
+        if len(hs) < 3:              # 2 якоря: геометрия неоднозначна — честно раздуваем
+            res = max(res, 0.6 * sum(p[2] for p in pts) / len(pts))
         node["est"] = dict(lat=round(clat + y / kmlat, 6), lon=round(clon + x / kmlon, 6),
                            unc=round(res, 2), by=len(hs))
 
