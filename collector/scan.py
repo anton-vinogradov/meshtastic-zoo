@@ -311,7 +311,7 @@ def build(found, prev=None):
         if info:
             node["info"] = info
         if nid in CFG.get("mobile", []):
-            node.update(mobile=True, hint="кочующая нода, IP меняется")
+            node.update(mobile=True, hint="roaming node, IP changes")
         nodes.append(node)
     for c in world:
         label = c.get("long") or c["short"]

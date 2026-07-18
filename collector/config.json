@@ -11,8 +11,8 @@
   ],
   "worldMaxAgeH": 6,
   "cacheMaxAgeH": 24,
-  "topoEveryS": 60,
-  "rescanS": 300,
+  "topoEveryS": 30,
+  "rescanS": 60,
   "worldTopN": 0,
   "snrScale": {
     "floor": -20,

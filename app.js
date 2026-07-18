@@ -93,10 +93,10 @@
     const fmtSnr = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
     const fmtAge = (ts) => {
       const s = Math.max(0, Date.now() / 1e3 - ts);
-      return s < 90 ? "только что" : s < 3600 ? Math.round(s / 60) + " мин"
-        : s < 86400 ? Math.round(s / 3600) + " ч" : Math.round(s / 86400) + " дн";
+      return s < 90 ? "just now" : s < 3600 ? Math.round(s / 60) + " min"
+        : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " d";
     };
-    const fmtAgo = (ts) => { const a = fmtAge(ts); return a === "только что" ? a : a + " назад"; };
+    const fmtAgo = (ts) => { const a = fmtAge(ts); return a === "just now" ? a : a + " ago"; };
 
     // Изображения девайсов (официальные рендеры из Meshtastic web-flasher)
     const HW_IMG = [
@@ -198,11 +198,11 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      const label = l.snr == null ? (l.note || "нет данных") : fmtSnr(l.snr);
+      const label = l.snr == null ? (l.note || "no data") : fmtSnr(l.snr);
       const tip = (l.snr == null
-        ? `${l.from} → ${l.to}: нет данных — ${lbl2(l.to)} не слышала ${lbl2(l.from)} напрямую (ни в скане, ни в кэше)`
-        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% от идеала`)
-        + (l.heard ? ` · слышно ${fmtAgo(l.heard)}` : "");
+        ? `${l.from} → ${l.to}: no data — ${lbl2(l.to)} has not heard ${lbl2(l.from)} directly (neither in a scan nor in cache)`
+        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% of ideal`)
+        + (l.heard ? ` · heard ${fmtAgo(l.heard)}` : "");
 
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
       const dim = a.world || b.world ? " dim" : "";
@@ -306,14 +306,14 @@
 
     document.getElementById("map").innerHTML =
       `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img"
-        aria-label="Карта mesh-сети"><defs>${rfMarkers.join("")}
+        aria-label="Mesh network map"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="40" height="40" rx="7"/></clipPath></defs>${out.join("\n")}</svg>`;
 
     // Панель подробностей ноды (по клику)
     const panel = document.getElementById("panel");
     const fmtUp = (s) => {
       const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
-      return (d ? d + " д " : "") + (h ? h + " ч " : "") + m + " м";
+      return (d ? d + " d " : "") + (h ? h + " h " : "") + m + " m";
     };
     const lbl = (id) => (nodes[id] || { label: id }).label;
     async function markRead(ids) {
@@ -337,16 +337,16 @@
       const i = n.info || {};
       const rows = [
         ["ID", n.id],
-        ["Позывной", n.short && n.short !== n.label ? n.short : null],
+        ["Callsign", n.short && n.short !== n.label ? n.short : null],
         ["IP", n.sub !== n.id ? n.sub : null],
-        ["Модель", n.hw],
-        ["Роль", i.role],
-        ["Батарея", i.battery == null ? null : i.battery > 100 ? "питание от сети" : i.battery + " %"],
-        ["Напряжение", i.voltage == null ? null : i.voltage.toFixed(2) + " В"],
-        ["Аптайм", i.uptime == null ? null : fmtUp(i.uptime)],
-        ["Эфир занят", i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
-        ["Свой TX", i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
-        ["Видели", n.online ? "онлайн (отвечает по TCP)" : n.heard ? fmtAgo(n.heard) : "—"],
+        ["Model", n.hw],
+        ["Role", i.role],
+        ["Battery", i.battery == null ? null : i.battery > 100 ? "wall power" : i.battery + " %"],
+        ["Voltage", i.voltage == null ? null : i.voltage.toFixed(2) + " V"],
+        ["Uptime", i.uptime == null ? null : fmtUp(i.uptime)],
+        ["Channel util", i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
+        ["Own TX", i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
+        ["Last seen", n.online ? "online (answers over TCP)" : n.heard ? fmtAgo(n.heard) : "—"],
       ].filter(([, v]) => v != null);
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
@@ -364,16 +364,16 @@
       const singles = rel.filter(r => !(r.in && r.out)).sort((a, b) => bestQ(b) - bestQ(a));
       const legLine = (l, who) => {
         const col = colorOf(l);
-        const val = l.snr == null ? "нет данных" : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
+        const val = l.snr == null ? "no data" : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
         return `<div class="leg"><span class="dot" style="background:${col}"></span>
           <span class="who">${who}</span><span style="color:${col}">${val}</span>
           ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}</div>`;
       };
       const legs =
-        (pairsL.length ? `<div class="psub">двусторонние</div>` : "") +
+        (pairsL.length ? `<div class="psub">two-way</div>` : "") +
         pairsL.map(r => `<div class="pair"><div class="pwho">⇄ ${esc(lbl(r.other))}</div>
           ${legLine(r.out, "→")}${legLine(r.in, "←")}</div>`).join("") +
-        (singles.length ? `<div class="psub">одиночные</div>` : "") +
+        (singles.length ? `<div class="psub">one-way</div>` : "") +
         `<div class="singles">${singles.map(r =>
           legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(lbl(r.other)))).join("")}</div>`;
       // История переписки этой ноды, хронологически. Дедуп: у сообщения
@@ -386,10 +386,10 @@
         : (isOwn ? m.node === id : m.frm === id))
         .sort((a, b) => a.ts - b.ts).slice(-40);
       const STATUS = {
-        sent: ["⏳", "в эфире", "var(--muted)"],
-        delivered: ["✓", "доставлено", "#35c98e"],
-        failed: ["✗", "ошибка", "#e05656"],
-        noack: ["⚠", "без квитанции", "#e0a03c"],
+        sent: ["⏳", "on air", "var(--muted)"],
+        delivered: ["✓", "delivered", "#35c98e"],
+        failed: ["✗", "error", "#e05656"],
+        noack: ["⚠", "no ack", "#e0a03c"],
       };
       const rowHtml = (m) => {
         const bySelf = m.frm === id;
@@ -405,13 +405,13 @@
           <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
           <div class="mtext">${esc(m.text)}</div>
           ${canRead ? `<div class="mact" data-mid="${esc(m.id)}" data-from="${esc(m.node)}" data-to="${esc(m.frm)}">
-            <input class="reply" placeholder="ответить…">
-            <button class="msend" title="ответить с ${esc(lbl(m.node))}">➤</button>
-            <button class="mok" title="пометить прочитанным">✓</button></div>` : ""}
+            <input class="reply" placeholder="reply…">
+            <button class="msend" title="reply from ${esc(lbl(m.node))}">➤</button>
+            <button class="mok" title="mark as read">✓</button></div>` : ""}
         </div>`;
       };
       const msgHtml = thread.length
-        ? `<div class="pmsgs"><b>Переписка</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
+        ? `<div class="pmsgs"><b>Conversation</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
         : "";
 
       // «Написать»: этой ноде — от лица любой своей онлайн-ноды
@@ -429,24 +429,27 @@
       const owners = Object.values(nodes)
         .filter(v => v.own && v.online && v.id !== id)
         .sort((a2, b2) => qTo(b2.id) - qTo(a2.id));
-      const composeHtml = owners.length ? `<div class="pcompose"><b>Написать</b>
+      const composeHtml = owners.length ? `<div class="pcompose"><b>Compose</b>
         <div class="crow">
-          <select class="cfrom" title="от лица какой ноды">${owners.map(o =>
+          <select class="cfrom" title="send from which node">${owners.map(o =>
             `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>
-          <input class="reply cmsg" placeholder="сообщение…">
-          <button class="csend" title="отправить">➤</button>
+          <input class="reply cmsg" placeholder="message…">
+          <button class="csend" title="send">➤</button>
         </div></div>` : "";
 
       panel.innerHTML = `
-        <button id="pclose" aria-label="закрыть">×</button>
+        <button id="pclose" aria-label="close">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
           <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v]) => `<div class="prow"><span>${k}</span><span>${esc(String(v))}</span></div>`).join("")}
         ${msgHtml}
         ${composeHtml}
-        ${legs ? `<div class="plegs"><b>Плечи</b>${legs}</div>` : ""}`;
+        ${legs ? `<div class="plegs"><b>Legs</b>${legs}</div>` : ""}`;
       panel.classList.add("open");
+      // переписка прокручивается к последнему сообщению
+      const th = panel.querySelector(".thread");
+      if (th) th.scrollTop = th.scrollHeight;
       panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; };
       // после действия — обновить msgs и перерисовать (в т.ч. маркеры почты)
       const afterAction = async () => { await refreshMsgs(); forcePanel = true; render(lastLive); };
@@ -457,7 +460,7 @@
           const text = inp.value.trim();
           if (!text) { inp.focus(); return; }
           row.querySelector(".msend").disabled = true;
-          let res = { ok: false, error: "hub недоступен" };
+          let res = { ok: false, error: "hub unavailable" };
           try {
             res = await (await fetch("/api/send", {
               method: "POST", body: JSON.stringify({ node: from, to, text }),
@@ -466,7 +469,7 @@
           if (res.ok) { await markRead([mid]); await afterAction(); }
           else {
             row.querySelector(".msend").disabled = false;
-            alert("Не отправилось: " + (res.error || "?"));
+            alert("Failed to send: " + (res.error || "?"));
           }
         };
         row.querySelector(".mok").onclick = async () => {
@@ -481,7 +484,7 @@
           if (!text) { inp.focus(); return; }
           const btn = cw.querySelector(".csend");
           btn.disabled = true;
-          let res = { ok: false, error: "hub недоступен" };
+          let res = { ok: false, error: "hub unavailable" };
           try {
             res = await (await fetch("/api/send", {
               method: "POST",
@@ -490,7 +493,7 @@
           } catch { }
           btn.disabled = false;
           if (res.ok) { inp.value = ""; await afterAction(); }
-          else alert("Не отправилось: " + (res.error || "?"));
+          else alert("Failed to send: " + (res.error || "?"));
         };
       }
     }
@@ -521,17 +524,17 @@
     const stale = D.meta.updatedTs && Date.now() - D.meta.updatedTs > 15 * 60e3;
     document.getElementById("legend").innerHTML = `
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
-        100% от идеала (SNR ${fmtSnr(S.floor)}…${fmtSnr(S.ideal)} dB)</span>
-      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>нет данных об SNR</span>
-      <span class="item">скан · ${esc(D.meta.updated)}
-        ${stale ? '<b style="color:#e0a03c">· устарело!</b>' : ""}</span>`;
+        100% of ideal (SNR ${fmtSnr(S.floor)}…${fmtSnr(S.ideal)} dB)</span>
+      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>no SNR data</span>
+      <span class="item">scan · ${esc(D.meta.updated)}
+        ${stale ? '<b style="color:#e0a03c">· stale!</b>' : ""}</span>`;
 
     // Общий маркер непрочитанной почты
     const mailEl = document.getElementById("mail");
     if (unreadTotal) {
       mailEl.hidden = false;
       mailEl.textContent = `✉ ${unreadTotal}`;
-      mailEl.title = "непрочитанные личные сообщения — клик откроет ноду";
+      mailEl.title = "unread direct messages — click to open the node";
       mailEl.onclick = () => {
         const nid = Object.keys(unread).find(k => nodes[k]);
         if (nid) showPanel(nid, true);
@@ -577,15 +580,15 @@
 
   // ---- Настройки (⚙): читаются и сохраняются через hub ----
   const SET_FIELDS = [
-    ["subnets", "Подсети площадок (по одной на строку)", "area"],
-    ["snrScale.floor", "0% качества при SNR, дБ", "num"],
-    ["snrScale.ideal", "100% качества при SNR, дБ", "num"],
-    ["worldMaxAgeH", "Держать молчащего соседа, часов", "num"],
-    ["cacheMaxAgeH", "Помнить плечи в кэше, часов", "num"],
-    ["topoEveryS", "Обновление карты, секунд", "num"],
-    ["rescanS", "Поиск новых нод, секунд", "num"],
-    ["mobile", "Кочующие ноды (id, по одному)", "area"],
-    ["fragile", "Хрупкие подсети (префикс, по одному)", "area"],
+    ["subnets", "Site subnets (one per line)", "area"],
+    ["snrScale.floor", "0% quality at SNR, dB", "num"],
+    ["snrScale.ideal", "100% quality at SNR, dB", "num"],
+    ["worldMaxAgeH", "Keep a silent neighbor, hours", "num"],
+    ["cacheMaxAgeH", "Remember legs in cache, hours", "num"],
+    ["topoEveryS", "Map refresh, seconds", "num"],
+    ["rescanS", "New-node discovery, seconds", "num"],
+    ["mobile", "Roaming nodes (id, one per line)", "area"],
+    ["fragile", "Fragile subnets (prefix, one per line)", "area"],
   ];
   const setEl = document.getElementById("settings");
   const sfId = (k) => "sf-" + k.replace(".", "-");
@@ -595,24 +598,24 @@
     try {
       cfg = await (await fetch("/api/config", { cache: "no-store" })).json();
     } catch {
-      setEl.innerHTML = "<b class='stitle'>Настройки</b><div class='shint'>hub недоступен</div>";
+      setEl.innerHTML = "<b class='stitle'>Settings</b><div class='shint'>hub unavailable</div>";
       setEl.classList.add("open");
       return;
     }
     const val = (k) => k.includes(".")
       ? (cfg[k.split(".")[0]] || {})[k.split(".")[1]]
       : cfg[k];
-    setEl.innerHTML = `<button id="sclose" aria-label="закрыть">×</button>
-      <b class="stitle">Настройки</b>` +
+    setEl.innerHTML = `<button id="sclose" aria-label="close">×</button>
+      <b class="stitle">Settings</b>` +
       SET_FIELDS.map(([k, label, kind]) => kind === "area"
         ? `<label class="srow"><span>${label}</span>
             <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
         : `<label class="srow"><span>${label}</span>
             <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
       ).join("") +
-      `<button id="ssave">Сохранить</button>
-       <div class="shint">хранится в collector/config.json;
-         карта подхватит при следующем обновлении (до минуты)</div>`;
+      `<button id="ssave">Save</button>
+       <div class="shint">stored in collector/config.json;
+         the map picks it up on the next refresh (within a minute)</div>`;
     setEl.classList.add("open");
     document.getElementById("panel").classList.remove("open");
     openId = null;
@@ -632,7 +635,7 @@
       };
       const btn = setEl.querySelector("#ssave");
       btn.disabled = true;
-      let res = { ok: false, error: "hub недоступен" };
+      let res = { ok: false, error: "hub unavailable" };
       try {
         res = await (await fetch("/api/config", {
           method: "POST", body: JSON.stringify(body),
@@ -640,10 +643,10 @@
       } catch { }
       btn.disabled = false;
       if (res.ok) {
-        btn.textContent = "✓ сохранено";
-        setTimeout(() => { btn.textContent = "Сохранить"; }, 1800);
+        btn.textContent = "✓ saved";
+        setTimeout(() => { btn.textContent = "Save"; }, 1800);
       } else {
-        alert("Не сохранилось: " + (res.error || "?"));
+        alert("Failed to save: " + (res.error || "?"));
       }
     };
   }
@@ -658,7 +661,7 @@
       if (lastStamp !== "empty") {
         lastStamp = "empty";
         document.getElementById("map").innerHTML =
-          '<p class="empty">Данных пока нет — запусти <code>python3 collector/hub.py</code></p>';
+          '<p class="empty">No data yet — run <code>python3 collector/hub.py</code></p>';
         document.getElementById("legend").innerHTML = "";
       }
       return;
