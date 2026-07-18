@@ -12,6 +12,7 @@
   // Язык интерфейса выбирается в настройках, хранится локально
   let lang = localStorage.getItem("mzLang") || "en";
   let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
+  let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
 
   // Лимит текста Meshtastic (payload ~200 байт), Enter-отправка, авто-обрезка.
   const MAX_MSG_BYTES = 200;
@@ -95,6 +96,7 @@
       geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
       antOmni: "omni", antDir: "directional", antAzim: "az",
       geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
+      geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -148,6 +150,7 @@
       geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
       antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
       geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
+      geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -281,16 +284,48 @@
       }
       const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
       const target = W >= H ? 0 : Math.PI / 2;
-      const cands = [];
-      for (const k of [0, 1]) for (const m of [1, -1]) {
-        const rot = target - theta + k * Math.PI;
-        const c = Math.cos(rot), s = Math.sin(rot);
-        cands.push(pts.map(([x, y]) =>
-          [(x - mx) * m * c - (y - my) * s, (x - mx) * m * s + (y - my) * c]));
+      // Ориентация по географии (Фаза 5): если ≥2 своих размещены на гео-карте,
+      // поворачиваем/отражаем раскладку так, чтобы ВЗАИМНОЕ расположение своих
+      // совпало с реальным (север сверху). Дистанции честные (по SNR) — Прокруст
+      // меняет только ориентацию. Иначе — прежний PCA-выбор из 4 кандидатов.
+      let P = null;
+      if (geoOrient) {
+        const own = D.nodes.filter(n => n.own && geoCfg[n.id] && geoCfg[n.id].lat != null);
+        if (own.length >= 2) {
+          const la0 = own.reduce((s, n) => s + geoCfg[n.id].lat, 0) / own.length;
+          const kmlat = 111.32, kmlon = 111.32 * Math.cos(la0 * Math.PI / 180);
+          const q = own.map(n => [geoCfg[n.id].lon * kmlon, -geoCfg[n.id].lat * kmlat]);
+          const qmx = q.reduce((s, p) => s + p[0], 0) / q.length;
+          const qmy = q.reduce((s, p) => s + p[1], 0) / q.length;
+          let best = null;
+          for (const m of [1, -1]) {   // без отражения / с отражением
+            let a = 0, b = 0;
+            own.forEach((n, i) => {
+              const pxr = (n.x - mx) * m, pyr = n.y - my;
+              const qx = q[i][0] - qmx, qy = q[i][1] - qmy;
+              a += pxr * qx + pyr * qy;
+              b += pxr * qy - pyr * qx;
+            });
+            const score = Math.hypot(a, b);  // максимум Σ q·R(p) по углу
+            if (!best || score > best.score) best = { m, rot: Math.atan2(b, a), score };
+          }
+          const c = Math.cos(best.rot), s = Math.sin(best.rot);
+          P = pts.map(([x, y]) =>
+            [(x - mx) * best.m * c - (y - my) * s, (x - mx) * best.m * s + (y - my) * c]);
+        }
       }
-      const fi = ids.indexOf([...ids].sort()[0]);
-      cands.sort((A, B) => (A[fi][1] - B[fi][1]) || (A[fi][0] - B[fi][0]));
-      const P = cands[0];
+      if (!P) {
+        const cands = [];
+        for (const k of [0, 1]) for (const m of [1, -1]) {
+          const rot = target - theta + k * Math.PI;
+          const c = Math.cos(rot), s = Math.sin(rot);
+          cands.push(pts.map(([x, y]) =>
+            [(x - mx) * m * c - (y - my) * s, (x - mx) * m * s + (y - my) * c]));
+        }
+        const fi = ids.indexOf([...ids].sort()[0]);
+        cands.sort((A, B) => (A[fi][1] - B[fi][1]) || (A[fi][0] - B[fi][0]));
+        P = cands[0];
+      }
       const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
       const spanX = (Math.max(...xs) - Math.min(...xs)) || 1e-6;
       const spanY = (Math.max(...ys) - Math.min(...ys)) || 1e-6;
@@ -1080,6 +1115,8 @@
       <label class="item toggle" title="${esc(t("showHopsTip"))}">
         <input type="checkbox" id="hopToggle" ${showHops ? "checked" : ""}>
         <span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</label>
+      <label class="item toggle" title="${esc(t("geoOrientTip"))}">
+        <input type="checkbox" id="geoOrientToggle" ${geoOrient ? "checked" : ""}>🧭 ${t("geoOrientLbl")}</label>
       <span class="item">${t("nodeCount", D.nodes.length,
         D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
       <span class="item">${t("scan")} · ${esc(D.meta.updated)}
@@ -1338,9 +1375,13 @@
   new ResizeObserver(refit).observe(document.getElementById("map"));
   // Галочка «многохопы» в легенде: делегируем на #legend (он пересобирается)
   document.getElementById("legend").addEventListener("change", (e) => {
-    if (e.target.id !== "hopToggle") return;
-    showHops = e.target.checked;
-    localStorage.setItem("mzShowHops", showHops ? "1" : "0");
+    if (e.target.id === "hopToggle") {
+      showHops = e.target.checked;
+      localStorage.setItem("mzShowHops", showHops ? "1" : "0");
+    } else if (e.target.id === "geoOrientToggle") {
+      geoOrient = e.target.checked;
+      localStorage.setItem("mzGeoOrient", geoOrient ? "1" : "0");
+    } else return;
     if (lastLive) render(lastLive);
   });
   // Ширина панели канала: применяем сохранённую + тянем за правый край
@@ -1540,6 +1581,7 @@
       if (r.geo) geoCfg = r.geo;
     } catch { }
     renderGeo();
+    if (lastLive) render(lastLive);  // связность тоже зависит от гео (ориентация)
   }
   // точка на дистанции dist(м) по азимуту brg(°) от (lat,lon) — для секторов
   function dest(lat, lon, brg, dist) {
@@ -1745,6 +1787,8 @@
 
   tick();
   refreshChan();
+  // геопривязки нужны и карте связности (ориентация по географии) — грузим сразу
+  loadGeoCfg().then(() => { if (lastLive) render(lastLive); });
   fetchLatestFw();
   setInterval(fetchLatestFw, 6 * 3600e3);  // раз в 6ч сверять актуальную прошивку
   setInterval(tick, 60e3);
