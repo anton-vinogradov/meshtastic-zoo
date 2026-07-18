@@ -1210,6 +1210,12 @@
     const prevIn = el.querySelector(".chmsg-in");
     const foc = prevIn && document.activeElement === prevIn;
     const caret = foc ? [prevIn.selectionStart, prevIn.selectionEnd] : null;
+    // позиция скролла ленты: если смотрим историю (пролистали вверх) — сохраняем;
+    // если были внизу — следуем за новыми (не дёргаем вниз при каждой перерисовке)
+    const prevFeed = el.querySelector(".chfeed");
+    const feedAtBottom = !prevFeed
+      || prevFeed.scrollHeight - prevFeed.scrollTop - prevFeed.clientHeight < 40;
+    const feedScroll = prevFeed ? prevFeed.scrollTop : 0;
     const nodesById = {};
     (lastLive && lastLive.nodes || []).forEach(n => nodesById[n.id] = n);
     // «реплай мне»: сообщение с цитатой на broadcast МОЕЙ ноды, а автор — не я
@@ -1261,7 +1267,7 @@
       if (foc) { inp0.focus(); try { inp0.setSelectionRange(caret[0], caret[1]); } catch { } }
     }
     const feedEl = el.querySelector(".chfeed");
-    if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
+    if (feedEl) feedEl.scrollTop = feedAtBottom ? feedEl.scrollHeight : feedScroll;
     el.querySelector("#chclose").onclick = () => setChan(false);
     el.querySelector(".rcancel")?.addEventListener("click", () => { replyChan = null; renderChannel(); });
     wireMsgActions(el, {
