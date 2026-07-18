@@ -68,6 +68,10 @@ tell which card a link goes to. The panel shows:
   back" pairs, one-way ones separately, everything sorted by quality
   with the age of each measurement.
 
+Every message (in DMs and the channel) can be **reacted to** (tapback
+emoji — ＋ opens a picker) and **replied to with a quote** (↩). Incoming
+reactions and quoted replies from the mesh are shown the same way.
+
 ## Public channel
 
 A collapsible panel on the left (the 💬 tab) shows the **public channel**

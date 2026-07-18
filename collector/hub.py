@@ -149,6 +149,21 @@ def on_receive(packet=None, interface=None):
         frm = f"!{frm_num:08x}" if isinstance(frm_num, int) else str(frm_num)
         u = ((dict(interface.nodes or {}).get(frm) or {}).get("user") or {})
         frm_name = u.get("longName") or u.get("shortName") or frm
+        text = dec.get("text") or ""
+        reply_id = dec.get("replyId") or dec.get("reply_id")
+
+        # РЕАКЦИЯ (тапбэк): emoji=1 + reply_id → привязать к целевому сообщению
+        if dec.get("emoji") and reply_id:
+            with lock:
+                tgt = find_by_pid(reply_id)
+                if tgt is not None:
+                    who = tgt.setdefault("reactions", {}).setdefault(text, [])
+                    if frm not in who:
+                        who.append(frm)
+            save_messages()
+            save_channel()
+            log(f"👍 {frm_name} {text} → pkt {reply_id}")
+            return
 
         if to in (0xFFFFFFFF, 4294967295, "^all", "!ffffffff"):
             # публичный канал (broadcast): один пакет слышат несколько наших нод —
@@ -158,20 +173,24 @@ def on_receive(packet=None, interface=None):
                 m = next((x for x in channel if pid and x.get("pid") == pid), None)
                 if m is None:
                     m = dict(id=f"ch·{pid or int(time.time() * 1000)}", pid=pid, frm=frm,
-                             frmName=frm_name, text=dec.get("text") or "",
-                             ts=int(time.time()), ch=packet.get("channel", 0), gotBy={})
+                             frmName=frm_name, text=text, ts=int(time.time()),
+                             ch=packet.get("channel", 0), gotBy={})
+                    if reply_id:
+                        m["replyTo"] = reply_id
                     channel.append(m)
                     del channel[:-300]
                 m["gotBy"][ent["id"]] = packet.get("rxSnr")
             save_channel()
-            log(f"📡 канал: {frm_name} → всем (принял {ent['id']}): {(dec.get('text') or '')[:50]!r}")
+            log(f"📡 канал: {frm_name} → всем (принял {ent['id']}): {text[:50]!r}")
             return
 
         if to != ent.get("num"):
             return  # чужой DM — не наш
-        msg = dict(id=f'{ent["id"]}·{packet.get("id")}', node=ent["id"], frm=frm,
-                   frmName=frm_name, text=dec.get("text") or "", ts=int(time.time()),
-                   snr=packet.get("rxSnr"), read=False)
+        msg = dict(id=f'{ent["id"]}·{packet.get("id")}', pid=packet.get("id"),
+                   node=ent["id"], frm=frm, frmName=frm_name, text=text,
+                   ts=int(time.time()), snr=packet.get("rxSnr"), read=False)
+        if reply_id:
+            msg["replyTo"] = reply_id
         with lock:
             if any(m["id"] == msg["id"] for m in messages):
                 return
@@ -180,6 +199,31 @@ def on_receive(packet=None, interface=None):
         log(f"✉ {msg['frmName']} → {ent['id']}: {msg['text'][:60]!r}")
     except Exception as e:
         log(f"on_receive: {e!r}")
+
+
+def find_by_pid(pid):
+    """Сообщение (личное или канал) по mesh-id пакета — для реакций/цитат."""
+    if not pid:
+        return None
+    for m in messages:
+        if m.get("pid") == pid or m.get("pktId") == pid:
+            return m
+    for m in channel:
+        if m.get("pid") == pid:
+            return m
+    return None
+
+
+def send_reaction(iface, dest, emoji_char, reply_id):
+    """Тапбэк-реакция: TEXT-пакет с emoji=1 и reply_id (в API нет — строим сами)."""
+    import meshtastic.mesh_interface as mi
+    mp = mi.mesh_pb2.MeshPacket()
+    mp.decoded.payload = emoji_char.encode("utf-8")
+    mp.decoded.portnum = mi.portnums_pb2.PortNum.TEXT_MESSAGE_APP
+    mp.decoded.reply_id = int(reply_id)
+    mp.decoded.emoji = 1
+    mp.id = iface._generatePacketId()
+    return iface._sendPacket(mp, dest, wantAck=False)
 
 
 def on_lost(interface=None):
@@ -343,12 +387,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": False,
                             "error": "нода не на связи или пустой текст"}, 400)
                 return
+            reply_id = body.get("replyId")
             try:
-                pkt = ent["iface"].sendText(text, destinationId=to, wantAck=True)
+                pkt = ent["iface"].sendText(text, destinationId=to, wantAck=True,
+                                            replyId=reply_id or None)
                 pid = getattr(pkt, "id", None)
                 out = dict(kind="out", id=f"out·{pid or int(time.time() * 1000)}",
                            pktId=pid, frm=node, to=to, text=text,
                            ts=int(time.time()), status="sent", read=True)
+                if reply_id:
+                    out["replyTo"] = reply_id
                 with lock:
                     messages.append(out)
                 save_messages()
@@ -359,6 +407,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path == "/api/channel":
             node = body.get("node")
             text = (body.get("text") or "").strip()
+            reply_id = body.get("replyId")
             with lock:
                 ent = next((c for c in conns.values()
                             if c.get("id") == node and c.get("iface")), None)
@@ -366,8 +415,36 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": False, "error": "нода не на связи или пустой текст"}, 400)
                 return
             try:
-                ent["iface"].sendText(text)  # без destinationId = broadcast
+                ent["iface"].sendText(text, replyId=reply_id or None)  # broadcast
                 log(f"📡 {node} → канал: {text[:60]!r}")
+                self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": repr(e)}, 500)
+        elif self.path == "/api/react":
+            node = body.get("node")
+            reply_id = body.get("replyId")
+            emoji = (body.get("emoji") or "").strip()
+            channel_react = bool(body.get("channel"))
+            to = body.get("to")
+            with lock:
+                ent = next((c for c in conns.values()
+                            if c.get("id") == node and c.get("iface")), None)
+            if not ent or not reply_id or not emoji:
+                self._json({"ok": False, "error": "нужны node, replyId, emoji"}, 400)
+                return
+            try:
+                dest = "^all" if channel_react else (to or "^all")
+                send_reaction(ent["iface"], dest, emoji, reply_id)
+                # оптимистично добавим свою реакцию (её эхо мы не услышим)
+                with lock:
+                    tgt = find_by_pid(reply_id)
+                    if tgt is not None:
+                        who = tgt.setdefault("reactions", {}).setdefault(emoji, [])
+                        if node not in who:
+                            who.append(node)
+                save_messages()
+                save_channel()
+                log(f"👍 {node} {emoji} → pkt {reply_id}")
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": repr(e)}, 500)

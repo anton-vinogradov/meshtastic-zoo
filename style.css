@@ -168,6 +168,41 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #panel .msg .mfoot { display: flex; gap: 6px; white-space: nowrap; }
 #panel .msg .mtext { margin: 3px 0 4px; white-space: pre-wrap; word-break: break-word; }
 #panel .msg .merr { color: #e05656; font-size: 11.5px; margin-top: 1px; overflow-wrap: anywhere; }
+
+/* Цитата, реакции, действия — общее для панели и канала */
+.quote {
+  border-left: 2px solid var(--card-stroke);
+  padding: 1px 7px;
+  margin: 2px 0 3px;
+  font-size: 11.5px;
+  color: var(--muted);
+  opacity: .9;
+  overflow-wrap: anywhere;
+}
+.quote b { color: var(--text); font-weight: 600; }
+.mact2 { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 3px; }
+.mact2 .rchip {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: rgba(255, 255, 255, .09); border-radius: 10px;
+  padding: 0 7px; font-size: 12px; cursor: pointer; line-height: 18px;
+}
+.mact2 .addreact, .mact2 .doreply {
+  background: none; border: none; color: var(--muted);
+  font-size: 13px; cursor: pointer; padding: 0 3px; line-height: 1;
+}
+.mact2 .addreact:hover, .mact2 .doreply:hover { color: var(--text); }
+.mact2 .picker { display: none; gap: 3px; }
+.mact2 .picker.open { display: inline-flex; }
+.mact2 .pemoji { cursor: pointer; font-size: 15px; padding: 0 1px; }
+.replybar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; font-size: 11.5px; color: var(--muted);
+  background: rgba(255, 255, 255, .05); border-radius: 7px;
+  padding: 3px 8px; margin-bottom: 6px; overflow: hidden;
+}
+.replybar button { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; flex: none; }
+#channel .chcompose { flex-direction: column; align-items: stretch; }
+#channel .chcompose .crow2 { display: flex; gap: 6px; }
 #panel .msg .mact { display: flex; gap: 6px; margin-top: 2px; }
 #panel .msg .reply {
   flex: 1;

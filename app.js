@@ -571,7 +571,9 @@
         const canRead = m.kind !== "out" && m.node === id && !m.read;
         return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}">
           <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
+          ${quoteHtml(m)}
           <div class="mtext">${esc(m.text)}</div>${errLine}
+          ${msgActions(m)}
           ${canRead ? `<div class="mact" data-mid="${esc(m.id)}" data-from="${esc(m.node)}" data-to="${esc(m.frm)}">
             <input class="reply" placeholder="${t("reply")}">
             <button class="msend" title="${esc(t("replyFrom", lbl(m.node)))}">➤</button>
@@ -599,8 +601,10 @@
       const owners = Object.values(nodes)
         .filter(v => v.own && v.online && v.id !== id)
         .sort((a2, b2) => (qTo(b2.id) - qTo(a2.id)) || (distTo(a2) - distTo(b2)));
+      const replyBar = replyDM ? `<div class="replybar">↩ ${esc((replyDM.text || "").slice(0, 40))}
+        <button class="rcancel">×</button></div>` : "";
       const composeHtml = owners.length ? `<div class="pcompose"><b>${t("compose")}</b>
-        <div class="crow">
+        ${replyBar}<div class="crow">
           <select class="cfrom" title="${t("sendFromWhich")}">${owners.map(o =>
             `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>
           <input class="reply cmsg" placeholder="${t("message")}">
@@ -654,6 +658,7 @@
       });
       const cw = panel.querySelector(".pcompose");
       if (cw) {
+        cw.querySelector(".rcancel")?.addEventListener("click", () => { replyDM = null; showPanel(id, true); });
         cw.querySelector(".csend").onclick = async () => {
           const inp = cw.querySelector(".cmsg");
           const text = inp.value.trim();
@@ -664,14 +669,24 @@
           try {
             res = await (await fetch("/api/send", {
               method: "POST",
-              body: JSON.stringify({ node: cw.querySelector(".cfrom").value, to: id, text }),
+              body: JSON.stringify({
+                node: cw.querySelector(".cfrom").value, to: id, text,
+                replyId: replyDM ? replyDM.pid : null,
+              }),
             })).json();
           } catch { }
           btn.disabled = false;
-          if (res.ok) { inp.value = ""; await afterAction(); }
+          if (res.ok) { inp.value = ""; replyDM = null; await afterAction(); }
           else alert(t("failedSend") + " " + (res.error || "?"));
         };
       }
+      // реакции/ответ на сообщения переписки
+      const defSender = () => (owners[0] || {}).id;
+      wireMsgActions(panel, {
+        scope: "dm", to: id, sender: defSender,
+        onReply: (pid, text) => { replyDM = { pid, text }; showPanel(id, true); panel.querySelector(".cmsg")?.focus(); },
+        refresh: () => afterAction(),
+      });
     }
 
     // Наведение/выбор ноды: подсветка соседей + затемнение остального
@@ -763,6 +778,65 @@
     return a === t("justNow") ? a : t("ago", a);
   };
   const fmtSnrM = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
+
+  // ---- Реакции и цитирование (общее для личных и канала) ----
+  const REACTS = ["👍", "❤️", "😂", "👀", "✅", "❓"];
+  let replyDM = null, replyChan = null; // {pid, text} — на что отвечаем
+  const findMsgByPid = (pid) => pid == null ? null
+    : (msgs.find(m => m.pid === pid || m.pktId === pid) || chan.find(m => m.pid === pid) || null);
+  const shortName = (id) => {
+    const n = (lastLive && lastLive.nodes || []).find(x => x.id === id);
+    return n ? (n.short || n.label) : (id || "").slice(-4);
+  };
+  const quoteHtml = (m) => {
+    if (!m.replyTo) return "";
+    const q = findMsgByPid(m.replyTo);
+    const who = q ? esc(q.frmName || shortName(q.frm) || "") : "";
+    const txt = q ? esc((q.text || "").slice(0, 70)) : "…";
+    return `<div class="quote">${who ? `<b>${who}</b> ` : ""}${txt}</div>`;
+  };
+  const reactionsHtml = (m) => {
+    const r = m.reactions || {};
+    return Object.entries(r).filter(([, w]) => w.length)
+      .map(([e, w]) => `<span class="rchip" data-emoji="${esc(e)}" title="${esc(w.map(shortName).join(", "))}">${esc(e)} ${w.length}</span>`).join("");
+  };
+  const msgActions = (m) => {
+    const pid = m.pid ?? m.pktId;
+    if (pid == null) return "";
+    return `<div class="mact2" data-pid="${pid}" data-text="${esc(m.text || "")}">
+      ${reactionsHtml(m)}
+      <span class="picker">${REACTS.map(e => `<span class="pemoji" data-emoji="${esc(e)}">${e}</span>`).join("")}</span>
+      <button class="addreact" title="reaction">＋</button>
+      <button class="doreply" title="reply">↩</button></div>`;
+  };
+  // навесить обработчики реакций/ответа в контейнере
+  function wireMsgActions(container, ctx) {
+    container.querySelectorAll(".mact2").forEach(row => {
+      const pid = +row.dataset.pid;
+      row.querySelector(".addreact")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        row.querySelector(".picker").classList.toggle("open");
+      });
+      row.querySelectorAll(".pemoji, .rchip").forEach(el =>
+        el.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await fetch("/api/react", {
+              method: "POST", body: JSON.stringify({
+                node: ctx.sender(), replyId: pid, emoji: el.dataset.emoji,
+                channel: ctx.scope === "channel", to: ctx.to || null,
+              }),
+            });
+          } catch { }
+          ctx.refresh();
+        }));
+      row.querySelector(".doreply")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        ctx.onReply(pid, row.dataset.text || "");
+      });
+    });
+  }
+
   function renderChannel() {
     const el = document.getElementById("channel");
     if (!el) return;
@@ -779,22 +853,33 @@
         }).join("");
       return `<div class="chmsg">
         <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span><span>${fmtAgoM(m.ts)}</span></div>
+        ${quoteHtml(m)}
         <div class="mtext">${esc(m.text)}</div>
         ${got ? `<div class="chgot">${esc(t("gotByLabel"))}: ${got}</div>` : ""}
+        ${msgActions(m)}
       </div>`;
     }).join("");
     const owners = (lastLive && lastLive.nodes || []).filter(n => n.own && n.online);
     const composeSel = owners.map(o => `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("");
+    const replyBar = replyChan ? `<div class="replybar">↩ ${esc((replyChan.text || "").slice(0, 40))}
+      <button class="rcancel">×</button></div>` : "";
     el.innerHTML = `
       <div class="chhead"><b>${esc(t("publicChannel"))}</b><button id="chclose" title="${esc(t("close"))}">‹</button></div>
       <div class="chfeed">${feed || `<div class="chempty">${esc(t("chNoMsg"))}</div>`}</div>
-      ${owners.length ? `<div class="chcompose">
+      ${owners.length ? `<div class="chcompose">${replyBar}<div class="crow2">
         <select class="chfrom">${composeSel}</select>
         <input class="chmsg-in" placeholder="${esc(t("message"))}">
-        <button class="chsend" title="${esc(t("send"))}">➤</button></div>` : ""}`;
+        <button class="chsend" title="${esc(t("send"))}">➤</button></div></div>` : ""}`;
     const feedEl = el.querySelector(".chfeed");
     if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
     el.querySelector("#chclose").onclick = () => setChan(false);
+    el.querySelector(".rcancel")?.addEventListener("click", () => { replyChan = null; renderChannel(); });
+    wireMsgActions(el, {
+      scope: "channel", to: null,
+      sender: () => (owners[0] || {}).id,
+      onReply: (pid, text) => { replyChan = { pid, text }; renderChannel(); el.querySelector(".chmsg-in")?.focus(); },
+      refresh: refreshChan,
+    });
     const cs = el.querySelector(".chsend");
     if (cs) cs.onclick = async () => {
       const inp = el.querySelector(".chmsg-in");
@@ -804,11 +889,14 @@
       let res = { ok: false };
       try {
         res = await (await fetch("/api/channel", {
-          method: "POST", body: JSON.stringify({ node: el.querySelector(".chfrom").value, text }),
+          method: "POST", body: JSON.stringify({
+            node: el.querySelector(".chfrom").value, text,
+            replyId: replyChan ? replyChan.pid : null,
+          }),
         })).json();
       } catch { }
       cs.disabled = false;
-      if (res.ok) { inp.value = ""; await refreshChan(); }
+      if (res.ok) { inp.value = ""; replyChan = null; await refreshChan(); }
       else alert(t("failedSend") + " " + (res.error || "?"));
     };
   }
