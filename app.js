@@ -1526,7 +1526,7 @@
 
   // ---- Гео-карта (Фаза 3): реальные GPS-позиции на OSM (Leaflet вендорён локально) ----
   let geoView = localStorage.getItem("mzGeoView") === "1";
-  let lmap = null, geoLayer = null, geoCfg = {}, placing = null;
+  let lmap = null, geoLayer = null, geoCfg = {}, placing = null, geoFitted = false;
   const GEO_R = 2500;  // радиус визуализации покрытия антенны, м
   async function loadGeoCfg() {
     try { geoCfg = (await (await fetch("/api/geo", { cache: "no-store" })).json()).geo || {}; } catch { }
@@ -1633,7 +1633,9 @@
         .bindTooltip(String((byId[id] || {}).label || id), { direction: "top" })
         .on("click", () => openPanel(id, true)).addTo(geoLayer);
     });
-    if (pts.length) lmap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+    // вписываем ТОЛЬКО один раз при входе в гео-режим — иначе простановка ноды,
+    // смена антенны или 60с-тик сбрасывали бы твой зум/пан
+    if (pts.length && !geoFitted) { lmap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 }); geoFitted = true; }
     renderGeoControls();
   }
   function renderGeoControls() {
@@ -1674,7 +1676,7 @@
     document.body.classList.toggle("geo-on", on);
     const vt = document.getElementById("viewtab");
     if (vt) vt.textContent = on ? "🕸" : "🗺";
-    if (on) loadGeoCfg().then(() => setTimeout(renderGeo, 40));
+    if (on) { geoFitted = false; loadGeoCfg().then(() => setTimeout(renderGeo, 40)); }
   }
   document.getElementById("viewtab").onclick = () => setGeoView(!geoView);
   setGeoView(geoView);  // применить сохранённое состояние вида
