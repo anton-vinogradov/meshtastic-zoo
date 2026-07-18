@@ -1763,23 +1763,24 @@
       L.circle(p, { radius: Math.max(150, n.est.unc * 1000), color: "#b98bff", weight: 1, fillColor: "#b98bff", fillOpacity: 0.06, dashArray: "3 4" }).addTo(geoLayer);
       const u = n.est.unc < 1 ? `${Math.round(n.est.unc * 1000)} m` : `${n.est.unc.toFixed(1)} km`;
       L.circleMarker(p, { radius: 6, color: "#b98bff", weight: 2, fillColor: "#0b0b0d", fillOpacity: 0.55, dashArray: "3 3" })
-        .bindTooltip(`${String((byId[n.id] || {}).label || n.id)} · ~${u} (${n.est.by})`, { direction: "top" })
+        .bindTooltip(`${esc(String((byId[n.id] || {}).label || n.id))} <span class="gl-sub">~${u}</span>`,
+          { permanent: true, direction: "bottom", className: "geo-lbl est", offset: [0, 2] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
-    // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий
+    // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий, с подписью
     (lastLive.nodes || []).forEach(n => {
       const i = n.info || {};
       if (n.own || i.lat == null || i.lon == null) return;
       pts.push([i.lat, i.lon]);
       L.circleMarker([i.lat, i.lon], { radius: 7, color: "#0b0b0d", weight: 1.5, fillColor: "#e0a03c", fillOpacity: 0.95 })
-        .bindTooltip(String(n.label || n.id), { direction: "top" })
+        .bindTooltip(esc(String(n.label || n.id)), { permanent: true, direction: "bottom", className: "geo-lbl", offset: [0, 3] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
     Object.entries(geoCfg).forEach(([id, g]) => {
       if (g.lat == null) return;
       pts.push([g.lat, g.lon]);
       L.circleMarker([g.lat, g.lon], { radius: 9, color: "#0b0b0d", weight: 2, fillColor: "#6ea8ff", fillOpacity: 0.98 })
-        .bindTooltip(String((byId[id] || {}).label || id), { direction: "top" })
+        .bindTooltip(esc(String((byId[id] || {}).label || id)), { permanent: true, direction: "bottom", className: "geo-lbl own", offset: [0, 4] })
         .on("click", () => openPanel(id, true)).addTo(geoLayer);
     });
     // вписываем ТОЛЬКО один раз при входе в гео-режим — иначе простановка ноды,
