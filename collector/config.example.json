@@ -23,5 +23,13 @@
   },
   "mobile": [],
   "known": {},
-  "names": {}
+  "names": {},
+  "alerts": {
+    "enabled": true,
+    "tgToken": "",
+    "tgChat": "",
+    "dm": true,
+    "lowBatt": true,
+    "lowBattPct": 20
+  }
 }

@@ -15,6 +15,8 @@ import asyncio
 import ipaddress
 import json
 import os
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -248,6 +250,9 @@ def on_receive(packet=None, interface=None):
             messages.append(msg)
         save_messages()
         log(f"✉ {msg['frmName']} → {ent['id']}: {msg['text'][:60]!r}")
+        if (CFG.get("alerts") or {}).get("dm", True):
+            own = (CFG.get("names") or {}).get(ent["id"], ent["id"])
+            alert(f"📡 Meshtastic DM → {own}\nот {msg['frmName']}:\n{text}")
     except Exception as e:
         log(f"on_receive: {e!r}")
 
@@ -494,6 +499,56 @@ def snapshot(ent):
                 db=dict(iface.nodes or {}), cfg=node_cfg(iface))
 
 
+# ---------- Telegram-алерты (Фаза 2) ----------
+# Отправка через твой telegram.sh (ретраи/прокси/очередь). Токен и чат — в
+# config.json (alerts.tgToken/tgChat, gitignore); пусто → молчим. Отдельный бот.
+ALERT_BIN = shutil.which("telegram") or "/opt/telegram.sh-repo/telegram"
+_batt_alerted = set()  # id нод, по которым уже слали «низкий заряд» (антидребезг)
+
+
+def alert(text):
+    a = CFG.get("alerts") or {}
+    if not a.get("enabled", True):
+        return
+    tok, chat = a.get("tgToken"), a.get("tgChat")
+    if not tok or not chat:
+        return  # не настроено — тихо выходим
+    def _send():
+        try:
+            cmd = [ALERT_BIN, "-t", str(tok), "-a", "3"]
+            for c in str(chat).replace(",", " ").split():
+                cmd += ["-c", c]
+            cmd.append(text)
+            r = subprocess.run(cmd, timeout=90, capture_output=True)
+            if r.returncode != 0:
+                log(f"alert rc={r.returncode}: {r.stderr.decode('utf-8', 'replace')[:120]}")
+        except Exception as e:
+            log(f"alert: {e!r}")
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def check_batt(data):
+    """Низкий заряд своих нод: шлём раз при переходе ниже порога, перевзвод —
+    когда заряд поднимется выше порога+5% (гистерезис против дребезга)."""
+    a = CFG.get("alerts") or {}
+    if not a.get("lowBatt", True):
+        return
+    thr = a.get("lowBattPct", 20)
+    for n in data.get("nodes", []) or []:
+        if not n.get("own"):
+            continue
+        b = (n.get("info") or {}).get("battery")
+        if b is None or b > 100:  # >100% = питание от сети → игнор
+            continue
+        nid = n.get("id")
+        name = (CFG.get("names") or {}).get(nid, nid)
+        if b < thr and nid not in _batt_alerted:
+            _batt_alerted.add(nid)
+            alert(f"🔋 Meshtastic: {name} — заряд {b}% (ниже {thr}%)")
+        elif b >= thr + 5 and nid in _batt_alerted:
+            _batt_alerted.discard(nid)
+
+
 _hist_last = 0.0
 _prune_last = 0.0
 
@@ -531,6 +586,7 @@ def topo_loop():
                 data = scan.build(found, prev)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
+                check_batt(data)
         except Exception as e:
             log(f"topo: {e!r}")
         # исходящие без квитанции дольше 90 с — помечаем честно; «waiting»
