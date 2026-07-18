@@ -1685,7 +1685,7 @@
     return [la2 * 180 / Math.PI, lo2 * 180 / Math.PI];
   }
   function coverage(g) {
-    const st = { color: "#6ea8ff", weight: 1, fillColor: "#6ea8ff", fillOpacity: 0.13 };
+    const st = { color: "#6ea8ff", weight: 1, fillColor: "#6ea8ff", fillOpacity: 0.13, interactive: false };
     if (g.ant === "dir") {
       const beam = g.beam || 90, n = 26, s = (g.dir || 0) - beam / 2, pts = [[g.lat, g.lon]];
       for (let i = 0; i <= n; i++) pts.push(dest(g.lat, g.lon, s + i * beam / n, GEO_R));
@@ -1750,7 +1750,7 @@
       const km = haversine(p.A, p.B), best = p.snrs.length ? Math.max(...p.snrs) : null;
       L.polyline([p.A, p.B], {
         color: best != null ? linkColor(best) : "#8a8a90", weight: 2, opacity: 0.85,
-        dashArray: best == null ? "5 6" : null,
+        dashArray: best == null ? "5 6" : null, interactive: false,
       }).bindTooltip(`${km < 10 ? km.toFixed(2) : km.toFixed(1)} km`,
         { permanent: true, direction: "center", className: "km-label" }).addTo(geoLayer);
     });
@@ -1760,7 +1760,7 @@
       if (!n.est || n.own) return;
       const p = [n.est.lat, n.est.lon];
       pts.push(p);
-      L.circle(p, { radius: Math.max(150, n.est.unc * 1000), color: "#b98bff", weight: 1, fillColor: "#b98bff", fillOpacity: 0.06, dashArray: "3 4" }).addTo(geoLayer);
+      L.circle(p, { radius: Math.max(150, n.est.unc * 1000), color: "#b98bff", weight: 1, fillColor: "#b98bff", fillOpacity: 0.06, dashArray: "3 4", interactive: false }).addTo(geoLayer);
       const u = n.est.unc < 1 ? `${Math.round(n.est.unc * 1000)} m` : `${n.est.unc.toFixed(1)} km`;
       L.circleMarker(p, { radius: 6, color: "#b98bff", weight: 2, fillColor: "#0b0b0d", fillOpacity: 0.55, dashArray: "3 3" })
         .bindTooltip(`${esc(String((byId[n.id] || {}).label || n.id))} <span class="gl-sub">~${u}</span>`,
