@@ -554,6 +554,16 @@ def build(found, prev=None):
             node["info"] = info
         nodes.append(node)
 
+    # Призрак переименованной своей ноды: heard-нода с ИМЕНЕМ как у подключённой
+    # своей = её старый node-id (сменился при перепрошивке/сбросе). Прячем, чтобы
+    # не было дубля «FerretClub 1» на карте.
+    own_labels = {n["label"] for n in nodes if n.get("own")}
+    kept = [n for n in nodes if n.get("own") or n.get("label") not in own_labels]
+    if len(kept) != len(nodes):
+        drop = {n["id"] for n in nodes} - {n["id"] for n in kept}
+        nodes = kept
+        rf = [l for l in rf if l["frm"] not in drop and l["to"] not in drop]
+
     out_links = []
     for l in rf:
         d = {"from": l["frm"], "to": l["to"], "type": "rf",
