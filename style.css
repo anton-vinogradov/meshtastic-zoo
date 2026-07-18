@@ -204,6 +204,8 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
   background: rgba(255, 255, 255, .09); border-radius: 10px;
   padding: 0 7px; font-size: 12px; cursor: pointer; line-height: 18px;
 }
+.mact2 .rchip .rwho { font-size: 11px; opacity: .85; }
+.mtext a { color: #7fb0ff; text-decoration: underline; word-break: break-word; }
 .mact2 .rchip.pending { opacity: .6; font-style: italic; animation: rpulse 1s ease-in-out infinite; }
 @keyframes rpulse { 50% { opacity: .3; } }
 .mact2 .addreact, .mact2 .doreply {
@@ -323,6 +325,21 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 }
 #settings .srow { display: block; margin-bottom: 10px; }
 #settings .srow span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+/* редактор подсетей: строка CIDR + цвет + удалить, кнопка «+» */
+#settings #sub-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+#settings .subrow { display: flex; gap: 6px; align-items: center; }
+#settings .subrow .sub-cidr { flex: 1; min-width: 0; }
+#settings .subrow .sub-color { width: 36px; height: 30px; padding: 2px; flex: none; cursor: pointer; }
+#settings .subrow .sub-del {
+  flex: none; width: 28px; padding: 5px 0; background: rgba(255, 255, 255, .08);
+  border: none; border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 15px;
+}
+#settings .subrow .sub-del:hover { color: #e05656; }
+#settings #sub-add {
+  width: auto; background: rgba(255, 255, 255, .08); border: none; color: var(--text);
+  border-radius: 6px; padding: 5px 11px; cursor: pointer; font-size: 12.5px;
+}
+#settings #sub-add:hover { background: rgba(255, 255, 255, .14); }
 #settings input,
 #settings textarea {
   width: 100%;

@@ -71,7 +71,7 @@
       fCache: "Remember legs in cache, hours", fMap: "Map refresh, seconds",
       fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
       fFragile: "Slow subnets — polled lightly (prefix per line)",
-      fSubColor: "Color of subnet {0}",
+      fSubColor: "Color of subnet {0}", addSubnet: "add subnet", remove: "remove",
     },
     ru: {
       callsign: "Позывной", model: "Модель", role: "Роль", battery: "Батарея",
@@ -104,7 +104,7 @@
       fCache: "Помнить плечи в кэше, часов", fMap: "Обновление карты, секунд",
       fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
       fFragile: "Медленные подсети — лёгкий опрос (префикс на строке)",
-      fSubColor: "Цвет подсети {0}",
+      fSubColor: "Цвет подсети {0}", addSubnet: "добавить подсеть", remove: "удалить",
     },
   };
   const t = (k, ...a) => {
@@ -659,7 +659,7 @@
         return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}"${peer ? ` data-peer="${esc(peer)}"` : ""}>
           <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
           ${quoteHtml(m)}
-          <div class="mtext">${esc(m.text)}</div>${errLine}
+          <div class="mtext">${linkify(m.text)}</div>${errLine}
           ${msgActions(m)}
           ${canRead ? `<div class="mact" data-mid="${esc(m.id)}" data-from="${esc(m.node)}" data-to="${esc(m.frm)}">
             <input class="reply" placeholder="${t("reply")}">
@@ -868,7 +868,7 @@
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
   let applySel = () => {}, hlPeer = () => {}; // подсветка выбора/наведения (устанавливаются в render)
-  let chan = [], chanSig = "";
+  let chan = [], chanSig = "", chanDraft = "";  // черновик канала переживает ре-рендеры
   async function refreshMsgs() {
     try {
       const r = await fetch("/api/messages", { cache: "no-store" });
@@ -904,6 +904,20 @@
   // реакции «в процессе»: показываем сразу по клику (эфир медленный), пока не
   // подтвердится реальными данными или не протухнет ~25с
   const pendingReacts = new Map(); // `${pid}|${emoji}` -> ts
+  // текст сообщения с кликабельными ссылками (экранируем всё, URL → <a>)
+  const linkify = (text) => {
+    const s = text || "", re = /https?:\/\/[^\s<]+/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(s))) {
+      let url = m[0];
+      const trail = url.match(/[.,;:!?)\]]+$/);  // не захватывать хвостовую пунктуацию
+      if (trail) url = url.slice(0, -trail[0].length);
+      out += esc(s.slice(last, m.index))
+        + `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+      last = m.index + url.length;
+    }
+    return out + esc(s.slice(last));
+  };
   const reactionsHtml = (m) => {
     const pid = m.pid ?? m.pktId;
     const r = m.reactions || {};
@@ -913,7 +927,9 @@
       if (kp === pid && ((r[ke] && r[ke].length) || now - ts > 25000)) pendingReacts.delete(k);
     }
     let html = Object.entries(r).filter(([, w]) => w.length)
-      .map(([e, w]) => `<span class="rchip" data-emoji="${esc(e)}" title="${esc(w.map(shortName).join(", "))}">${esc(e)} ${w.length}</span>`).join("");
+      .map(([e, w]) => { const who = w.map(shortName).join(", ");
+        return `<span class="rchip" data-emoji="${esc(e)}" title="${esc(who)}">${esc(e)} <span class="rwho">${esc(who)}</span></span>`;
+      }).join("");
     for (const k of pendingReacts.keys()) {   // эмодзи «в процессе» для этого сообщения
       const i = k.indexOf("|"), kp = +k.slice(0, i), ke = k.slice(i + 1);
       if (kp === pid && !(r[ke] && r[ke].length))
@@ -964,11 +980,11 @@
   function renderChannel() {
     const el = document.getElementById("channel");
     if (!el) return;
-    // сохранить ввод/фокус: перерисовка канала не должна сбивать набор
+    // фокус/курсор перед перерисовкой (сам текст живёт в chanDraft — переживает
+    // даже отсутствие композера, когда ноды на миг офлайн)
     const prevIn = el.querySelector(".chmsg-in");
-    const keepIn = prevIn && (document.activeElement === prevIn || prevIn.value)
-      ? { val: prevIn.value, foc: document.activeElement === prevIn,
-          s: prevIn.selectionStart, e: prevIn.selectionEnd } : null;
+    const foc = prevIn && document.activeElement === prevIn;
+    const caret = foc ? [prevIn.selectionStart, prevIn.selectionEnd] : null;
     const nodesById = {};
     (lastLive && lastLive.nodes || []).forEach(n => nodesById[n.id] = n);
     const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
@@ -987,7 +1003,7 @@
       return `<div class="chmsg">
         <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span><span>${fmtAgoM(m.ts)}</span></div>
         ${quoteHtml(m)}
-        <div class="mtext">${esc(m.text)}</div>
+        <div class="mtext">${linkify(m.text)}</div>
         ${got ? `<div class="chgot">${esc(t("gotByLabel"))}: ${got}</div>` : ""}
         ${msgActions(m)}
       </div>`;
@@ -1004,12 +1020,11 @@
         <select class="chfrom">${composeSel}</select>
         <input class="chmsg-in" placeholder="${esc(t("message"))}">
         <button class="chsend" title="${esc(t("send"))}">➤</button></div></div>` : ""}`;
-    if (keepIn) {  // вернуть набранный текст и курсор
-      const inp = el.querySelector(".chmsg-in");
-      if (inp) {
-        inp.value = keepIn.val;
-        if (keepIn.foc) { inp.focus(); try { inp.setSelectionRange(keepIn.s, keepIn.e); } catch { } }
-      }
+    const inp0 = el.querySelector(".chmsg-in");  // вернуть черновик и курсор
+    if (inp0) {
+      inp0.value = chanDraft;
+      inp0.addEventListener("input", () => { chanDraft = inp0.value; });
+      if (foc) { inp0.focus(); try { inp0.setSelectionRange(caret[0], caret[1]); } catch { } }
     }
     const feedEl = el.querySelector(".chfeed");
     if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
@@ -1038,7 +1053,7 @@
         })).json();
       } catch { }
       cs.disabled = false;
-      if (res.ok) { inp.value = ""; replyChan = null; await refreshChan(); }
+      if (res.ok) { inp.value = ""; chanDraft = ""; replyChan = null; await refreshChan(); }
       else alert(t("failedSend") + " " + (res.error || "?"));
     };
     setupInput(el.querySelector(".chmsg-in"), () => cs.click());
@@ -1105,7 +1120,6 @@
 
   // ---- Настройки (⚙): читаются и сохраняются через hub ----
   const SET_FIELDS = [
-    ["subnets", "fSubnets", "area"],
     ["snrScale.floor", "fFloor", "num"],
     ["snrScale.ideal", "fIdeal", "num"],
     ["worldMaxAgeH", "fKeep", "num"],
@@ -1131,18 +1145,22 @@
       ? (cfg[k.split(".")[0]] || {})[k.split(".")[1]]
       : cfg[k];
     const langOpt = (v, name) => `<option value="${v}"${lang === v ? " selected" : ""}>${name}</option>`;
-    // пикеры цвета для каждой своей подсети (клиентские, в localStorage)
-    const ownSubs = [...new Set((lastLive && lastLive.nodes || [])
-      .filter(n => n.own).map(n => subnetOf(n.sub)))].sort();
-    const subColorRows = ownSubs.map((p, i) =>
-      `<label class="srow"><span>${t("fSubColor", p)}</span>
-        <input class="subcol" data-sub="${esc(p)}" type="color"
-          value="${subColors[p] || SUB_PALETTE[i % SUB_PALETTE.length]}"></label>`).join("");
+    // редактор подсетей: строка = CIDR + цвет + удалить; цвет клиентский (localStorage)
+    const palAt = (i) => SUB_PALETTE[i % SUB_PALETTE.length];
+    const subRowHtml = (cidr, color) =>
+      `<div class="subrow">
+        <input class="sub-cidr" value="${esc(cidr)}" placeholder="10.0.0.0/24">
+        <input class="sub-color" type="color" value="${color}">
+        <button class="sub-del" type="button" title="${t("remove")}">×</button></div>`;
+    const subnetEditor = `<div class="srow scol"><span>${t("fSubnets")}</span>
+      <div id="sub-list">${(cfg.subnets || []).map((c, i) =>
+        subRowHtml(c, subColors[subnetOf(c)] || palAt(i))).join("")}</div>
+      <button id="sub-add" type="button">+ ${t("addSubnet")}</button></div>`;
     setEl.innerHTML = `<button id="sclose" aria-label="${t("close")}">×</button>
       <b class="stitle">${t("settings")}</b>
       <label class="srow"><span>${t("language")}</span>
         <select id="sf-lang">${langOpt("en", "English")}${langOpt("ru", "Русский")}</select></label>`
-      + subColorRows +
+      + subnetEditor +
       SET_FIELDS.map(([k, label, kind]) => kind === "area"
         ? `<label class="srow"><span>${t(label)}</span>
             <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
@@ -1162,16 +1180,37 @@
       if (lastLive) render(lastLive);
       openSettings(); // перестроить настройки на новом языке
     };
-    setEl.querySelectorAll(".subcol").forEach(inp => inp.oninput = () => {
-      subColors[inp.dataset.sub] = inp.value;
+    // применить цвета подсетей из строк (клиентски) + мгновенно перерисовать
+    const applyColors = () => {
+      setEl.querySelectorAll("#sub-list .subrow").forEach(row => {
+        const cidr = row.querySelector(".sub-cidr").value.trim();
+        if (cidr) subColors[subnetOf(cidr)] = row.querySelector(".sub-color").value;
+      });
       localStorage.setItem("mzSubColors", JSON.stringify(subColors));
-      if (lastLive) render(lastLive);  // цвет применяется мгновенно
-    });
+      if (lastLive) render(lastLive);
+    };
+    const wireSubRow = (row) => {
+      row.querySelector(".sub-color").oninput = applyColors;
+      row.querySelector(".sub-cidr").oninput = applyColors;
+      row.querySelector(".sub-del").onclick = () => { row.remove(); applyColors(); };
+    };
+    setEl.querySelectorAll("#sub-list .subrow").forEach(wireSubRow);
+    setEl.querySelector("#sub-add").onclick = () => {
+      const list = setEl.querySelector("#sub-list");
+      const box = document.createElement("div");
+      box.innerHTML = subRowHtml("", palAt(list.children.length));
+      const row = box.firstElementChild;
+      list.appendChild(row);
+      wireSubRow(row);
+      row.querySelector(".sub-cidr").focus();
+    };
     setEl.querySelector("#ssave").onclick = async () => {
       const g = (k) => document.getElementById(sfId(k));
       const lines = (el) => el.value.split("\n").map(s => s.trim()).filter(Boolean);
+      applyColors();  // зафиксировать цвета подсетей перед сохранением
       const body = {
-        subnets: lines(g("subnets")),
+        subnets: [...setEl.querySelectorAll("#sub-list .sub-cidr")]
+          .map(i => i.value.trim()).filter(Boolean),
         snrScale: { floor: +g("snrScale.floor").value, ideal: +g("snrScale.ideal").value },
         worldMaxAgeH: +g("worldMaxAgeH").value,
         cacheMaxAgeH: +g("cacheMaxAgeH").value,

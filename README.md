@@ -85,8 +85,9 @@ tell which card a link goes to. The panel shows:
   with the age of each measurement.
 
 Every message (in DMs and the channel) can be **reacted to** (tapback
-emoji — ＋ opens a picker) and **replied to with a quote** (↩). Incoming
-reactions and quoted replies from the mesh are shown the same way.
+emoji — ＋ opens a picker) and **replied to with a quote** (↩). Each
+reaction shows **who placed it**. Incoming reactions and quoted replies
+from the mesh are shown the same way. Links in messages are clickable.
 
 ## Public channel
 
@@ -132,12 +133,11 @@ panel. Every field, top to bottom:
 
 - **Language** — interface language, English or Russian. Stored in your
   browser (not on the server), so each viewer picks their own.
-- **Subnet colors** — one color per site subnet for your own node cards.
-  Stored in your browser and applied instantly; each viewer picks their
-  own.
-- **Site subnets** — the IP subnets (CIDR, one per line, e.g.
-  `10.88.88.0/24`) the collector scans for nodes. These are "your"
-  nodes — they show up as blue cards. Order doesn't matter.
+- **Site subnets** — the IP subnets the collector scans for nodes, each
+  row a CIDR (e.g. `10.88.88.0/24`) with its own **card color**. ＋ adds a
+  subnet, × removes one. The subnets are shared config; the colors are
+  stored in your browser and applied instantly, so each viewer picks
+  their own.
 - **0% quality at SNR, dB** — the SNR that the color scale treats as the
   worst (0%, red). Links at or below it are drawn fully red.
 - **100% quality at SNR, dB** — the SNR treated as perfect (100%,
