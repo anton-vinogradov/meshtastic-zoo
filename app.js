@@ -85,7 +85,7 @@
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       waiting: "waiting for node", waitingHint: "no key yet — will send the moment this node is next heard on air",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read", resend: "resend",
-      reactPending: "sending…",
+      reactPending: "sending…", replyToYou: "↩ to you",
       sendFromWhich: "send from which node", message: "message…", send: "send",
       close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
@@ -133,7 +133,7 @@
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       waiting: "жду ноду", waitingHint: "ключа пока нет — отправлю, как только нода снова выйдет в эфир",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано", resend: "повторить",
-      reactPending: "отправляется…",
+      reactPending: "отправляется…", replyToYou: "↩ вам",
       sendFromWhich: "от лица какой ноды", message: "сообщение…", send: "отправить",
       close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
@@ -1192,6 +1192,13 @@
     const caret = foc ? [prevIn.selectionStart, prevIn.selectionEnd] : null;
     const nodesById = {};
     (lastLive && lastLive.nodes || []).forEach(n => nodesById[n.id] = n);
+    // «реплай мне»: сообщение с цитатой на broadcast МОЕЙ ноды, а автор — не я
+    const ownIds = new Set(Object.values(nodesById).filter(n => n.own).map(n => n.id));
+    const isReplyToMe = (m) => {
+      if (!m.replyTo || ownIds.has(m.frm)) return false;
+      const q = findMsgByPid(m.replyTo);
+      return !!(q && ownIds.has(q.frm));
+    };
     const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
     const col = (snr) => snr == null ? "#8a8a90"
       : `hsl(${Math.round(Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor))) * 100) * 1.4}, 62%, 55%)`;
@@ -1205,8 +1212,10 @@
           const hp = g.hops != null ? `<span class="hop">${esc(t("hop", g.hops))}</span>` : "";
           return `<span class="chip"><span class="dot" style="background:${col(g.snr)}"></span>${esc(nm)}${g.snr != null ? " " + fmtSnrM(g.snr) : ""}${hp}</span>`;
         }).join("");
-      return `<div class="chmsg">
-        <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span><span>${fmtAgoM(m.ts)}</span></div>
+      const r2me = isReplyToMe(m);
+      return `<div class="chmsg${r2me ? " reply2me" : ""}">
+        <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}${r2me
+          ? ` <span class="r2me-tag">${esc(t("replyToYou"))}</span>` : ""}</span><span>${fmtAgoM(m.ts)}</span></div>
         ${quoteHtml(m)}
         <div class="mtext">${linkify(m.text)}</div>
         ${got ? `<div class="chgot">${esc(t("gotByLabel"))}: ${got}</div>` : ""}

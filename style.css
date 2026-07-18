@@ -115,6 +115,9 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 }
 #channel .chempty { color: var(--muted); font-size: 13px; text-align: center; margin-top: 20px; }
 #channel .chmsg { background: rgba(255, 255, 255, .05); border-radius: 9px; padding: 7px 9px; font-size: 13px; }
+/* реплай на моё сообщение в канале — подсвечиваем */
+#channel .chmsg.reply2me { background: rgba(123, 176, 255, .12); border-left: 3px solid #7bb0ff; padding-left: 6px; }
+#channel .chmsg .r2me-tag { color: #7bb0ff; font-weight: 700; }
 #channel .chmsg .mh { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--muted); }
 #channel .chmsg .mfrom { font-weight: 600; }
 #channel .chmsg .mtext { margin: 3px 0; white-space: pre-wrap; word-break: break-word; }
