@@ -274,21 +274,25 @@ def ent_by_id(node_id):
 
 
 def best_sender_for(to):
-    """Своя онлайн-нода, которая ЛУЧШЕ всех слышит адресата напрямую (из
-    live.json): у неё сильнее шанс, что запрос ключа/DM дойдёт и ответ
-    вернётся. Возвращает id ноды или None."""
+    """Своя онлайн-нода для отправки DM адресату. Приоритет: у кого ЕСТЬ ключ
+    адресата (иначе PKI-сбой гарантирован), среди них — кто громче слышит его
+    напрямую. Если ни у кого нет ключа — самый громкий (дальше сработает
+    автозапрос ключа). Возвращает id ноды или None."""
     try:
         live = json.loads(OUT_LIVE.read_text())
     except Exception:
         return None
     own = {n["id"] for n in live.get("nodes", []) if n.get("own")}
-    best, best_snr = None, -1e9
-    for l in live.get("links", []):
-        if (l.get("from") == to and l.get("to") in own and not l.get("hops")
-                and l.get("snr") is not None and l["snr"] > best_snr
-                and ent_by_id(l["to"])):
-            best, best_snr = l["to"], l["snr"]
-    return best
+    tgt = next((n for n in live.get("nodes", []) if n.get("id") == to), None)
+    keyby = set(tgt.get("keyBy", []) if tgt else [])
+    # кандидаты: свои онлайн-ноды, слышащие адресата напрямую (snr) → (snr, id, есть_ключ)
+    cands = [(l["snr"], l["to"], l["to"] in keyby) for l in live.get("links", [])
+             if (l.get("from") == to and l.get("to") in own and not l.get("hops")
+                 and l.get("snr") is not None and ent_by_id(l["to"]))]
+    if not cands:  # напрямую никто не слышит — взять любую онлайн-ноду с ключом
+        return next((oid for oid in keyby if ent_by_id(oid)), None)
+    with_key = [c for c in cands if c[2]]
+    return max(with_key or cands, key=lambda c: c[0])[1]
 
 
 def request_key(ent, to):

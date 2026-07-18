@@ -66,7 +66,7 @@
       storedHint: "stored in collector/config.json; the map picks it up on the next refresh (within a minute)",
       failedSend: "Failed to send:", failedSave: "Failed to save:",
       mapAria: "Mesh network map", language: "Language",
-      fSubnets: "Site subnets (one per line)", fFloor: "0% quality at SNR, dB",
+      fSubnets: "Site subnets & colors", fFloor: "0% quality at SNR, dB",
       fIdeal: "100% quality at SNR, dB", fKeep: "Keep a silent neighbor, hours",
       fCache: "Remember legs in cache, hours", fMap: "Map refresh, seconds",
       fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
@@ -99,7 +99,7 @@
       storedHint: "хранится в collector/config.json; карта подхватит при следующем обновлении (до минуты)",
       failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
       mapAria: "Карта mesh-сети", language: "Язык",
-      fSubnets: "Подсети площадок (по одной на строку)", fFloor: "0% качества при SNR, дБ",
+      fSubnets: "Подсети площадок и цвета", fFloor: "0% качества при SNR, дБ",
       fIdeal: "100% качества при SNR, дБ", fKeep: "Держать молчащего соседа, часов",
       fCache: "Помнить плечи в кэше, часов", fMap: "Обновление карты, секунд",
       fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
@@ -886,7 +886,7 @@
   const fmtSnrM = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
 
   // ---- Реакции и цитирование (общее для личных и канала) ----
-  const REACTS = ["👍", "❤️", "😂", "👀", "✅", "❓"];
+  const REACTS = ["👍", "👎", "❤️", "🔥", "😂", "🎉", "👏", "👀", "😮", "😢", "🙏", "✅", "❌", "❓", "💯"];
   let replyDM = null, replyChan = null; // {pid, text} — на что отвечаем
   const findMsgByPid = (pid) => pid == null ? null
     : (msgs.find(m => m.pid === pid || m.pktId === pid) || chan.find(m => m.pid === pid) || null);
