@@ -22,16 +22,70 @@ CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
 
 
-def layout(ids, des, seed):
-    """Силовая укладка без зон. des: {(a,b): желаемая дистанция} — из
-    качества плеч; seed: стартовые позиции (прошлый прогон — карта не
-    скачет между сканами). Несвязанные пары активно расталкиваются: их
-    дистанция ничем не измерена — можно занимать свободное место.
-    Возвращает СЫРЫЕ честные координаты; финальную посадку под размер
-    окна (поворот, единый масштаб, раздвижка карточек) делает рендерер."""
-    pos = {nid: list(seed.get(nid, (0.5, 0.5))) for nid in ids}
+def layout(ids, des):
+    """Жадная укладка «от самых связных» + пружинная полировка.
+
+    Сначала компонуется ядро — ноды с наибольшей связностью (число
+    соседей, затем суммарное качество плеч); остальные добавляются по
+    убыванию связности. Кандидаты для новичка — точки на окружностях
+    желаемых дистанций вокруг уже размещённых соседей; выбирается
+    позиция с минимальной ошибкой пружин плюс штраф за близость к
+    чужим (нодам без связи) — штраф растёт с каждой итерацией.
+    Возвращает СЫРЫЕ честные координаты; посадку под окно делает
+    рендерер."""
+    neigh = {}
+    for (a, b), d in des.items():
+        q = max(0.0, 1 - (d - 0.16) / 0.60)
+        neigh.setdefault(a, {})
+        neigh.setdefault(b, {})
+        neigh[a][b] = max(neigh[a].get(b, 0.0), q)
+        neigh[b][a] = max(neigh[b].get(a, 0.0), q)
+    order = sorted(ids, key=lambda n: (len(neigh.get(n, {})),
+                                       sum(neigh.get(n, {}).values()), n),
+                   reverse=True)
+
+    placed = {}
+    for k, nid in enumerate(order):
+        if not placed:
+            placed[nid] = (0.0, 0.0)
+            continue
+        anchors = []
+        for o, q in neigh.get(nid, {}).items():
+            if o in placed:
+                key = (nid, o) if (nid, o) in des else (o, nid)
+                anchors.append((placed[o], des[key], 0.3 + 0.7 * q))
+        pen_w = 0.6 + 2.4 * k / max(1, len(order) - 1)
+        cx = sum(p[0] for p in placed.values()) / len(placed)
+        cy = sum(p[1] for p in placed.values()) / len(placed)
+        cands = []
+        if anchors:
+            for (ax, ay), d, _ in anchors:
+                for j in range(24):
+                    ang = j * math.tau / 24
+                    cands.append((ax + d * math.cos(ang), ay + d * math.sin(ang)))
+        else:
+            for r in (0.9, 1.3):
+                for j in range(24):
+                    ang = j * math.tau / 24
+                    cands.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+        others = [placed[o] for o in placed if o not in neigh.get(nid, {})]
+
+        def score(c):
+            s = 0.0
+            for (ax, ay), d, w in anchors:
+                s += w * (math.hypot(c[0] - ax, c[1] - ay) - d) ** 2
+            for ox, oy in others:
+                dist = math.hypot(c[0] - ox, c[1] - oy)
+                if dist < 0.5:
+                    s += pen_w * (0.5 - dist) ** 2
+            return s
+
+        placed[nid] = min(cands, key=score)
+
+    # Пружинная полировка: подтянуть точные дистанции, не разрушая композицию
+    pos = {nid: list(p) for nid, p in placed.items()}
     idl = list(ids)
-    steps = 600
+    steps = 250
     for it in range(steps):
         t = 1.0 - it / steps
         for (a, b), d in des.items():
@@ -40,7 +94,7 @@ def layout(ids, des, seed):
             dx = pos[b][0] - pos[a][0]
             dy = pos[b][1] - pos[a][1]
             dist = math.hypot(dx, dy) or 1e-6
-            mv = (dist - d) / dist * 0.2 * t
+            mv = (dist - d) / dist * 0.15 * t
             pos[a][0] += dx * mv; pos[a][1] += dy * mv
             pos[b][0] -= dx * mv; pos[b][1] -= dy * mv
         for i in range(len(idl)):
@@ -51,8 +105,8 @@ def layout(ids, des, seed):
                 dx = pos[b][0] - pos[a][0]
                 dy = pos[b][1] - pos[a][1]
                 dist = math.hypot(dx, dy) or 1e-6
-                if dist < 0.55:
-                    mv = (0.55 - dist) / dist * 0.22 * t
+                if dist < 0.5:
+                    mv = (0.5 - dist) / dist * 0.15 * t
                     pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
                     pos[b][0] += dx * mv; pos[b][1] += dy * mv
     return {nid: (round(p[0], 4), round(p[1], 4)) for nid, p in pos.items()}
@@ -241,25 +295,7 @@ def build(found, prev=None):
             q = max(ps)
         des[key] = 0.16 + (1 - q) * 0.60
 
-    # Затравка позиций: прошлый прогон; новичкам — свои ноды по площадкам
-    # сверху вниз, внешние возле самого громкого слушателя
-    seed = {}
-    if prev:
-        for n in prev.get("nodes", []):
-            if n.get("x") is not None and n.get("y") is not None:
-                seed[n["id"]] = (n["x"], n["y"])
-    site_y = {s: 0.14 + 0.72 * i / max(1, len(subnets) - 1)
-              for i, s in enumerate(subnets)}
-    for i, nid in enumerate(sorted(stat)):
-        seed.setdefault(nid, (0.25 + 0.25 * (i % 3), site_y[stat[nid]["subnet"]]))
-    for c in world:
-        if c["id"] in seed:
-            continue
-        loud = max(c["hears"], key=lambda h: h[2])[1]
-        lx, ly = seed.get(loud, (0.5, 0.5))
-        j = int(c["id"][1:], 16) % 97 / 97
-        seed[c["id"]] = (min(0.9, max(0.1, lx + (j - 0.5) * 0.5)), ly)
-    pos = layout(sorted(node_ids), des, seed)
+    pos = layout(sorted(node_ids), des)
 
     # Карточки нод
     nodes = []

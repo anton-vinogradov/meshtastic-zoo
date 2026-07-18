@@ -62,17 +62,19 @@ about your network — it just draws whatever is in the file:
   tooltip.
 
 The whole map fits the window — no scrolling. There are no zones or
-bands: the layout is honest — every node's position comes from a force
-layout driven by link quality: the better a pair hears each other (the
-greener the leg), the closer their cards. Unlinked pairs repel actively —
-their distance is not measured by anything, so they spread into free
-space and de-clutter the picture. The final placement is done by the
-page for the window's real proportions: the cloud is rotated with its
-principal axis along the longer side, fitted with a single scale on both
-axes (distance proportions are preserved), and re-fitted on window
-resize. Your own nodes are the blue
-cards with an IP, outside ones are black. The map does not jump between
-scans: previous positions seed the next layout.
+bands: the layout is honest — node proximity is proportional to link
+quality (the greener the leg, the closer the cards). Placement is
+greedy, "most-connected first": the core is composed of the nodes with
+the highest connectivity (shared neighbors, good legs), the rest are
+added in decreasing connectivity order — candidate positions lie on
+circles of desired distances around already-placed neighbors, and the
+penalty for sitting close to strangers (nodes with no link) grows with
+every iteration; a short spring polish then tightens the exact
+distances. The final placement is done by the page for the window's
+real proportions: the cloud is rotated with its principal axis along
+the longer side, fitted with a single scale on both axes (distance
+proportions are preserved), and re-fitted on window resize. Your own
+nodes are the blue cards with an IP, outside ones are black.
 
 Against arrow pile-up: the legs' endpoints fan out across the card edges
 (each arrow gets its own port), opposite legs of a pair run side by
