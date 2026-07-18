@@ -20,10 +20,12 @@ import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import scan  # noqa: E402 — соседний модуль: CFG, build(), log()
+import history  # noqa: E402 — лог истории в SQLite (графики/uptime/алерты)
 
 from pubsub import pub  # noqa: E402
 import meshtastic.tcp_interface  # noqa: E402
@@ -492,6 +494,28 @@ def snapshot(ent):
                 db=dict(iface.nodes or {}), cfg=node_cfg(iface))
 
 
+_hist_last = 0.0
+_prune_last = 0.0
+
+
+def hist_tick(data):
+    """Врезать срез в историю (не чаще histEveryS) и раз в час чистить старьё."""
+    global _hist_last, _prune_last
+    now = time.time()
+    if now - _hist_last >= CFG.get("histEveryS", 60):
+        try:
+            history.record(data, fresh=CFG.get("topoEveryS", 60) * 3)
+            _hist_last = now
+        except Exception as e:
+            log(f"hist: {e!r}")
+    if now - _prune_last >= 3600:
+        try:
+            history.prune(days=CFG.get("histDays", 30))
+            _prune_last = now
+        except Exception as e:
+            log(f"hist-prune: {e!r}")
+
+
 def topo_loop():
     while True:
         try:
@@ -506,6 +530,7 @@ def topo_loop():
                     pass
                 data = scan.build(found, prev)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
+                hist_tick(data)
         except Exception as e:
             log(f"topo: {e!r}")
         # исходящие без квитанции дольше 90 с — помечаем честно; «waiting»
@@ -564,8 +589,35 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/config"):
             with lock:
                 self._json({k: CFG.get(k) for k in EDITABLE})
+        elif self.path.startswith("/api/history/"):
+            self._history()
         else:
             super().do_GET()
+
+    def _history(self):
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+
+        def g(k, d=None):
+            v = q.get(k)
+            return v[0] if v else d
+        try:
+            hours = float(g("hours", 24) or 24)
+        except ValueError:
+            hours = 24
+        try:
+            if u.path.endswith("/uptime"):
+                self._json({"uptime": history.uptime(hours=hours)})
+            elif u.path.endswith("/node"):
+                self._json({"series": history.node_series(g("id"), hours=hours)})
+            elif u.path.endswith("/link"):
+                self._json({"series": history.link_series(g("src"), g("dst"), hours=hours)})
+            elif u.path.endswith("/stats"):
+                self._json({"stats": history.stats()})
+            else:
+                self._json({"ok": False, "error": "нет такого эндпоинта"}, 404)
+        except Exception as e:
+            self._json({"ok": False, "error": repr(e)}, 500)
 
     def do_POST(self):
         try:
