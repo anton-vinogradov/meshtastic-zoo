@@ -257,16 +257,24 @@
           const hiB = horiz ? n.cx + n.w / 2 - 12 : n.cy + n.h / 2 - 10;
           p.nat = Math.max(lo, Math.min(hiB, nat)) + p.bias;
         }
-        // совпавшие точки раздвигаются минимальным зазором
+        // Раздвигаем совпавшие порты, но ВСЕГДА держим их в пределах грани
+        // [lo, hi]: если с зазором gap не помещаются (у хабов вроде FCB
+        // десятки плеч на одну грань) — ужимаем равномерно по всей грани,
+        // иначе лишние порты вылезали за карточку и стрелка втыкалась в пустоту
         list.sort((p, q) => p.nat - q.nat);
-        const gap = 13;
-        for (let i = 1; i < list.length; i++) {
-          if (list[i].nat < list[i - 1].nat + gap) list[i].nat = list[i - 1].nat + gap;
-        }
-        let hi = horiz ? n.cx + n.w / 2 - 12 : n.cy + n.h / 2 - 10;
-        for (let i = list.length - 1; i >= 0; i--) {
-          if (list[i].nat > hi) list[i].nat = hi;
-          hi = list[i].nat - gap;
+        const lo = horiz ? n.cx - n.w / 2 + 12 : n.cy - n.h / 2 + 10;
+        const hi = horiz ? n.cx + n.w / 2 - 12 : n.cy + n.h / 2 - 10;
+        const gap = 13, span = Math.max(0, hi - lo);
+        if (list.length <= 1) {
+          if (list.length) list[0].nat = Math.max(lo, Math.min(hi, list[0].nat));
+        } else if ((list.length - 1) * gap <= span) {
+          for (let i = 1; i < list.length; i++)
+            if (list[i].nat < list[i - 1].nat + gap) list[i].nat = list[i - 1].nat + gap;
+          const over = list[list.length - 1].nat - hi;   // вдвинуть группу целиком внутрь
+          if (over > 0) for (const p of list) p.nat -= over;
+          for (const p of list) p.nat = Math.max(lo, Math.min(hi, p.nat));
+        } else {
+          for (let i = 0; i < list.length; i++) list[i].nat = lo + span * i / (list.length - 1);
         }
         for (const p of list) {
           portPt[`${p.li}:${nid}`] =
