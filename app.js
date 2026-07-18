@@ -487,7 +487,10 @@
       const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
       return (d ? d + " " + t("upD") + " " : "") + (h ? h + " " + t("upH") + " " : "") + m + " " + t("upM");
     };
-    const lbl = (id) => (nodes[id] || { label: id }).label;
+    // имя ноды: сначала карточка на карте, затем карта имён всех известных
+    // нод от hub (чтобы подписать даже адресата, ушедшего с карты), иначе id
+    const NAMES = (D.meta && D.meta.names) || {};
+    const lbl = (id) => (nodes[id] || {}).label || NAMES[id] || id;
     async function markRead(ids) {
       try {
         await fetch("/api/read", { method: "POST", body: JSON.stringify({ ids }) });

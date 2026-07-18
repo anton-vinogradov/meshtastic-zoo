@@ -437,10 +437,25 @@ def build(found, prev=None):
             d["heard"] = l["heard"]
         out_links.append(d)
 
+    # Карта id → имя для ВСЕХ известных нод (из nodeDB), чтобы фронт мог
+    # подписать даже ноду, которой нет на карте (напр. адресата старого DM,
+    # уже ушедшего из видимости). Дёшево — словарь id→имя.
+    names = {}
+    for nid, n in stat.items():
+        for oid, e in n["db"].items():
+            if not isinstance(e, dict) or oid in names:
+                continue
+            u = e.get("user") or {}
+            nm = u.get("longName") or u.get("shortName")
+            if nm:
+                names[oid] = nm
+    for nid, n in stat.items():
+        names.setdefault(nid, n.get("long") or n.get("short") or nid)
+
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  updatedTs=int(now * 1000), directSeen=direct_seen),
+                  updatedTs=int(now * 1000), directSeen=direct_seen, names=names),
         nodes=nodes,
         links=out_links,
     )
