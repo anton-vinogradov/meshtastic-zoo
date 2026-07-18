@@ -48,6 +48,7 @@ body {
 #legend .item.toggle input { cursor: pointer; margin: 0; accent-color: #8fce6a; }
 #legend .swatch { width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; }
 #legend .swatch.dashed { border-top-style: dashed; }
+#legend .cdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 #legend .grad {
   display: inline-block;
   width: 96px;

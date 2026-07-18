@@ -92,6 +92,7 @@
       close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
       nodeCount: "{0} nodes · {1} own · {2} neighbors",
+      chanLoad: "channel {0}%", chanLoadTip: "busiest channel utilization across your nodes — high means a congested mesh where messages start dropping (green <25%, amber <40%, red above)",
       nodeChartTitle: "Nodes on the map (last {0}h)", nowLabel: "now",
       lblTotal: "total", lblOwn: "own",
       geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
@@ -148,6 +149,7 @@
       close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
       nodeCount: "узлов: {0} · свои {1} · соседи {2}",
+      chanLoad: "канал {0}%", chanLoadTip: "самая высокая загрузка эфира среди твоих нод — высокая значит меш перегружен и сообщения начинают теряться (зелёный <25%, жёлтый <40%, красный выше)",
       nodeChartTitle: "Узлов на карте (за {0}ч)", nowLabel: "сейчас",
       lblTotal: "всего", lblOwn: "свои",
       geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
@@ -181,6 +183,9 @@
     a.forEach((v, i) => { s = s.split("{" + i + "}").join(v); });
     return s;
   };
+  // цвет по порогам загрузки: канал (chUtil, %) и своя передача (airTx, %)
+  const chanColor = (v) => v == null ? "var(--muted)" : v < 25 ? "#35c98e" : v < 40 ? "#e0a03c" : "#e0524d";
+  const txColor = (v) => v == null ? "var(--muted)" : v < 5 ? "#35c98e" : v < 10 ? "#e0a03c" : "#e0524d";
 
   // ===== История (Фаза 1): мини-графики из /api/history (кэш 30 с гасит частые перерисовки) =====
   const histCache = new Map();
@@ -808,8 +813,8 @@
         [t("battery"), i.battery == null ? null : i.battery > 100 ? t("wallPower") : i.battery + " %"],
         [t("voltage"), i.voltage == null ? null : i.voltage.toFixed(2) + " V"],
         [t("uptime"), i.uptime == null ? null : fmtUp(i.uptime)],
-        [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
-        [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
+        [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %", chanColor(i.chUtil)],
+        [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %", txColor(i.airTx)],
         [t("cWifi"), yn(cfg.wifi)], [t("cBt"), yn(cfg.bt)], [t("cPkc"), yn(cfg.pkc)],
         [t("cRebroadcast"), cfg.rebroadcast],
         [t("cNodeInfo"), cfg.nodeInfoSecs == null ? null : Math.round(cfg.nodeInfoSecs / 60) + " " + t("unitMin")],
@@ -1151,6 +1156,12 @@
     const grad = `linear-gradient(90deg, ${[0, 25, 50, 75, 100]
       .map(p => `hsl(${hue(p)}, 62%, 55%)`).join(", ")})`;
     const stale = D.meta.updatedTs && Date.now() - D.meta.updatedTs > 15 * 60e3;
+    // загрузка канала: худшая chUtil среди своих нод (диагностика перегруза эфира)
+    const chLoads = D.nodes.filter(n => n.own && n.info && n.info.chUtil != null).map(n => n.info.chUtil);
+    const maxCh = chLoads.length ? Math.max(...chLoads) : null;
+    const chItem = maxCh == null ? "" :
+      `<span class="item" title="${esc(t("chanLoadTip"))}"><span class="cdot" style="background:${chanColor(maxCh)}"></span>`
+      + `${maxCh >= 40 ? "⚠ " : ""}${t("chanLoad", maxCh.toFixed(0))}</span>`;
     document.getElementById("legend").innerHTML = `
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
@@ -1162,6 +1173,7 @@
         <input type="checkbox" id="geoOrientToggle" ${geoOrient ? "checked" : ""}>🧭 ${t("geoOrientLbl")}</label>
       <label class="item toggle" title="${esc(t("critTip"))}">
         <input type="checkbox" id="critToggle" ${showCrit ? "checked" : ""}>⚠ ${t("critLbl")}</label>
+      ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,
         D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
       <span class="item">${t("scan")} · ${esc(D.meta.updated)}
