@@ -1784,8 +1784,23 @@
         .on("click", () => openPanel(id, true)).addTo(geoLayer);
     });
     // вписываем ТОЛЬКО один раз при входе в гео-режим — иначе простановка ноды,
-    // смена антенны или 60с-тик сбрасывали бы твой зум/пан
-    if (pts.length && !geoFitted) { lmap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 }); geoFitted = true; }
+    // смена антенны или 60с-тик сбрасывали бы твой зум/пан. Выбросы (шутники с
+    // координатами в другом городе / кривые оценки) отсекаем по 90му перцентилю
+    // расстояния от медианного центра — они остаются на карте, но вид не растягивают.
+    if (pts.length && !geoFitted) {
+      let fit = pts;
+      if (pts.length > 4) {
+        const med = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+        const cLat = med(pts.map(p => p[0])), cLon = med(pts.map(p => p[1]));
+        const kk = Math.cos(cLat * Math.PI / 180);
+        const d = pts.map(p => Math.hypot(p[0] - cLat, (p[1] - cLon) * kk));
+        const cut = [...d].sort((x, y) => x - y)[Math.floor((d.length - 1) * 0.9)];
+        const kept = pts.filter((_, i) => d[i] <= cut * 1.0001);
+        if (kept.length >= 2) fit = kept;
+      }
+      lmap.fitBounds(fit, { padding: [40, 40], maxZoom: 15 });
+      geoFitted = true;
+    }
     renderGeoControls();
   }
   function renderGeoControls() {
