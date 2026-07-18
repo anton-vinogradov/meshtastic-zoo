@@ -28,6 +28,10 @@ is a list in [`collector/config.json`](collector/config.json).
 - **An envelope ✉** — the node has an unread direct message. The
   overall mail counter sits in the top-left corner; clicking it opens
   the node with the letter.
+- **A lock 🔒** — the node's public key hasn't been received yet, so an
+  encrypted DM to it can't be sent (the `PKI_SEND_FAIL_PUBLIC_KEY`
+  error). Keys arrive on their own with NodeInfo; the badge disappears
+  once one does. The panel shows the key status for every node.
 - **Arrows** show who hears whom: the head points at the listener.
   Color is link quality, from red (barely) to green (ideal); the label
   on the line is the SNR in dB; the exact percentage is in the tooltip.

@@ -17,6 +17,7 @@
       wallPower: "wall power", voltage: "Voltage", uptime: "Uptime",
       chUtil: "Channel util", ownTx: "Own TX", lastSeen: "Last seen",
       online: "online (answers over TCP)", conversation: "Conversation",
+      keyLabel: "Key", keyYes: "received", keyNo: "not received (can't DM)",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
@@ -42,6 +43,7 @@
       wallPower: "питание от сети", voltage: "Напряжение", uptime: "Аптайм",
       chUtil: "Загрузка эфира", ownTx: "Свой TX", lastSeen: "Видели",
       online: "онлайн (отвечает по TCP)", conversation: "Переписка",
+      keyLabel: "Ключ", keyYes: "получен", keyNo: "не получен (DM нельзя)",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
@@ -418,11 +420,14 @@
         <rect width="32" height="16" rx="8" fill="#e0a03c"/>
         <text x="16" y="12" text-anchor="middle" font-size="10" font-weight="700"
           fill="#141416">✉ ${unread[n.id]}</text></g>` : "";
+      // замок в углу, если публичный ключ ноды ещё не получен (нельзя слать DM)
+      const keyBadge = n.key === false
+        ? `<text x="${x + 6}" y="${y + n.h - 6}" font-size="11">🔒</text>` : "";
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
-        ${photo}${badge}${mailBadge}
+        ${photo}${badge}${mailBadge}${keyBadge}
         <text x="${n.cx}" y="${y + 55}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 10 ? 10 : 11.5}" font-weight="700">${esc(nm)}</text>
         <text x="${n.cx}" y="${y + 71}" text-anchor="middle" fill="${subFill}"
@@ -473,6 +478,9 @@
         [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
         [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
         [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—"],
+        n.key == null ? [null, null] :
+          [t("keyLabel"), n.key ? "✓ " + t("keyYes") : "🔒 " + t("keyNo"),
+            n.key ? "#35c98e" : "#e0a03c"],
       ].filter(([, v]) => v != null);
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
@@ -598,7 +606,7 @@
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
           <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
-        ${rows.map(([k, v]) => `<div class="prow"><span>${k}</span><span>${esc(String(v))}</span></div>`).join("")}
+        ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${msgHtml}
         ${composeHtml}
         ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;

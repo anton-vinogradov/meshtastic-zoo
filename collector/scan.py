@@ -229,6 +229,14 @@ def build(found, prev=None):
                          hw=i.get("hw"), long=i.get("long"), role=i.get("role"),
                          dm=i.get("dm") or {}, db=i.get("db") or {})
 
+    # У каких нод получен публичный ключ (без него шифрованный DM не уйдёт —
+    # PKI_SEND_FAIL_PUBLIC_KEY). Ключ приходит с NodeInfo и оседает в nodeDB.
+    keys_known = set()
+    for n in stat.values():
+        for oid, e in n["db"].items():
+            if isinstance(e, dict) and (e.get("user") or {}).get("publicKey"):
+                keys_known.add(oid)
+
     # Линки: запись в nodeDB ноды N про ноду X = «N слышит X» → плечо X→N.
     # Берём только прямые (hopsAway 0) и свежие.
     rf, world_cand = [], {}
@@ -328,7 +336,8 @@ def build(found, prev=None):
         label = n.get("long") or n["short"]
         x, y = pos[nid]
         node = dict(id=nid, label=label, sub=n["ip"], short=n["short"], own=True,
-                    x=round(x, 4), y=round(y, 4), online=True, heard=int(now))
+                    x=round(x, 4), y=round(y, 4), online=True, heard=int(now),
+                    key=nid in keys_known)
         if n.get("hw"):
             node["hw"] = n["hw"]
         info = node_info(n)
@@ -341,7 +350,8 @@ def build(found, prev=None):
         label = c.get("long") or c["short"]
         x, y = pos[c["id"]]
         node = dict(id=c["id"], label=label, sub=c["id"], short=c["short"],
-                    x=round(x, 4), y=round(y, 4), heard=c["heard"] or None)
+                    x=round(x, 4), y=round(y, 4), heard=c["heard"] or None,
+                    key=c["id"] in keys_known)
         if c.get("hw"):
             node["hw"] = c["hw"]
         info = node_info(c)
