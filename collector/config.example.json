@@ -33,5 +33,6 @@
     "lowBatt": true,
     "lowBattPct": 20,
     "tgReply": true
-  }
+  },
+  "geo": {}
 }

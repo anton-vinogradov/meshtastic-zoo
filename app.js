@@ -92,6 +92,8 @@
       nodeCount: "{0} nodes · {1} own · {2} neighbors",
       nodeChartTitle: "Nodes on the map (last {0}h)", nowLabel: "now",
       lblTotal: "total", lblOwn: "own",
+      geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
+      antOmni: "omni", antDir: "directional", antAzim: "az",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -142,6 +144,8 @@
       nodeCount: "узлов: {0} · свои {1} · соседи {2}",
       nodeChartTitle: "Узлов на карте (за {0}ч)", nowLabel: "сейчас",
       lblTotal: "всего", lblOwn: "свои",
+      geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
+      antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -1518,7 +1522,36 @@
 
   // ---- Гео-карта (Фаза 3): реальные GPS-позиции на OSM (Leaflet вендорён локально) ----
   let geoView = localStorage.getItem("mzGeoView") === "1";
-  let lmap = null, geoLayer = null;
+  let lmap = null, geoLayer = null, geoCfg = {}, placing = null;
+  const GEO_R = 2500;  // радиус визуализации покрытия антенны, м
+  async function loadGeoCfg() {
+    try { geoCfg = (await (await fetch("/api/geo", { cache: "no-store" })).json()).geo || {}; } catch { }
+  }
+  async function saveGeo(node, entry) {
+    try {
+      const r = await (await fetch("/api/geo", { method: "POST", body: JSON.stringify({ node, ...entry }) })).json();
+      if (r.geo) geoCfg = r.geo;
+    } catch { }
+    renderGeo();
+  }
+  // точка на дистанции dist(м) по азимуту brg(°) от (lat,lon) — для секторов
+  function dest(lat, lon, brg, dist) {
+    const R = 6371000, d = dist / R, b = brg * Math.PI / 180;
+    const la1 = lat * Math.PI / 180, lo1 = lon * Math.PI / 180;
+    const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(b));
+    const lo2 = lo1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la1),
+      Math.cos(d) - Math.sin(la1) * Math.sin(la2));
+    return [la2 * 180 / Math.PI, lo2 * 180 / Math.PI];
+  }
+  function coverage(g) {
+    const st = { color: "#6ea8ff", weight: 1, fillColor: "#6ea8ff", fillOpacity: 0.13 };
+    if (g.ant === "dir") {
+      const beam = g.beam || 90, n = 26, s = (g.dir || 0) - beam / 2, pts = [[g.lat, g.lon]];
+      for (let i = 0; i <= n; i++) pts.push(dest(g.lat, g.lon, s + i * beam / n, GEO_R));
+      return L.polygon(pts, st);
+    }
+    return L.circle([g.lat, g.lon], { ...st, radius: GEO_R });
+  }
   function initGeo() {
     if (lmap) return true;
     if (typeof L === "undefined") return false;
@@ -1526,26 +1559,73 @@
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(lmap);
     geoLayer = L.layerGroup().addTo(lmap);
+    lmap.on("click", (e) => {              // режим размещения: клик ставит позицию
+      if (!placing) return;
+      const g = geoCfg[placing] || {};
+      saveGeo(placing, { lat: e.latlng.lat, lon: e.latlng.lng, ant: g.ant || "omni", dir: g.dir || 0, beam: g.beam || 90 });
+      placing = null;
+      document.getElementById("geomap").classList.remove("placing");
+    });
     return true;
   }
   function renderGeo() {
     if (!geoView || !lastLive || !initGeo()) return;
     lmap.invalidateSize();
     geoLayer.clearLayers();
-    const pts = [];
+    const pts = [], byId = {};
+    (lastLive.nodes || []).forEach(n => byId[n.id] = n);
+    // соседи с broadcast-GPS — оранжевые
     (lastLive.nodes || []).forEach(n => {
       const i = n.info || {};
-      if (i.lat == null || i.lon == null) return;   // без GPS — не на гео-карте
+      if (n.own || i.lat == null || i.lon == null) return;
       pts.push([i.lat, i.lon]);
-      const m = L.circleMarker([i.lat, i.lon], {
-        radius: n.own ? 9 : 7, color: "#0b0b0d", weight: 1.5,
-        fillColor: n.own ? "#6ea8ff" : "#e0a03c", fillOpacity: 0.95,
-      });
-      m.bindTooltip(String(n.label || n.id), { direction: "top" });
-      m.on("click", () => openPanel(n.id, true));
-      m.addTo(geoLayer);
+      L.circleMarker([i.lat, i.lon], { radius: 7, color: "#0b0b0d", weight: 1.5, fillColor: "#e0a03c", fillOpacity: 0.95 })
+        .bindTooltip(String(n.label || n.id), { direction: "top" })
+        .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
+    });
+    // свои размещённые — синие + сектор/круг покрытия антенны
+    Object.entries(geoCfg).forEach(([id, g]) => {
+      if (g.lat == null) return;
+      pts.push([g.lat, g.lon]);
+      coverage(g).addTo(geoLayer);
+      L.circleMarker([g.lat, g.lon], { radius: 9, color: "#0b0b0d", weight: 2, fillColor: "#6ea8ff", fillOpacity: 0.98 })
+        .bindTooltip(String((byId[id] || {}).label || id), { direction: "top" })
+        .on("click", () => openPanel(id, true)).addTo(geoLayer);
     });
     if (pts.length) lmap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+    renderGeoControls();
+  }
+  function renderGeoControls() {
+    const ctl = document.getElementById("geoctl");
+    if (!ctl) return;
+    const own = (lastLive && lastLive.nodes || []).filter(n => n.own);
+    ctl.innerHTML = `<div class="geoctl-h">${esc(t("geoPlaceHint"))}</div>` + own.map(n => {
+      const g = geoCfg[n.id] || {}, placed = g.lat != null;
+      return `<div class="geo-node" data-id="${esc(n.id)}">
+        <div class="geo-row1"><b>${esc(n.label || n.id)}</b>
+          <button class="geo-place${placing === n.id ? " on" : ""}">📍 ${esc(t("geoPlace"))}</button>
+          ${placed ? `<button class="geo-clear" title="${esc(t("remove"))}">×</button>` : ""}</div>
+        ${placed ? `<div class="geo-row2">
+          <select class="geo-ant">
+            <option value="omni"${g.ant !== "dir" ? " selected" : ""}>${esc(t("antOmni"))}</option>
+            <option value="dir"${g.ant === "dir" ? " selected" : ""}>${esc(t("antDir"))}</option></select>
+          ${g.ant === "dir" ? `<label class="geo-az">${esc(t("antAzim"))}
+            <input type="number" class="geo-azin" min="0" max="359" value="${g.dir || 0}">°</label>` : ""}
+        </div>` : ""}</div>`;
+    }).join("");
+    ctl.querySelectorAll(".geo-node").forEach(row => {
+      const id = row.dataset.id, g = geoCfg[id] || {};
+      row.querySelector(".geo-place").onclick = () => {
+        placing = id;
+        document.getElementById("geomap").classList.add("placing");
+        renderGeoControls();
+      };
+      row.querySelector(".geo-clear")?.addEventListener("click", () => saveGeo(id, { lat: null }));
+      row.querySelector(".geo-ant")?.addEventListener("change", (e) =>
+        saveGeo(id, { lat: g.lat, lon: g.lon, ant: e.target.value, dir: g.dir || 0, beam: g.beam || 90 }));
+      row.querySelector(".geo-azin")?.addEventListener("change", (e) =>
+        saveGeo(id, { lat: g.lat, lon: g.lon, ant: "dir", dir: +e.target.value || 0, beam: g.beam || 90 }));
+    });
   }
   function setGeoView(on) {
     geoView = on;
@@ -1553,7 +1633,7 @@
     document.body.classList.toggle("geo-on", on);
     const vt = document.getElementById("viewtab");
     if (vt) vt.textContent = on ? "🕸" : "🗺";
-    if (on) setTimeout(renderGeo, 40);
+    if (on) loadGeoCfg().then(() => setTimeout(renderGeo, 40));
   }
   document.getElementById("viewtab").onclick = () => setGeoView(!geoView);
   setGeoView(geoView);  // применить сохранённое состояние вида

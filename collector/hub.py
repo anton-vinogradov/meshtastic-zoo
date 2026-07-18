@@ -800,6 +800,9 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/config"):
             with lock:
                 self._json({k: CFG.get(k) for k in EDITABLE})
+        elif self.path.startswith("/api/geo"):
+            with lock:
+                self._json({"geo": CFG.get("geo", {})})
         elif self.path.startswith("/api/history/"):
             self._history()
         elif self.path.startswith("/api/dbentry"):
@@ -973,6 +976,37 @@ class Handler(SimpleHTTPRequestHandler):
                              json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
             log(f"⚙ конфиг обновлён: {', '.join(clean)}")
             self._json({"ok": True})
+        elif self.path == "/api/geo":
+            # размещение своих нод на гео-карте (у них GPS выключен): позиция +
+            # антенна (omni/dir + азимут/ширина). lat==null → снять размещение.
+            node = body.get("node")
+            if not node:
+                self._json({"ok": False, "error": "нужен node"}, 400)
+                return
+            with lock:
+                geo = CFG.setdefault("geo", {})
+                if body.get("lat") is None:
+                    geo.pop(node, None)
+                else:
+                    try:
+                        lat, lon = float(body["lat"]), float(body["lon"])
+                    except (TypeError, ValueError, KeyError):
+                        self._json({"ok": False, "error": "плохие координаты"}, 400)
+                        return
+                    ant = "dir" if body.get("ant") == "dir" else "omni"
+                    entry = dict(lat=round(lat, 6), lon=round(lon, 6), ant=ant)
+                    if ant == "dir":
+                        entry["dir"] = int(body.get("dir", 0)) % 360
+                        entry["beam"] = max(10, min(360, int(body.get("beam", 90))))
+                    geo[node] = entry
+                try:
+                    disk = json.loads((ROOT / "config.json").read_text())
+                except Exception:
+                    disk = {}
+                disk["geo"] = geo
+                atomic_write(ROOT / "config.json",
+                             json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
+            self._json({"ok": True, "geo": CFG.get("geo", {})})
         else:
             self._json({"ok": False, "error": "нет такого API"}, 404)
 
