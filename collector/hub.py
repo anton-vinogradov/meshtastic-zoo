@@ -154,17 +154,26 @@ def on_receive(packet=None, interface=None):
             err = (dec.get("routing") or {}).get("errorReason")
             ok = err in (None, 0, "NONE")
             changed = False
+            pki_fail = None  # нет ключа адресата → запросим и повторим (раз)
             with lock:
                 for m in messages:
-                    if (m.get("kind") == "out" and m.get("pktId") == rid
+                    if not (m.get("kind") == "out" and m.get("pktId") == rid
                             and m.get("status") == "sent"):
-                        m["status"] = "delivered" if ok else "failed"
-                        if not ok:
-                            m["detail"] = str(err)
-                        changed = True
+                        continue
+                    if ok:
+                        m["status"] = "delivered"
+                    elif (str(err) == "PKI_SEND_FAIL_PUBLIC_KEY"
+                          and CFG.get("autoKeyRequest", True) and not m.get("keyRetry")):
+                        m["keyRetry"] = 1  # оставляем "sent" (⏳): запросим ключ и повторим
+                        pki_fail = m
+                    else:
+                        m["status"], m["detail"] = "failed", str(err)
+                    changed = True
             if changed:
                 save_messages()
                 log(f"{'✓ доставлено' if ok else '✗ NAK ' + str(err)} (rid={rid})")
+            if pki_fail:
+                auto_key_retry(pki_fail)
             return
         if dec.get("portnum") != "TEXT_MESSAGE_APP":
             return
@@ -256,6 +265,71 @@ def send_reaction(iface, dest, emoji_char, reply_id):
     mp.decoded.emoji = 1
     mp.id = iface._generatePacketId()
     return iface._sendPacket(mp, dest, wantAck=False)
+
+
+def ent_by_id(node_id):
+    with lock:
+        return next((c for c in conns.values()
+                     if c.get("id") == node_id and c.get("iface")), None)
+
+
+def request_key(ent, to):
+    """Солицит ключа адресата: шлём ему наш NodeInfo с want_response — он
+    отвечает своим NodeInfo (в нём publicKey), и наша нода узнаёт его ключ."""
+    import meshtastic.mesh_interface as mi
+    iface = ent["iface"]
+    mu = iface.getMyUser() or {}
+    u = mi.mesh_pb2.User(id=mu.get("id") or ent.get("id") or "",
+                         long_name=mu.get("longName") or "",
+                         short_name=mu.get("shortName") or "")
+    iface.sendData(u, destinationId=to, wantResponse=True,
+                   portNum=mi.portnums_pb2.PortNum.NODEINFO_APP)
+
+
+def resend(m, auto=False):
+    """Переслать исходящее сообщение с той же ноды тому же адресату (после того
+    как ключ, возможно, пришёл). Обновляем ту же запись, а не плодим новую."""
+    ent = ent_by_id(m.get("frm"))
+    if not ent:
+        with lock:
+            m["status"] = "failed"
+        save_messages()
+        return False
+    try:
+        pkt = ent["iface"].sendText(m["text"], destinationId=m["to"], wantAck=True,
+                                    replyId=m.get("replyTo") or None)
+        with lock:
+            m["pktId"] = getattr(pkt, "id", None)
+            m["status"] = "sent"
+            m.pop("detail", None)
+            if not auto:
+                m.pop("keyRetry", None)  # ручной повтор → снова разрешить автозапрос
+        save_messages()
+        log(f"{'🔁 авто-ретрай' if auto else '↻ ретрай'} {m['frm']} → {m['to']}: {m['text'][:40]!r}")
+        return True
+    except Exception as e:
+        with lock:
+            m["status"] = "failed"
+            m["detail"] = str(e)
+        save_messages()
+        return False
+
+
+def auto_key_retry(m):
+    """Нет ключа адресата → запросить ключ и через keyRetryS повторить DM (раз)."""
+    ent = ent_by_id(m.get("frm"))
+    if not ent:
+        with lock:
+            m["status"], m["detail"] = "failed", "PKI_SEND_FAIL_PUBLIC_KEY"
+        save_messages()
+        return
+    try:
+        request_key(ent, m["to"])
+    except Exception as e:
+        log(f"🔑 запрос ключа не удался: {e!r}")
+    delay = CFG.get("keyRetryS", 12)
+    log(f"🔑 нет ключа {m['to']} — запросил у адресата, ретрай DM через {delay}с")
+    threading.Timer(delay, lambda: resend(m, auto=True)).start()
 
 
 def on_lost(interface=None):
@@ -409,6 +483,14 @@ class Handler(SimpleHTTPRequestHandler):
                         m["read"] = True
             save_messages()
             self._json({"ok": True})
+        elif self.path == "/api/resend":
+            with lock:
+                m = next((x for x in messages if x.get("id") == body.get("id")
+                          and x.get("kind") == "out"), None)
+            if not m:
+                self._json({"ok": False, "error": "нет такого сообщения"}, 404)
+                return
+            self._json({"ok": resend(m)})
         elif self.path == "/api/send":
             node, to = body.get("node"), body.get("to")
             text = (body.get("text") or "").strip()

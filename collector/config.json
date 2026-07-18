@@ -14,6 +14,8 @@
   "hopSettleMin": 3,
   "hopStaleMin": 60,
   "hopMaxShow": 2,
+  "autoKeyRequest": true,
+  "keyRetryS": 12,
   "topoEveryS": 30,
   "rescanS": 60,
   "worldTopN": 0,

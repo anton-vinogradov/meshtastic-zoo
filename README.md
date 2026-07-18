@@ -71,9 +71,12 @@ tell which card a link goes to. The panel shows:
 - **Conversation** — the full message history with this node: incoming
   on the left, your replies on the right. Outgoing messages show a
   delivery status: ⏳ on air → ✓ delivered, ✗ error (with the reason
-  spelled out, e.g. "no recipient key") or ⚠ no ack. A reply goes on the
-  air from the very node that was written to (➤), or just mark it as
-  read (✓) — the marker clears right away;
+  spelled out, e.g. "no recipient key") or ⚠ no ack. A failed message has
+  a **↻ resend** button; and a "no recipient key" (PKI) failure is handled
+  automatically — the hub asks the recipient for its key and retries the
+  DM once a few seconds later. A reply goes on the air from the very node
+  that was written to (➤), or just mark it as read (✓) — the marker
+  clears right away;
 - **Compose** — send a direct message to this node; a selector picks
   which of your nodes speaks (the closest one — that hears the recipient
   loudest — is preselected);
@@ -161,8 +164,11 @@ count a former neighbor may show at before it's treated as routing noise
 rather than a real move — default 2), `hopSettleMin` (minutes of no
 direct contact before a slipped neighbor turns grey, so momentary flaps
 are ignored — default 3), `hopStaleMin` (how long a grey multi-hop node
-is kept before it's forgotten — default 60), and `known` / `names` —
-fallback IP↔radio-id and name maps used when a node doesn't answer.
+is kept before it's forgotten — default 60), `autoKeyRequest` (on a "no
+recipient key" DM failure, ask the recipient for its key and retry once —
+default on) and `keyRetryS` (how long to wait before that retry — default
+12), and `known` / `names` — fallback IP↔radio-id and name maps used when
+a node doesn't answer.
 
 ## Roadmap
 

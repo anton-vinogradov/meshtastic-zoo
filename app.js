@@ -26,7 +26,7 @@
       resizeTip: "drag to resize",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
-      reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
+      reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read", resend: "resend",
       sendFromWhich: "send from which node", message: "message…", send: "send",
       close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
@@ -57,7 +57,7 @@
       resizeTip: "потяните, чтобы изменить ширину",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
-      reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
+      reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано", resend: "повторить",
       sendFromWhich: "от лица какой ноды", message: "сообщение…", send: "отправить",
       close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
@@ -615,7 +615,8 @@
           const [g, st, c] = STATUS[m.status] || ["", "", "var(--muted)"];
           const why = m.status === "failed" && m.detail ? reasonText(m.detail) : "";
           foot = `<span class="mstatus" style="color:${c}" title="${esc(st + (why ? " · " + why : ""))}">${g} ${esc(st)}</span>` + foot;
-          if (why) errLine = `<div class="merr">${esc(why)}</div>`;
+          if (m.status === "failed")  // причина + кнопка ручного повтора
+            errLine = `<div class="merr">${why ? esc(why) + " · " : ""}<button class="resend" data-mid="${esc(m.id)}">↻ ${esc(t("resend"))}</button></div>`;
         }
         const canRead = m.kind !== "out" && m.node === id && !m.read;
         // наведение на сообщение подсвечивает собеседника на графе (адресата
@@ -708,6 +709,16 @@
         };
         row.querySelector(".mok").onclick = async () => {
           await markRead([mid]); await afterAction();
+        };
+      });
+      // ручной повтор упавшего DM
+      panel.querySelectorAll(".resend").forEach(btn => {
+        btn.onclick = async () => {
+          btn.disabled = true;
+          try {
+            await fetch("/api/resend", { method: "POST", body: JSON.stringify({ id: btn.dataset.mid }) });
+          } catch { }
+          await afterAction();
         };
       });
       const cw = panel.querySelector(".pcompose");
