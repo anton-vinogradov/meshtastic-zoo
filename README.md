@@ -34,16 +34,15 @@ is a list in [`collector/config.json`](collector/config.json).
   from one of your nodes that already has the recipient's key, so the
   panel lists exactly which of your nodes hold it. Keys arrive on their
   own with NodeInfo; the badge disappears once every node has one.
-- **Grey squares with a hop count** — a node that used to be a direct
-  (0-hop) neighbor but now only reaches you through relays. It keeps its
-  place on the map but is drawn grey with a dashed frame, and its leg
-  shows the hop count (`1 hop`, `2 hops`…) instead of an SNR — there is
-  no direct link to measure. The more hops, the farther out it drifts.
-  Only close relays count — 1–2 hops by default; a node bouncing to 3+
-  hops right after being direct is usually just mesh routing variance,
-  not a real move. Such a node is remembered for a few minutes after it
-  was last on the map, so a single missed scan won't drop it; once it's
-  been gone longer than that it's forgotten.
+- **Grey squares with a hop count** — a former direct (0-hop) neighbor
+  that has genuinely slipped to relay-only. Direct neighbors constantly
+  flap between 0 and 1–2 hops (normal RF), so a node turns grey only
+  after its direct signal has been gone for a few minutes straight — a
+  momentary flap doesn't count — and only while it's still within a
+  couple of hops (a jump to 3+ right after being direct is routing noise,
+  not a move). It keeps its place, drawn grey with a dashed frame, its
+  leg showing the hop count (`1 hop`, `2 hops`…) instead of an SNR. It's
+  held for up to an hour of no direct contact, then forgotten.
 - **Arrows** show who hears whom: the head points at the listener.
   Color is link quality, from red (barely) to green (ideal); the label
   on the line is the SNR in dB; the exact percentage is in the tooltip.
@@ -152,10 +151,11 @@ Changes apply on the fly and are saved to `collector/config.json`.
 A few rarely-touched keys live in that file only: `port` (the node
 API port, 4403), the connect/query timeouts, `hopMaxShow` (largest hop
 count a former neighbor may show at before it's treated as routing noise
-rather than a real move — default 2), `hopMemoryMin` (how many minutes a
-former neighbor is kept on the map after it was last seen there —
-default 5), and `known` / `names` — fallback IP↔radio-id and name maps
-used when a node doesn't answer.
+rather than a real move — default 2), `hopSettleMin` (minutes of no
+direct contact before a slipped neighbor turns grey, so momentary flaps
+are ignored — default 3), `hopStaleMin` (how long a grey multi-hop node
+is kept before it's forgotten — default 60), and `known` / `names` —
+fallback IP↔radio-id and name maps used when a node doesn't answer.
 
 ## Roadmap
 

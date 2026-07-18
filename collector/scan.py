@@ -285,37 +285,33 @@ def build(found, prev=None):
     for c in world:
         rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
-    # Многохоповые ноды — бывшие прямые соседи, деградировавшие в многохоп.
-    # Показываем ТОЛЬКО тех, кто недавно был на самой карте (own/world/hop),
-    # а не «кто хоть раз за сутки мелькнул на 0 хопов» — в плотном меше это
-    # сотни дальних нод. `map_seen` (id → ts последнего появления на карте)
-    # переживает live.json, поэтому пропущенный скан ноду не теряет; окно
-    # `hopMemoryMin` короткое (минуты) — забываем уехавших и не копим весь меш.
-    # Плюс потолок по хопам: 1–2 хопа = «слегка отъехал», 3+ при недавнем
-    # прямом — это разброс маршрутов меша (кружной путь), а не переезд.
+    # Многохоповые ноды — прямые соседи, УСТОЙЧИВО деградировавшие в многохоп
+    # (а не мгновенно флапнувшие: прямые соседи постоянно скачут 0↔1↔2 хопа —
+    # это норма РЧ, проверено на живых nodeDB). `direct_seen` (id → ts, когда
+    # ноду в последний раз слышали НАПРЯМУЮ, 0 хопов) переживает live.json.
+    # Нода показывается серой, если прямого приёма нет уже settle..stale:
+    #   settle (hopSettleMin) — минимум «тишины по прямому», отсекает флап;
+    #   stale  (hopStaleMin)  — отдельное «протухание» многохопа: после него
+    #                           ноду забываем (дефолт 1 час).
+    # Плюс потолок по хопам: 3+ сразу после прямого — это кружной маршрут меша.
     direct_ids = set(stat) | {c["id"] for c in world}
     hop_max = CFG.get("hopMaxShow", 2)
-    grace = CFG.get("hopMemoryMin", 5) * 60
+    settle = CFG.get("hopSettleMin", 3) * 60
+    stale = CFG.get("hopStaleMin", 60) * 60
     prev_meta = prev.get("meta", {}) if prev else {}
-    prev_map = prev_meta.get("mapSeen")
-    if prev_map is None and prev:
-        # миграция со старого live.json без mapSeen: засеваем ТОЛЬКО прямыми
-        # нодами прошлой карты (без hop), чтобы не втащить накопленный мусор
-        prev_map = {n["id"]: (n.get("heard") or int(now))
-                    for n in prev.get("nodes", []) if n.get("id") and not n.get("hop")}
-    prev_map = {k: v for k, v in (prev_map or {}).items() if now - v <= grace}
+    direct_seen = {k: v for k, v in (prev_meta.get("directSeen") or {}).items()
+                   if now - v <= stale}
+    for nid in stat:
+        direct_seen[nid] = int(now)
+    for c in world:  # world = слышно напрямую → обновляем время прямого приёма
+        direct_seen[c["id"]] = max(direct_seen.get(c["id"], 0), c["heard"] or int(now))
     hops_nodes = []
     for c in hop_cand.values():
         if c["id"] in direct_ids or not c["via"] or c["hops"] > hop_max:
             continue
-        if c["id"] in prev_map:
+        ts = direct_seen.get(c["id"])
+        if ts is not None and settle <= now - ts <= stale:
             hops_nodes.append(c)
-    # Обновляем «был на карте» для всех нод ТЕКУЩЕЙ карты (own+world+hop)
-    map_seen = {k: v for k, v in prev_map.items()}
-    for nid in direct_ids:
-        map_seen[nid] = int(now)
-    for c in hops_nodes:
-        map_seen[c["id"]] = int(now)
     for c in hops_nodes:
         rf.append(dict(frm=c["id"], to=c["via"], snr=None, hops=c["hops"], heard=c["heard"]))
 
@@ -444,7 +440,7 @@ def build(found, prev=None):
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  updatedTs=int(now * 1000), mapSeen=map_seen),
+                  updatedTs=int(now * 1000), directSeen=direct_seen),
         nodes=nodes,
         links=out_links,
     )
