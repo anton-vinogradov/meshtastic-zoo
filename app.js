@@ -91,6 +91,7 @@
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
       nodeCount: "{0} nodes · {1} own · {2} neighbors",
       nodeChartTitle: "Nodes on the map (last {0}h)", nowLabel: "now",
+      lblTotal: "total", lblOwn: "own",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -140,6 +141,7 @@
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
       nodeCount: "узлов: {0} · свои {1} · соседи {2}",
       nodeChartTitle: "Узлов на карте (за {0}ч)", nowLabel: "сейчас",
+      lblTotal: "всего", lblOwn: "свои",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -214,23 +216,30 @@
     const s = series.filter(p => p.online != null);
     return s.length ? Math.round(s.filter(p => p.online).length / s.length * 100) : null;
   };
-  // площадной график: уровень (напр. число узлов) во времени; pts=[{ts,v}]
-  function areaChart(pts, { w = 300, h = 64, color = "#6ea8ff" } = {}) {
-    const vals = pts.map(p => p.v).filter(v => v != null);
-    if (vals.length < 2) return `<span class="spark-empty">${t("histNone")}</span>`;
-    const hi = Math.max(1, ...vals), lo = 0, base = h - 11;
-    const t0 = pts[0].ts, tspan = (pts[pts.length - 1].ts - t0) || 1;
+  // площадной график уровня во времени: main=[{ts,v}] (линия+заливка),
+  // extra=[{pts,color}] — доп. линии на той же шкале (напр. «свои»)
+  function areaChart(main, extra = [], { w = 300, h = 64, color = "#6ea8ff" } = {}) {
+    const seen = main.filter(p => p.v != null);
+    if (seen.length < 2) return `<span class="spark-empty">${t("histNone")}</span>`;
+    const allVals = main.concat(...extra.map(e => e.pts)).map(p => p.v).filter(v => v != null);
+    const hi = Math.max(1, ...allVals), lo = 0, base = h - 11;
+    const t0 = main[0].ts, tspan = (main[main.length - 1].ts - t0) || 1;
     const X = ts => (1 + (ts - t0) / tspan * (w - 2)).toFixed(1);
     const Y = v => (base - (v - lo) / (hi - lo) * (base - 4)).toFixed(1);
-    const seen = pts.filter(p => p.v != null);
-    let line = "";
-    seen.forEach(p => { line += (line ? "L" : "M") + X(p.ts) + " " + Y(p.v) + " "; });
-    const area = `M${X(seen[0].ts)} ${base} ${line.replace(/^M/, "L")}L${X(seen[seen.length - 1].ts)} ${base} Z`;
+    const path = pts => {
+      let d = ""; pts.filter(p => p.v != null).forEach(p => { d += (d ? "L" : "M") + X(p.ts) + " " + Y(p.v) + " "; });
+      return d;
+    };
+    const mainLine = path(main);
+    const area = `M${X(seen[0].ts)} ${base} ${mainLine.replace(/^M/, "L")}L${X(seen[seen.length - 1].ts)} ${base} Z`;
+    const extraLines = extra.map(e =>
+      `<path d="${path(e.pts)}" fill="none" stroke="${e.color}" stroke-width="1.5" stroke-linejoin="round"/>`).join("");
     return `<svg class="areachart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
       + `<text x="1" y="9" font-size="9" fill="var(--muted)">${Math.round(hi)}</text>`
       + `<line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="var(--muted)" stroke-width="0.5" opacity="0.4"/>`
       + `<path d="${area}" fill="${color}" opacity="0.18"/>`
-      + `<path d="${line}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+      + `<path d="${mainLine}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`
+      + `${extraLines}</svg>`;
   }
 
   function render(D) {
@@ -1427,8 +1436,12 @@
       const nowT = nc.nowTotal ?? nc.series[nc.series.length - 1].total, nowO = nc.nowOwn ?? 0;
       body.innerHTML =
         `<div class="nn-now">${t("nodeCount", nowT, nowO, Math.max(0, nowT - nowO))}</div>`
-        + areaChart(nc.series.map(s => ({ ts: s.ts, v: s.total })))
-        + `<div class="nn-cap"><span>−${hours}${t("unitH")}</span><span>${t("nowLabel")}</span></div>`;
+        + areaChart(nc.series.map(s => ({ ts: s.ts, v: s.total })),
+          [{ pts: nc.series.map(s => ({ ts: s.ts, v: s.own })), color: "#35c98e" }])
+        + `<div class="nn-cap"><span>−${hours}${t("unitH")}</span>`
+        + `<span class="nn-leg"><i style="background:#6ea8ff"></i>${t("lblTotal")}`
+        + `<i style="background:#35c98e"></i>${t("lblOwn")}</span>`
+        + `<span>${t("nowLabel")}</span></div>`;
     })();
     document.getElementById("panel").classList.remove("open");
     openId = null;

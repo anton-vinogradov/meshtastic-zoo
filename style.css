@@ -458,6 +458,9 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #settings .nn-now { font-size: 12.5px; color: var(--text); margin-bottom: 3px; }
 #settings .areachart { display: block; width: 100%; height: 64px; }
 #settings .nn-cap { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--muted); margin-top: 2px; }
+#settings .nn-leg { display: inline-flex; align-items: center; gap: 3px; }
+#settings .nn-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 2px 0 6px; }
+#settings .nn-leg i:first-child { margin-left: 0; }
 
 #map .empty {
   padding: 48px 24px;
