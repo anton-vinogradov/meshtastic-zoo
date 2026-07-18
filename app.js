@@ -198,6 +198,10 @@
       [/TLORA/, "tlora-v2-1-1_6.svg"],
       [/RAK/, "rak4631.svg"], [/BEAM/, "tbeam.svg"], [/DIY/, "diy.svg"],
       [/PORTDUINO|NATIVE|LINUX/, "portduino.svg"],
+      // обобщённые (после специфичных: CARDPUTER/PROMICRO и т.п. выигрывают)
+      [/THINKNODE/, "thinknode.svg"], [/EBYTE/, "ebyte-esp32-s3.svg"],
+      [/M5STACK/, "m5stack.svg"], [/PRIVATE_HW/, "private-hw.svg"],
+      [/NRF52/, "nrf52-generic.svg"],
     ];
     const hwImg = (hw) => {
       const h = String(hw || "").toUpperCase();
@@ -614,7 +618,9 @@
           if (why) errLine = `<div class="merr">${esc(why)}</div>`;
         }
         const canRead = m.kind !== "out" && m.node === id && !m.read;
-        return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}">
+        // наведение на сообщение подсвечивает собеседника на графе (адресата
+        // исходящего / отправителя входящего), если он там есть
+        return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}"${peer ? ` data-peer="${esc(peer)}"` : ""}>
           <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
           ${quoteHtml(m)}
           <div class="mtext">${esc(m.text)}</div>${errLine}

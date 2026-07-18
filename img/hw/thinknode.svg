@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 100">
+  <!-- Elecrow ThinkNode (M1/M6): портативный коммуникатор с экраном -->
+  <!-- антенна -->
+  <rect x="50" y="1" width="6" height="14" rx="3" fill="#3a3f47" stroke="#565c66" stroke-width="1.5"/>
+  <!-- корпус -->
+  <rect x="10" y="10" width="52" height="86" rx="9" fill="#2a2d33" stroke="#484d57" stroke-width="2"/>
+  <!-- экран -->
+  <rect x="17" y="18" width="38" height="46" rx="3" fill="#16241e" stroke="#2f4a3e" stroke-width="1.5"/>
+  <g stroke="#294036" stroke-width="1"><line x1="21" y1="27" x2="51" y2="27"/><line x1="21" y1="34" x2="47" y2="34"/><line x1="21" y1="41" x2="51" y2="41"/><line x1="21" y1="48" x2="43" y2="48"/></g>
+  <!-- динамик -->
+  <g fill="#4a4f58"><circle cx="30" cy="72" r="1.4"/><circle cx="36" cy="72" r="1.4"/><circle cx="42" cy="72" r="1.4"/></g>
+  <!-- кнопки -->
+  <rect x="18" y="80" width="16" height="9" rx="4.5" fill="#3a3f47" stroke="#565c66" stroke-width="1"/>
+  <circle cx="46" cy="84.5" r="5" fill="#3a3f47" stroke="#565c66" stroke-width="1"/>
+</svg>
