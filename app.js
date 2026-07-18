@@ -1556,6 +1556,19 @@
     }
     return L.circle([g.lat, g.lon], { ...st, radius: GEO_R });
   }
+  // расстояние между точками, км (гаверсинус)
+  function haversine(a, b) {
+    const R = 6371, r = Math.PI / 180;
+    const dLa = (b[0] - a[0]) * r, dLo = (b[1] - a[1]) * r;
+    const h = Math.sin(dLa / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLo / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  // цвет плеча по SNR (та же шкала «% от идеала», что и на карте связности)
+  function linkColor(snr) {
+    const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
+    const p = Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor)));
+    return `hsl(${Math.round(p * 140)}, 62%, 50%)`;
+  }
   function initGeo() {
     if (lmap) return true;
     if (typeof L === "undefined") return false;
@@ -1578,7 +1591,33 @@
     geoLayer.clearLayers();
     const pts = [], byId = {};
     (lastLive.nodes || []).forEach(n => byId[n.id] = n);
-    // соседи с broadcast-GPS — оранжевые
+    const posOf = (id) => {                    // позиция ноды: своя размещённая / GPS соседа
+      const g = geoCfg[id];
+      if (g && g.lat != null) return [g.lat, g.lon];
+      const i = (byId[id] || {}).info;
+      return (i && i.lat != null) ? [i.lat, i.lon] : null;
+    };
+    // покрытие антенн своих нод — в самом низу
+    Object.entries(geoCfg).forEach(([id, g]) => { if (g.lat != null) coverage(g).addTo(geoLayer); });
+    // RF-плечи между размещёнными нодами (неориентированные пары) с км
+    const pairs = {};
+    (lastLive.links || []).forEach(l => {
+      if (l.type !== "rf") return;
+      const A = posOf(l.from), B = posOf(l.to);
+      if (!A || !B) return;
+      const p = pairs[[l.from, l.to].sort().join("|")] ||= { A, B, snrs: [], hops: null };
+      if (l.snr != null) p.snrs.push(l.snr);
+      if (l.hops != null && p.hops == null) p.hops = l.hops;
+    });
+    Object.values(pairs).forEach(p => {
+      const km = haversine(p.A, p.B), best = p.snrs.length ? Math.max(...p.snrs) : null;
+      L.polyline([p.A, p.B], {
+        color: best != null ? linkColor(best) : "#8a8a90", weight: 2, opacity: 0.85,
+        dashArray: best == null ? "5 6" : null,
+      }).bindTooltip(`${km < 10 ? km.toFixed(2) : km.toFixed(1)} km`,
+        { permanent: true, direction: "center", className: "km-label" }).addTo(geoLayer);
+    });
+    // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий
     (lastLive.nodes || []).forEach(n => {
       const i = n.info || {};
       if (n.own || i.lat == null || i.lon == null) return;
@@ -1587,11 +1626,9 @@
         .bindTooltip(String(n.label || n.id), { direction: "top" })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
-    // свои размещённые — синие + сектор/круг покрытия антенны
     Object.entries(geoCfg).forEach(([id, g]) => {
       if (g.lat == null) return;
       pts.push([g.lat, g.lon]);
-      coverage(g).addTo(geoLayer);
       L.circleMarker([g.lat, g.lon], { radius: 9, color: "#0b0b0d", weight: 2, fillColor: "#6ea8ff", fillOpacity: 0.98 })
         .bindTooltip(String((byId[id] || {}).label || id), { direction: "top" })
         .on("click", () => openPanel(id, true)).addTo(geoLayer);

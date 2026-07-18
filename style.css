@@ -312,6 +312,12 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 body.geo-on #map { display: none; }
 body.geo-on #geomap { display: block; }
 .leaflet-container { background: #0b0b0d; }
+/* подпись расстояния (км) на RF-плече гео-карты */
+.leaflet-tooltip.km-label {
+  background: rgba(11, 11, 13, .72); color: #fff; border: 0; box-shadow: none;
+  font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 4px;
+}
+.leaflet-tooltip.km-label::before { display: none; }
 #geomap.placing, #geomap.placing .leaflet-interactive { cursor: crosshair !important; }
 /* панель размещения своих нод на гео-карте */
 #geoctl {
