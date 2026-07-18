@@ -670,13 +670,17 @@ def tg_poll_loop():
             off = tgmap.get("offset", 0)
             url = (f"https://api.telegram.org/bot{tok}/getUpdates?timeout=25"
                    f"&offset={off + 1}&allowed_updates=%5B%22message%22%5D")
-            cmd = ["curl", "-s", "--max-time", "35"]
+            # URL (с токеном) — через stdin-конфиг (-K -), чтобы токен НЕ светился
+            # в списке процессов (ps) при долгом long-poll
+            cmd = ["curl", "-s", "--max-time", "35", "-K", "-"]
             if proxy:
                 cmd += ["-x", proxy]
-            cmd.append(url)
-            r = subprocess.run(cmd, timeout=45, capture_output=True)
+            r = subprocess.run(cmd, timeout=45, capture_output=True,
+                               input=('url = "%s"\n' % url).encode())
             data = json.loads(r.stdout.decode("utf-8", "replace") or "{}")
             if not data.get("ok"):
+                if data.get("error_code") == 409:  # другой getUpdates — редко, не спамим
+                    time.sleep(10)
                 time.sleep(5)
                 continue
             dirty = False
@@ -685,11 +689,14 @@ def tg_poll_loop():
                 dirty = True
                 msg = upd.get("message") or {}
                 text = (msg.get("text") or "").strip()
-                key = str((msg.get("reply_to_message") or {}).get("message_id"))
+                rt = msg.get("reply_to_message") or {}
                 with lock:
-                    m = tgmap["map"].get(key)
+                    m = tgmap["map"].get(str(rt.get("message_id")))
                 if text and m:
                     threading.Thread(target=tg_to_mesh, args=(m, text), daemon=True).start()
+                elif text and rt:
+                    log("tg_poll: ответ в Telegram без связки с DM "
+                        "(отвечай именно на сообщение «📡 Meshtastic DM»)")
             if dirty:
                 save_tgmap()
         except Exception as e:

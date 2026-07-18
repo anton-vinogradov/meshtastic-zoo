@@ -89,6 +89,7 @@
       sendFromWhich: "send from which node", message: "message…", send: "send",
       close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
       noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
+      nodeCount: "{0} nodes · {1} own · {2} neighbors",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -136,6 +137,7 @@
       sendFromWhich: "от лица какой ноды", message: "сообщение…", send: "отправить",
       close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
       noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
+      nodeCount: "узлов: {0} · свои {1} · соседи {2}",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -1038,6 +1040,8 @@
       <label class="item toggle" title="${esc(t("showHopsTip"))}">
         <input type="checkbox" id="hopToggle" ${showHops ? "checked" : ""}>
         <span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</label>
+      <span class="item">${t("nodeCount", D.nodes.length,
+        D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
       <span class="item">${t("scan")} · ${esc(D.meta.updated)}
         ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
 
