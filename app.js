@@ -4,8 +4,8 @@
 (function () {
   // Квадратные «жетоны»: фото сверху, имя и подпись под ним — центр
   // карточки ближе к точке, дистанции читаются честнее
-  const CARD = { w: 148, h: 96, r: 12 };
-  const WCARD = { w: 148, h: 96, r: 12 };
+  const CARD = { w: 120, h: 88, r: 11 };
+  const WCARD = { w: 120, h: 88, r: 11 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
   function render(D) {
@@ -44,7 +44,7 @@
       const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
       const spanX = (Math.max(...xs) - Math.min(...xs)) || 1e-6;
       const spanY = (Math.max(...ys) - Math.min(...ys)) || 1e-6;
-      const scale = Math.min((W - 260) / spanX, (H - 250) / spanY);
+      const scale = Math.min((W - 210) / spanX, (H - 230) / spanY);
       const cx0 = (Math.max(...xs) + Math.min(...xs)) / 2;
       const cy0 = (Math.max(...ys) + Math.min(...ys)) / 2;
       ids.forEach((id, i) => {
@@ -56,10 +56,10 @@
         for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
           const a = px[ids[i]], b = px[ids[j]];
           const dx = b[0] - a[0], dy = b[1] - a[1];
-          if (Math.abs(dx) < 162 && Math.abs(dy) < 112) {
-            const over = (112 - Math.abs(dy)) / 2, s = dy >= 0 ? 1 : -1;
-            a[1] = Math.max(60, Math.min(H - 60, a[1] - s * over));
-            b[1] = Math.max(60, Math.min(H - 60, b[1] + s * over));
+          if (Math.abs(dx) < 134 && Math.abs(dy) < 104) {
+            const over = (104 - Math.abs(dy)) / 2, s = dy >= 0 ? 1 : -1;
+            a[1] = Math.max(55, Math.min(H - 55, a[1] - s * over));
+            b[1] = Math.max(55, Math.min(H - 55, b[1] + s * over));
             moved = true;
           }
         }
@@ -187,16 +187,49 @@
       const dl = Math.hypot(x2 - x1, y2 - y1) || 1;
       const ux = (x2 - x1) / dl, uy = (y2 - y1) / dl;
       x1 += ux * 3; y1 += uy * 3; x2 -= ux * 11; y2 -= uy * 11;
-      // Подпись — «пилюля» прямо на линии, повёрнутая вдоль неё:
-      // принадлежность очевидна, фон гарантирует читаемость
+
+      // Объезд чужих карточек: линия, режущая карточку, гнётся дугой от неё
+      let bend = 0, nxv = 0, nyv = 0;
+      {
+        const ddx = x2 - x1, ddy = y2 - y1;
+        const len2 = ddx * ddx + ddy * ddy || 1;
+        let worst = 0;
+        for (const o of Object.values(nodes)) {
+          if (o.id === l.from || o.id === l.to) continue;
+          const tp = ((o.cx - x1) * ddx + (o.cy - y1) * ddy) / len2;
+          if (tp < 0.1 || tp > 0.9) continue;
+          const dxo = o.cx - (x1 + ddx * tp), dyo = o.cy - (y1 + ddy * tp);
+          const need = 90 - Math.hypot(dxo, dyo);
+          if (need > worst) {
+            worst = need;
+            const s = (dxo * ddy - dyo * ddx) >= 0 ? -1 : 1;
+            const ln = Math.sqrt(len2);
+            nxv = (-ddy / ln) * s; nyv = (ddx / ln) * s;
+          }
+        }
+        bend = Math.max(0, Math.min(85, worst * 1.5));
+      }
+      const qcx = (x1 + x2) / 2 + nxv * bend * 2;
+      const qcy = (y1 + y2) / 2 + nyv * bend * 2;
+      const geom = bend
+        ? `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${qcx.toFixed(1)} ${qcy.toFixed(1)}
+            ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${col}" stroke-width="2"
+            stroke-dasharray="6 6" marker-end="url(#${mid})"/>`
+        : `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+            stroke="${col}" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#${mid})"/>`;
+
+      // Подпись — «пилюля» прямо на линии (на дуге — по кривой),
+      // повёрнутая вдоль неё: принадлежность очевидна, фон читается
       const t = l.labelT ?? (side === 1 ? 0.38 : side === -1 ? 0.62 : 0.5);
-      const lx = x1 + (x2 - x1) * t, ly = y1 + (y2 - y1) * t;
+      const qp = (tq, p0, pc, p1) =>
+        (1 - tq) ** 2 * p0 + 2 * (1 - tq) * tq * pc + tq ** 2 * p1;
+      const lx = bend ? qp(t, x1, qcx, x2) : x1 + (x2 - x1) * t;
+      const ly = bend ? qp(t, y1, qcy, y2) : y1 + (y2 - y1) * t;
       const ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
       const rot = (ang > 90 || ang < -90) ? ang + 180 : ang;
       const tw = label.length * 7.6 + 16;
       edgeSvg.push(`<g class="${cls}${dim}"><title>${esc(tip)}</title>
-        <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-          stroke="${col}" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#${mid})"/>
+        ${geom}
         <g transform="translate(${lx.toFixed(1)}, ${ly.toFixed(1)}) rotate(${rot.toFixed(1)})">
           <rect x="${-tw / 2}" y="-10" width="${tw}" height="20" rx="10"
             fill="var(--bg)" fill-opacity="0.92" stroke="${col}" stroke-opacity="0.65"/>
@@ -215,37 +248,37 @@
       const long = (n.info || {}).long;
       const tipTxt = [long !== n.label ? long : null, n.hw, n.hint].filter(Boolean).join(" · ");
       const name = String(n.label);
-      const nm = name.length > 16 ? name.slice(0, 15) + "…" : name;
+      const nm = name.length > 15 ? name.slice(0, 14) + "…" : name;
       const sub = String(n.sub);
-      const sb = sub.length > 21 ? sub.slice(0, 20) + "…" : sub;
-      const photo = `<g transform="translate(${n.cx - 22}, ${y + 8})" clip-path="url(#ph)">
-        <rect width="44" height="44" rx="8" fill="rgba(255,255,255,.06)"/>
-        <image href="${hwImg(n.hw)}" width="44" height="44" preserveAspectRatio="xMidYMid meet"/></g>`;
+      const sb = sub.length > 17 ? sub.slice(0, 16) + "…" : sub;
+      const photo = `<g transform="translate(${n.cx - 20}, ${y + 6})" clip-path="url(#ph)">
+        <rect width="40" height="40" rx="7" fill="rgba(255,255,255,.06)"/>
+        <image href="${hwImg(n.hw)}" width="40" height="40" preserveAspectRatio="xMidYMid meet"/></g>`;
       const stale = n.heard && !n.online && Date.now() / 1e3 - n.heard > 3 * 3600;
       const badge = n.online
-        ? `<circle cx="${x + n.w - 11}" cy="${y + 11}" r="4" fill="#35c98e"/>`
-        : n.heard ? `<text x="${x + n.w - 7}" y="${y + 14}" text-anchor="end" font-size="10"
+        ? `<circle cx="${x + n.w - 10}" cy="${y + 10}" r="3.5" fill="#35c98e"/>`
+        : n.heard ? `<text x="${x + n.w - 6}" y="${y + 13}" text-anchor="end" font-size="9.5"
             fill="${stale ? "#e0a03c" : "var(--muted)"}">${fmtAge(n.heard)}</text>` : "";
-      const mailBadge = unread[n.id] ? `<g transform="translate(${x + 8}, ${y + 7})">
-        <rect width="38" height="19" rx="9.5" fill="#e0a03c"/>
-        <text x="19" y="14" text-anchor="middle" font-size="11.5" font-weight="700"
+      const mailBadge = unread[n.id] ? `<g transform="translate(${x + 5}, ${y + 5})">
+        <rect width="34" height="17" rx="8.5" fill="#e0a03c"/>
+        <text x="17" y="12.5" text-anchor="middle" font-size="10.5" font-weight="700"
           fill="#141416">✉ ${unread[n.id]}</text></g>` : "";
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
         ${photo}${badge}${mailBadge}
-        <text x="${n.cx}" y="${y + 68}" text-anchor="middle" fill="var(--text)"
-          font-size="${nm.length > 12 ? 11.5 : 13.5}" font-weight="700">${esc(nm)}</text>
-        <text x="${n.cx}" y="${y + 85}" text-anchor="middle" fill="${subFill}"
-          font-size="10.5">${esc(sb)}</text>
+        <text x="${n.cx}" y="${y + 61}" text-anchor="middle" fill="var(--text)"
+          font-size="${nm.length > 11 ? 10.5 : 12}" font-weight="700">${esc(nm)}</text>
+        <text x="${n.cx}" y="${y + 77}" text-anchor="middle" fill="${subFill}"
+          font-size="9.5">${esc(sb)}</text>
       </g>`);
     }
 
     document.getElementById("map").innerHTML =
       `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="Карта mesh-сети"><defs>${rfMarkers.join("")}
-        <clipPath id="ph"><rect width="44" height="44" rx="8"/></clipPath></defs>${out.join("\n")}</svg>`;
+        <clipPath id="ph"><rect width="40" height="40" rx="7"/></clipPath></defs>${out.join("\n")}</svg>`;
 
     // Панель подробностей ноды (по клику)
     const panel = document.getElementById("panel");
@@ -272,6 +305,7 @@
       const i = n.info || {};
       const rows = [
         ["ID", n.id],
+        ["Позывной", n.short && n.short !== n.label ? n.short : null],
         ["IP", n.sub !== n.id ? n.sub : null],
         ["Модель", n.hw],
         ["Роль", i.role],

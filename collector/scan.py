@@ -76,8 +76,8 @@ def layout(ids, des):
                 s += w * (math.hypot(c[0] - ax, c[1] - ay) - d) ** 2
             for ox, oy in others:
                 dist = math.hypot(c[0] - ox, c[1] - oy)
-                if dist < 0.5:
-                    s += pen_w * (0.5 - dist) ** 2
+                if dist < 0.55:
+                    s += pen_w * (0.55 - dist) ** 2
             return s
 
         placed[nid] = min(cands, key=score)
@@ -105,8 +105,8 @@ def layout(ids, des):
                 dx = pos[b][0] - pos[a][0]
                 dy = pos[b][1] - pos[a][1]
                 dist = math.hypot(dx, dy) or 1e-6
-                if dist < 0.5:
-                    mv = (0.5 - dist) / dist * 0.15 * t
+                if dist < 0.58:
+                    mv = (0.58 - dist) / dist * 0.2 * t
                     pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
                     pos[b][0] += dx * mv; pos[b][1] += dy * mv
     return {nid: (round(p[0], 4), round(p[1], 4)) for nid, p in pos.items()}
@@ -302,9 +302,8 @@ def build(found, prev=None):
     for nid in sorted(stat):
         n = stat[nid]
         label = n.get("long") or n["short"]
-        sub = n["ip"] if label == n["short"] else f'{n["short"]} · {n["ip"]}'
         x, y = pos[nid]
-        node = dict(id=nid, label=label, sub=sub, own=True,
+        node = dict(id=nid, label=label, sub=n["ip"], short=n["short"], own=True,
                     x=round(x, 4), y=round(y, 4), online=True, heard=int(now))
         if n.get("hw"):
             node["hw"] = n["hw"]
@@ -316,9 +315,8 @@ def build(found, prev=None):
         nodes.append(node)
     for c in world:
         label = c.get("long") or c["short"]
-        sub = c["id"] if label == c["short"] else f'{c["short"]} · {c["id"]}'
         x, y = pos[c["id"]]
-        node = dict(id=c["id"], label=label, sub=sub,
+        node = dict(id=c["id"], label=label, sub=c["id"], short=c["short"],
                     x=round(x, 4), y=round(y, 4), heard=c["heard"] or None)
         if c.get("hw"):
             node["hw"] = c["hw"]
