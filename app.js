@@ -197,6 +197,7 @@
       [/T3_S3|TLORA_T3/, "tlora-t3s3-v1.svg"], [/TLORA_C6/, "tlora-c6.svg"],
       [/TLORA/, "tlora-v2-1-1_6.svg"],
       [/RAK/, "rak4631.svg"], [/BEAM/, "tbeam.svg"], [/DIY/, "diy.svg"],
+      [/PORTDUINO|NATIVE|LINUX/, "portduino.svg"],
     ];
     const hwImg = (hw) => {
       const h = String(hw || "").toUpperCase();

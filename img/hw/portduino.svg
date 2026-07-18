@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 84">
+  <!-- PORTDUINO: Meshtastic на Linux-одноплатнике (Raspberry Pi и т.п.) -->
+  <!-- плата -->
+  <rect x="6" y="8" width="104" height="68" rx="6" fill="#2c3a33" stroke="#48594f" stroke-width="2"/>
+  <!-- монтажные отверстия по углам -->
+  <g fill="#141a17" stroke="#5a6c61" stroke-width="1.5">
+    <circle cx="16" cy="18" r="3.2"/><circle cx="100" cy="18" r="3.2"/>
+    <circle cx="16" cy="66" r="3.2"/><circle cx="100" cy="66" r="3.2"/>
+  </g>
+  <!-- GPIO-гребёнка (двойной ряд золотых контактов) сверху -->
+  <g fill="#c99a2e">
+    <rect x="26" y="12.5" width="62" height="9" rx="1.5"/>
+  </g>
+  <g fill="#8f6f22">
+    <rect x="28.5" y="14" width="1.6" height="6"/><rect x="33" y="14" width="1.6" height="6"/>
+    <rect x="37.5" y="14" width="1.6" height="6"/><rect x="42" y="14" width="1.6" height="6"/>
+    <rect x="46.5" y="14" width="1.6" height="6"/><rect x="51" y="14" width="1.6" height="6"/>
+    <rect x="55.5" y="14" width="1.6" height="6"/><rect x="60" y="14" width="1.6" height="6"/>
+    <rect x="64.5" y="14" width="1.6" height="6"/><rect x="69" y="14" width="1.6" height="6"/>
+    <rect x="73.5" y="14" width="1.6" height="6"/><rect x="78" y="14" width="1.6" height="6"/>
+    <rect x="82.5" y="14" width="1.6" height="6"/>
+  </g>
+  <!-- SoC-чип по центру -->
+  <rect x="42" y="34" width="30" height="30" rx="3" fill="#20232a" stroke="#3d4550" stroke-width="1.5"/>
+  <rect x="49" y="41" width="16" height="16" rx="1.5" fill="#2b2f38"/>
+  <circle cx="46" cy="38" r="1.4" fill="#7a828e"/>
+  <!-- порты по правой грани (USB / Ethernet), выступают наружу -->
+  <g fill="#b7bcc1" stroke="#7d838a" stroke-width="1">
+    <rect x="100" y="30" width="14" height="12" rx="1.5"/>
+    <rect x="100" y="48" width="14" height="13" rx="1.5"/>
+  </g>
+  <!-- microSD-слот слева -->
+  <rect x="6" y="40" width="9" height="14" rx="1.5" fill="#9aa0a6"/>
+  <!-- мелкие пассивные компоненты -->
+  <g fill="#1b201d">
+    <rect x="24" y="52" width="7" height="4" rx="1"/>
+    <rect x="24" y="60" width="7" height="4" rx="1"/>
+    <rect x="80" y="52" width="7" height="4" rx="1"/>
+  </g>
+</svg>
