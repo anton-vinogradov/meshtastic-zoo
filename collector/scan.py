@@ -285,13 +285,33 @@ def build(found, prev=None):
     for c in world:
         rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
-    # Многохоповые ноды — ТОЛЬКО те, что были на карте раньше (в прошлом
-    # live.json), но напрямую больше не слышны: бывшие прямые соседи,
-    # деградировавшие в многохоп. Не весь меш (в nodeDB сотни дальних нод).
+    # Многохоповые ноды — бывшие прямые соседи, деградировавшие в многохоп.
+    # Не весь меш (в nodeDB сотни дальних нод): показываем только те, что
+    # КОГДА-ТО были слышны напрямую (0 хопов), и помним их по времени того
+    # последнего 0-хопа. `direct_seen` (id → ts последнего прямого приёма)
+    # переживает live.json, поэтому пропущенный скан ноду не теряет; когда
+    # последний 0-хоп уходит за окно hopMemoryH — ноду забываем.
     direct_ids = set(stat) | {c["id"] for c in world}
-    prev_ids = {n.get("id") for n in (prev.get("nodes", []) if prev else [])}
-    hops_nodes = [c for c in hop_cand.values()
-                  if c["id"] not in direct_ids and c["via"] and c["id"] in prev_ids]
+    mem_ttl = CFG.get("hopMemoryH", 24) * 3600
+    prev_meta = prev.get("meta", {}) if prev else {}
+    seen_raw = prev_meta.get("directSeen")
+    if seen_raw is None and prev:
+        # миграция со старого live.json без directSeen: засеваем из его нод,
+        # чтобы уже показанные многохопы не пропали при переходе
+        seen_raw = {n["id"]: (n.get("heard") or int(now))
+                    for n in prev.get("nodes", []) if n.get("id")}
+    direct_seen = {k: v for k, v in (seen_raw or {}).items() if now - v <= mem_ttl}
+    for nid in stat:
+        direct_seen[nid] = int(now)
+    for c in world:
+        direct_seen[c["id"]] = max(direct_seen.get(c["id"], 0), c["heard"] or int(now))
+    hops_nodes = []
+    for c in hop_cand.values():
+        if c["id"] in direct_ids or not c["via"]:
+            continue
+        ts = direct_seen.get(c["id"])
+        if ts is not None and now - ts <= mem_ttl:
+            hops_nodes.append(c)
     for c in hops_nodes:
         rf.append(dict(frm=c["id"], to=c["via"], snr=None, hops=c["hops"], heard=c["heard"]))
 
@@ -420,7 +440,7 @@ def build(found, prev=None):
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  updatedTs=int(now * 1000)),
+                  updatedTs=int(now * 1000), directSeen=direct_seen),
         nodes=nodes,
         links=out_links,
     )
