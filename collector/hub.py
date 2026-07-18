@@ -145,6 +145,11 @@ def on_receive(packet=None, interface=None):
         if not ent:
             return
         ent["last"] = time.time()
+        # ЛЮБОЙ пакет от ноды = она сейчас в эфире и свежа в базе ent → шлём ей
+        # ждущие DM ровно в этот момент (событийная доставка без вытеснения ключа)
+        fn = packet.get("from")
+        if isinstance(fn, int):
+            try_deliver_waiting(f"!{fn:08x}", ent)
         dec = (packet or {}).get("decoded") or {}
         if dec.get("portnum") == "ROUTING_APP":
             # квитанция: матчим requestId с id отправленных пакетов
@@ -162,9 +167,12 @@ def on_receive(packet=None, interface=None):
                         continue
                     if ok:
                         m["status"] = "delivered"
-                    elif (str(err) == "PKI_SEND_FAIL_PUBLIC_KEY"
-                          and CFG.get("autoKeyRequest", True) and not m.get("keyRetry")):
-                        m["keyRetry"] = 1  # оставляем "sent" (⏳): запросим ключ и повторим
+                    elif (str(err) == "PKI_SEND_FAIL_PUBLIC_KEY" and CFG.get("autoKeyRequest", True)
+                          and m.get("tries", 0) < CFG.get("keyMaxTries", 12)):
+                        # ключа пока нет — ждём появления адресата в эфире
+                        m["status"] = "waiting"
+                        m.pop("detail", None)
+                        m.setdefault("waitSince", int(time.time()))
                         pki_fail = m
                     else:
                         m["status"], m["detail"] = "failed", str(err)
@@ -173,7 +181,7 @@ def on_receive(packet=None, interface=None):
                 save_messages()
                 log(f"{'✓ доставлено' if ok else '✗ NAK ' + str(err)} (rid={rid})")
             if pki_fail:
-                auto_key_retry(pki_fail)
+                solicit_key(pki_fail["to"])  # попросить ключ; доставим, как услышим
             return
         if dec.get("portnum") != "TEXT_MESSAGE_APP":
             return
@@ -329,10 +337,10 @@ def resend(m, auto=False):
             m["status"] = "sent"
             m["ts"] = int(time.time())
             m.pop("detail", None)
-            if not auto:
-                m.pop("keyRetry", None)  # ручной повтор → снова разрешить автозапрос
+            m["tries"] = 0  # ручной повтор → сбросить счётчик, снова разрешить ожидание
+            m.pop("waitSince", None)
         save_messages()
-        log(f"{'🔁 авто-ретрай' if auto else '↻ ретрай'} {frm} → {m['to']}: {m['text'][:40]!r}")
+        log(f"↻ ретрай {frm} → {m['to']}: {m['text'][:40]!r}")
         return True
     except Exception as e:
         with lock:
@@ -342,23 +350,53 @@ def resend(m, auto=False):
         return False
 
 
-def auto_key_retry(m):
-    """Нет ключа адресата → запросить ключ (с ноды, что лучше его слышит) и
-    через keyRetryS повторить DM (раз)."""
-    frm = best_sender_for(m.get("to")) or m.get("frm")
-    ent = ent_by_id(frm) or ent_by_id(m.get("frm"))
+def solicit_key(to):
+    """Запросить ключ адресата (NodeInfo) с ноды, что лучше его слышит — чтобы
+    он вскоре прислал свой NodeInfo (с ключом); его следующий пакет и станет
+    моментом доставки (см. try_deliver_waiting)."""
+    ent = ent_by_id(best_sender_for(to) or "")
     if not ent:
-        with lock:
-            m["status"], m["detail"] = "failed", "PKI_SEND_FAIL_PUBLIC_KEY"
-        save_messages()
         return
     try:
-        request_key(ent, m["to"])
+        request_key(ent, to)
+        log(f"🔑 запросил ключ у {to} (через {ent['id']})")
     except Exception as e:
         log(f"🔑 запрос ключа не удался: {e!r}")
-    delay = CFG.get("keyRetryS", 12)
-    log(f"🔑 нет ключа {m['to']} — запросил у адресата с {ent['id']}, ретрай DM через {delay}с")
-    threading.Timer(delay, lambda: resend(m, auto=True)).start()
+
+
+def send_from(ent, m):
+    """Отправить ждущий DM ИМЕННО с ноды ent: она только что услышала адресата,
+    он свеж в её базе (с ключом), пока не вытеснило из 250-лимита."""
+    try:
+        pkt = ent["iface"].sendText(m["text"], destinationId=m["to"], wantAck=True,
+                                    replyId=m.get("replyTo") or None)
+        with lock:
+            m["frm"], m["pktId"] = ent["id"], getattr(pkt, "id", None)
+            m["status"], m["ts"] = "sent", int(time.time())
+            m.pop("detail", None)
+        save_messages()
+        log(f"🎯 доставка по контакту: {ent['id']} → {m['to']}: {m['text'][:40]!r}")
+    except Exception as e:
+        with lock:
+            m["status"] = "waiting"
+        save_messages()
+        log(f"🎯 контакт-отправка не удалась: {e!r}")
+
+
+def try_deliver_waiting(frm_id, ent):
+    """Адресат вышел в эфир (услышан ent) → шлём ждущие ему DM ПРЯМО СЕЙЧАС,
+    пока он свеж в базе ent. Событийная доставка вместо слепых ретраев."""
+    now = time.time()
+    todo = []
+    with lock:
+        for m in messages:
+            if (m.get("kind") == "out" and m.get("to") == frm_id
+                    and m.get("status") == "waiting"
+                    and now - m.get("lastTry", 0) >= 6):  # не чаще раза в 6с на сообщение
+                m["lastTry"], m["tries"] = now, m.get("tries", 0) + 1
+                todo.append(m)
+    for m in todo:
+        threading.Thread(target=send_from, args=(ent, m), daemon=True).start()
 
 
 def on_lost(interface=None):
@@ -470,15 +508,20 @@ def topo_loop():
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
         except Exception as e:
             log(f"topo: {e!r}")
-        # исходящие без квитанции дольше 90 с — помечаем честно
+        # исходящие без квитанции дольше 90 с — помечаем честно; «waiting»
+        # дольше keyWaitMin (адресат так и не появился в эфире) — сдаёмся
         try:
             dirty = False
+            now, wait_ttl = time.time(), CFG.get("keyWaitMin", 120) * 60
             with lock:
                 for m in messages:
-                    if (m.get("kind") == "out" and m.get("status") == "sent"
-                            and time.time() - m["ts"] > 90):
-                        m["status"] = "noack"
-                        dirty = True
+                    if m.get("kind") != "out":
+                        continue
+                    if m.get("status") == "sent" and now - m["ts"] > 90:
+                        m["status"], dirty = "noack", True
+                    elif (m.get("status") == "waiting"
+                          and now - m.get("waitSince", now) > wait_ttl):
+                        m["status"], m["detail"], dirty = "failed", "PKI_SEND_FAIL_PUBLIC_KEY", True
             if dirty:
                 save_messages()
         except Exception:

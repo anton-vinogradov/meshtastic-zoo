@@ -83,6 +83,7 @@
       resizeTip: "drag to resize",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
+      waiting: "waiting for node", waitingHint: "no key yet — will send the moment this node is next heard on air",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read", resend: "resend",
       reactPending: "sending…",
       sendFromWhich: "send from which node", message: "message…", send: "send",
@@ -125,6 +126,7 @@
       resizeTip: "потяните, чтобы изменить ширину",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
+      waiting: "жду ноду", waitingHint: "ключа пока нет — отправлю, как только нода снова выйдет в эфир",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано", resend: "повторить",
       reactPending: "отправляется…",
       sendFromWhich: "от лица какой ноды", message: "сообщение…", send: "отправить",
@@ -696,6 +698,7 @@
         delivered: ["✓", t("delivered"), "#35c98e"],
         failed: ["✗", t("error"), "#e05656"],
         noack: ["⚠", t("noAck"), "#e0a03c"],
+        waiting: ["🔑", t("waiting"), "#e0a03c"],
       };
       // читаемая расшифровка причины ошибки доставки (Routing.Error)
       const REASON = {
@@ -729,8 +732,11 @@
           const [g, st, c] = STATUS[m.status] || ["", "", "var(--muted)"];
           const why = m.status === "failed" && m.detail ? reasonText(m.detail) : "";
           foot = `<span class="mstatus" style="color:${c}" title="${esc(st + (why ? " · " + why : ""))}">${g} ${esc(st)}</span>` + foot;
-          if (m.status === "failed")  // причина + кнопка ручного повтора
-            errLine = `<div class="merr">${why ? esc(why) + " · " : ""}<button class="resend" data-mid="${esc(m.id)}">↻ ${esc(t("resend"))}</button></div>`;
+          if (m.status === "failed" || m.status === "waiting") {  // пояснение + ручной повтор
+            const wait = m.status === "waiting";
+            const note = wait ? t("waitingHint") : (why || "");
+            errLine = `<div class="merr${wait ? " wait" : ""}">${note ? esc(note) + " · " : ""}<button class="resend" data-mid="${esc(m.id)}">↻ ${esc(t("resend"))}</button></div>`;
+          }
         }
         const canRead = m.kind !== "out" && m.node === id && !m.read;
         // наведение на сообщение подсвечивает собеседника на графе (адресата
