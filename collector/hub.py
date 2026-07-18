@@ -31,6 +31,9 @@ CFG = scan.CFG
 OUT_LIVE = ROOT.parent / "data" / "live.json"
 OUT_MSGS = ROOT.parent / "data" / "messages.json"
 PORT = 8814
+# что можно менять из UI (остальное — только руками в config.json)
+EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "cacheMaxAgeH",
+            "topoEveryS", "rescanS", "mobile", "fragile"]
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
@@ -236,6 +239,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/messages"):
             with lock:
                 self._json({"messages": messages[-200:]})
+        elif self.path.startswith("/api/config"):
+            with lock:
+                self._json({k: CFG.get(k) for k in EDITABLE})
         else:
             super().do_GET()
 
@@ -270,6 +276,37 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": repr(e)}, 500)
+        elif self.path == "/api/config":
+            clean = {}
+            for k in EDITABLE:
+                if k not in body:
+                    continue
+                v = body[k]
+                if k in ("subnets", "mobile", "fragile"):
+                    if not isinstance(v, list) or not all(isinstance(s, str) for s in v):
+                        continue
+                elif k == "snrScale":
+                    if (not isinstance(v, dict)
+                            or not all(isinstance(v.get(f), (int, float)) for f in ("floor", "ideal"))
+                            or v["floor"] >= v["ideal"]):
+                        continue
+                elif not isinstance(v, (int, float)) or v <= 0:
+                    continue
+                clean[k] = v
+            if not clean:
+                self._json({"ok": False, "error": "нечего применить"}, 400)
+                return
+            with lock:
+                CFG.update(clean)
+                try:
+                    disk = json.loads((ROOT / "config.json").read_text())
+                except Exception:
+                    disk = {}
+                disk.update(clean)
+                (ROOT / "config.json").write_text(
+                    json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
+            log(f"⚙ конфиг обновлён: {', '.join(clean)}")
+            self._json({"ok": True})
         else:
             self._json({"ok": False, "error": "нет такого API"}, 404)
 

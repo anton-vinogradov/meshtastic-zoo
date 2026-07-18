@@ -70,15 +70,20 @@ Clicking opens the details panel:
 - Device photos are the official renders from the Meshtastic project
   (web-flasher); an unknown model gets a placeholder.
 
-## Settings (collector/config.json)
+## Settings
 
-- `subnets` — your sites' subnets: where to look for nodes;
-- `snrScale` — the color scale: which SNR counts as zero and which as
-  ideal;
-- `worldMaxAgeH` — how many hours to keep a silent neighbor on the map;
-- `mobile` — roaming nodes (dashed frame on the map);
-- `known` / `names` — addresses and names as a fallback when a node
-  does not answer.
+The **⚙** button in the top-right corner of the map. All the important
+things live there:
+
+- your sites' subnets — where to look for nodes;
+- the color scale: which SNR counts as zero and which as ideal;
+- how many hours to keep a silent neighbor on the map;
+- the map refresh and new-node discovery periods;
+- roaming nodes (dashed frame) and "fragile" subnets.
+
+Changes apply on the fly and are saved to `collector/config.json`;
+rare things like fallback node addresses (`known` / `names`) live in
+that file too.
 
 ## Roadmap
 

@@ -543,7 +543,87 @@
       document.getElementById("panel").classList.remove("open");
       openId = null;
     }
+    if (!e.target.closest("#settings") && !e.target.closest("#gear")) {
+      document.getElementById("settings").classList.remove("open");
+    }
   });
+
+  // ---- Настройки (⚙): читаются и сохраняются через hub ----
+  const SET_FIELDS = [
+    ["subnets", "Подсети площадок (по одной на строку)", "area"],
+    ["snrScale.floor", "0% качества при SNR, дБ", "num"],
+    ["snrScale.ideal", "100% качества при SNR, дБ", "num"],
+    ["worldMaxAgeH", "Держать молчащего соседа, часов", "num"],
+    ["cacheMaxAgeH", "Помнить плечи в кэше, часов", "num"],
+    ["topoEveryS", "Обновление карты, секунд", "num"],
+    ["rescanS", "Поиск новых нод, секунд", "num"],
+    ["mobile", "Кочующие ноды (id, по одному)", "area"],
+    ["fragile", "Хрупкие подсети (префикс, по одному)", "area"],
+  ];
+  const setEl = document.getElementById("settings");
+  const sfId = (k) => "sf-" + k.replace(".", "-");
+
+  async function openSettings() {
+    let cfg = {};
+    try {
+      cfg = await (await fetch("/api/config", { cache: "no-store" })).json();
+    } catch {
+      setEl.innerHTML = "<b class='stitle'>Настройки</b><div class='shint'>hub недоступен</div>";
+      setEl.classList.add("open");
+      return;
+    }
+    const val = (k) => k.includes(".")
+      ? (cfg[k.split(".")[0]] || {})[k.split(".")[1]]
+      : cfg[k];
+    setEl.innerHTML = `<button id="sclose" aria-label="закрыть">×</button>
+      <b class="stitle">Настройки</b>` +
+      SET_FIELDS.map(([k, label, kind]) => kind === "area"
+        ? `<label class="srow"><span>${label}</span>
+            <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
+        : `<label class="srow"><span>${label}</span>
+            <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
+      ).join("") +
+      `<button id="ssave">Сохранить</button>
+       <div class="shint">хранится в collector/config.json;
+         карта подхватит при следующем обновлении (до минуты)</div>`;
+    setEl.classList.add("open");
+    document.getElementById("panel").classList.remove("open");
+    openId = null;
+    setEl.querySelector("#sclose").onclick = () => setEl.classList.remove("open");
+    setEl.querySelector("#ssave").onclick = async () => {
+      const g = (k) => document.getElementById(sfId(k));
+      const lines = (el) => el.value.split("\n").map(s => s.trim()).filter(Boolean);
+      const body = {
+        subnets: lines(g("subnets")),
+        snrScale: { floor: +g("snrScale.floor").value, ideal: +g("snrScale.ideal").value },
+        worldMaxAgeH: +g("worldMaxAgeH").value,
+        cacheMaxAgeH: +g("cacheMaxAgeH").value,
+        topoEveryS: +g("topoEveryS").value,
+        rescanS: +g("rescanS").value,
+        mobile: lines(g("mobile")),
+        fragile: lines(g("fragile")),
+      };
+      const btn = setEl.querySelector("#ssave");
+      btn.disabled = true;
+      let res = { ok: false, error: "hub недоступен" };
+      try {
+        res = await (await fetch("/api/config", {
+          method: "POST", body: JSON.stringify(body),
+        })).json();
+      } catch { }
+      btn.disabled = false;
+      if (res.ok) {
+        btn.textContent = "✓ сохранено";
+        setTimeout(() => { btn.textContent = "Сохранить"; }, 1800);
+      } else {
+        alert("Не сохранилось: " + (res.error || "?"));
+      }
+    };
+  }
+  document.getElementById("gear").onclick = () => {
+    if (setEl.classList.contains("open")) setEl.classList.remove("open");
+    else openSettings();
+  };
   async function tick() {
     try {
       const r = await fetch("/api/messages", { cache: "no-store" });
