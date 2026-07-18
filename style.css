@@ -44,6 +44,8 @@ body {
   align-items: center;
 }
 #legend .item { display: flex; align-items: center; gap: 7px; }
+#legend .item.toggle { cursor: pointer; user-select: none; }
+#legend .item.toggle input { cursor: pointer; margin: 0; accent-color: #8fce6a; }
 #legend .swatch { width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; }
 #legend .swatch.dashed { border-top-style: dashed; }
 #legend .grad {

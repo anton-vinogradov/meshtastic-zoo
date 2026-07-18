@@ -11,6 +11,7 @@
 
   // Язык интерфейса выбирается в настройках, хранится локально
   let lang = localStorage.getItem("mzLang") || "en";
+  let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
   const T = {
     en: {
       callsign: "Callsign", model: "Model", role: "Role", battery: "Battery",
@@ -21,6 +22,7 @@
       publicChannel: "Public channel", gotByLabel: "received by",
       chNoMsg: "no messages yet",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
+      showHops: "multi-hop", showHopsTip: "show former direct neighbors that slipped to multi-hop",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
@@ -50,6 +52,7 @@
       publicChannel: "Публичный канал", gotByLabel: "приняли",
       chNoMsg: "пока пусто",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
+      showHops: "многохопы", showHopsTip: "показывать бывших прямых соседей, ушедших в многохоп",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
@@ -78,6 +81,16 @@
   };
 
   function render(D) {
+    // Галочка «многохопы» снята → убираем серые hop-ноды и их плечи из данных
+    // до раскладки (карта тогда вписывается только по реальным нодам)
+    if (!showHops) {
+      const drop = new Set(D.nodes.filter(n => n.hop != null).map(n => n.id));
+      if (drop.size) D = {
+        ...D,
+        nodes: D.nodes.filter(n => n.hop == null),
+        links: D.links.filter(l => !drop.has(l.from) && !drop.has(l.to)),
+      };
+    }
     // Холст подстраивается под пропорции окна — свободного места не остаётся
     const box = document.getElementById("map").getBoundingClientRect();
     const H = 1150;
@@ -747,6 +760,9 @@
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
       <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
+      <label class="item toggle" title="${esc(t("showHopsTip"))}">
+        <input type="checkbox" id="hopToggle" ${showHops ? "checked" : ""}>
+        <span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</label>
       <span class="item">${t("scan")} · ${esc(D.meta.updated)}
         ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
 
@@ -934,6 +950,13 @@
   };
   window.addEventListener("resize", refit);
   new ResizeObserver(refit).observe(document.getElementById("map"));
+  // Галочка «многохопы» в легенде: делегируем на #legend (он пересобирается)
+  document.getElementById("legend").addEventListener("change", (e) => {
+    if (e.target.id !== "hopToggle") return;
+    showHops = e.target.checked;
+    localStorage.setItem("mzShowHops", showHops ? "1" : "0");
+    if (lastLive) render(lastLive);
+  });
   // канал по умолчанию свёрнут; вкладка слева разворачивает
   if (localStorage.getItem("mzChanOpen") !== "1") document.body.classList.add("chan-collapsed");
   document.getElementById("chtab").onclick = () => setChan(true);
