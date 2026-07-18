@@ -18,7 +18,28 @@ python3 -m http.server 8814
 # → http://localhost:8814
 ```
 
-## Live mode: network scan
+## Hub: the live center (recommended)
+
+```sh
+python3 collector/hub.py   # site + API + listeners on :8814
+```
+
+The hub keeps permanent TCP connections to your own nodes and does
+everything at once:
+
+- **mail**: direct messages to your nodes accumulate in
+  `data/messages.json`; the map shows a global "✉ N" marker in the
+  corner and an envelope on the node's token; the node panel shows the
+  messages themselves, a reply to the sender **from that node** (the ➤
+  button) and a "mark as read" (✓);
+- **topology**: every `topoEveryS` seconds `live.json` is rebuilt from
+  the live nodeDBs — no reconnects, which fragile nodes appreciate;
+- **API**: `GET /api/messages`, `POST /api/send {node, to, text}`,
+  `POST /api/read {ids}`;
+- new nodes in the subnets are picked up by a rescan every `rescanS`
+  seconds (the port scan never touches your live connections).
+
+## One-shot scan without the hub
 
 The collector discovers nodes by itself (scans the subnets for an open
 TCP API port), queries them, and assembles the map from their nodeDB —
@@ -113,4 +134,6 @@ repository (`img/hw/`); an unknown model gets a placeholder image.
 - [x] Stage 2: collector — subnet scan + node queries over the TCP API,
       auto-generated `data/live.json`, live re-rendering
 - [x] Stage 2.5: battery, uptime, "last seen", click-through details panel
+- [x] Stage 4: mail — unread direct messages on the nodes, markers on
+      the map, replying to the sender from the right node (hub)
 - [ ] Stage 3: measurement history and link quality charts

@@ -75,6 +75,15 @@
       nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
     }
 
+    // Непрочитанные личные сообщения: счётчики для маркеров
+    const unread = {};
+    let unreadTotal = 0;
+    for (const m of msgs) {
+      if (m.read) continue;
+      unreadTotal++;
+      unread[m.node] = (unread[m.node] || 0) + 1;
+    }
+
     // % от идеала по SNR и непрерывный цвет: 0% — красный (hue 0), 100% — зелёный (hue 140)
     const S = D.meta.snrScale;
     const pctOf = (snr) => Math.round(
@@ -217,11 +226,15 @@
         ? `<circle cx="${x + n.w - 11}" cy="${y + 11}" r="4" fill="#35c98e"/>`
         : n.heard ? `<text x="${x + n.w - 7}" y="${y + 14}" text-anchor="end" font-size="10"
             fill="${stale ? "#e0a03c" : "var(--muted)"}">${fmtAge(n.heard)}</text>` : "";
+      const mailBadge = unread[n.id] ? `<g transform="translate(${x + 8}, ${y + 7})">
+        <rect width="38" height="19" rx="9.5" fill="#e0a03c"/>
+        <text x="19" y="14" text-anchor="middle" font-size="11.5" font-weight="700"
+          fill="#141416">✉ ${unread[n.id]}</text></g>` : "";
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
-        ${photo}${badge}
+        ${photo}${badge}${mailBadge}
         <text x="${n.cx}" y="${y + 68}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 12 ? 11.5 : 13.5}" font-weight="700">${esc(nm)}</text>
         <text x="${n.cx}" y="${y + 85}" text-anchor="middle" fill="${subFill}"
@@ -241,7 +254,18 @@
       return (d ? d + " д " : "") + (h ? h + " ч " : "") + m + " м";
     };
     const lbl = (id) => (nodes[id] || { label: id }).label;
-    function showPanel(id) {
+    async function markRead(ids) {
+      try {
+        await fetch("/api/read", { method: "POST", body: JSON.stringify({ ids }) });
+      } catch { }
+      for (const m of msgs) if (ids.includes(m.id)) m.read = true;
+    }
+    function showPanel(id, force) {
+      // не перерисовывать панель под руками, пока пользователь пишет ответ
+      if (!force) {
+        const typing = panel.querySelector(".reply");
+        if (typing && (typing.value || document.activeElement === typing)) return;
+      }
       const n = nodes[id];
       if (!n) { panel.classList.remove("open"); openId = null; return; }
       openId = id;
@@ -286,21 +310,61 @@
         (singles.length ? `<div class="psub">одиночные</div>` : "") +
         `<div class="singles">${singles.map(r =>
           legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(lbl(r.other)))).join("")}</div>`;
+      // Сообщения этой ноды: непрочитанные сверху, с формой ответа
+      const nodeMsgs = msgs.filter(m => m.node === id)
+        .sort((a, b) => (a.read - b.read) || (b.ts - a.ts)).slice(0, 8);
+      const msgHtml = nodeMsgs.length ? `<div class="pmsgs"><b>Сообщения</b>` +
+        nodeMsgs.map(m => `
+          <div class="msg${m.read ? " done" : ""}">
+            <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span>
+              <span class="age">${fmtAgo(m.ts)}</span></div>
+            <div class="mtext">${esc(m.text)}</div>
+            ${m.read ? "" : `<div class="mact" data-mid="${esc(m.id)}" data-to="${esc(m.frm)}">
+              <input class="reply" placeholder="ответить от ${esc(n.label)}…">
+              <button class="msend" title="отправить с этой ноды">➤</button>
+              <button class="mok" title="пометить прочитанным">✓</button></div>`}
+          </div>`).join("") + `</div>` : "";
+
       panel.innerHTML = `
         <button id="pclose" aria-label="закрыть">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
           <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v]) => `<div class="prow"><span>${k}</span><span>${esc(String(v))}</span></div>`).join("")}
+        ${msgHtml}
         ${legs ? `<div class="plegs"><b>Плечи</b>${legs}</div>` : ""}`;
       panel.classList.add("open");
       panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; };
+      panel.querySelectorAll(".mact").forEach(row => {
+        const inp = row.querySelector(".reply");
+        const mid = row.dataset.mid, to = row.dataset.to;
+        row.querySelector(".msend").onclick = async () => {
+          const text = inp.value.trim();
+          if (!text) { inp.focus(); return; }
+          row.querySelector(".msend").disabled = true;
+          let res = { ok: false, error: "hub недоступен" };
+          try {
+            res = await (await fetch("/api/send", {
+              method: "POST", body: JSON.stringify({ node: id, to, text }),
+            })).json();
+          } catch { }
+          if (res.ok) { await markRead([mid]); showPanel(id, true); }
+          else {
+            row.querySelector(".msend").disabled = false;
+            alert("Не отправилось: " + (res.error || "?"));
+          }
+        };
+        row.querySelector(".mok").onclick = async () => {
+          await markRead([mid]);
+          showPanel(id, true);
+        };
+      });
     }
 
     // Наведение на ноду — подсветить её линки и соседей; клик — панель
     const svgEl = document.querySelector("#map svg");
     for (const g of svgEl.querySelectorAll(".node")) {
-      g.addEventListener("click", (ev) => { ev.stopPropagation(); showPanel(g.dataset.id); });
+      g.addEventListener("click", (ev) => { ev.stopPropagation(); showPanel(g.dataset.id, true); });
       g.addEventListener("mouseenter", () => {
         const id = g.dataset.id;
         svgEl.classList.add("focus");
@@ -328,6 +392,20 @@
       <span class="item">скан · ${esc(D.meta.updated)}
         ${stale ? '<b style="color:#e0a03c">· устарело!</b>' : ""}</span>`;
 
+    // Общий маркер непрочитанной почты
+    const mailEl = document.getElementById("mail");
+    if (unreadTotal) {
+      mailEl.hidden = false;
+      mailEl.textContent = `✉ ${unreadTotal}`;
+      mailEl.title = "непрочитанные личные сообщения — клик откроет ноду";
+      mailEl.onclick = () => {
+        const nid = Object.keys(unread).find(k => nodes[k]);
+        if (nid) showPanel(nid, true);
+      };
+    } else {
+      mailEl.hidden = true;
+    }
+
     if (openId) showPanel(openId); // обновить открытую панель свежими данными
   }
 
@@ -339,7 +417,7 @@
     } catch { return null; }
   }
 
-  let lastStamp = "", openId = null, lastLive = null, rsTimer = null;
+  let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [];
   const refit = () => {
     clearTimeout(rsTimer);
     rsTimer = setTimeout(() => { if (lastLive) render(lastLive); }, 200);
@@ -353,6 +431,10 @@
     }
   });
   async function tick() {
+    try {
+      const r = await fetch("/api/messages", { cache: "no-store" });
+      if (r.ok) msgs = (await r.json()).messages || [];
+    } catch { /* hub не запущен — карта работает и без почты */ }
     const live = await loadLive();
     if (!live) {
       if (lastStamp !== "empty") {

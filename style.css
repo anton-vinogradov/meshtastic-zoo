@@ -55,6 +55,57 @@ body {
   vertical-align: middle;
 }
 
+/* Общий маркер непрочитанной почты */
+#mail {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 6;
+  background: #e0a03c;
+  color: #141416;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+}
+
+/* Сообщения в панели */
+#panel .pmsgs { margin-top: 12px; }
+#panel .pmsgs > b { display: block; margin-bottom: 5px; }
+#panel .msg {
+  background: rgba(224, 160, 60, .10);
+  border: 1px solid rgba(224, 160, 60, .35);
+  border-radius: 9px;
+  padding: 7px 9px;
+  margin-bottom: 7px;
+}
+#panel .msg.done { background: rgba(255, 255, 255, .04); border-color: transparent; opacity: .75; }
+#panel .msg .mh { display: flex; justify-content: space-between; gap: 8px; }
+#panel .msg .mfrom { font-weight: 600; }
+#panel .msg .mtext { margin: 3px 0 5px; white-space: pre-wrap; word-break: break-word; }
+#panel .msg .mact { display: flex; gap: 6px; }
+#panel .msg .reply {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--zone-stroke);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 13px;
+}
+#panel .msg .mact button {
+  background: rgba(255, 255, 255, .08);
+  border: none;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+#panel .msg .mact button:disabled { opacity: .4; cursor: default; }
+
 /* Панель подробностей ноды */
 #panel {
   position: fixed;
