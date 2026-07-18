@@ -28,8 +28,10 @@
     "enabled": true,
     "tgToken": "",
     "tgChat": "",
+    "tgProxy": "",
     "dm": true,
     "lowBatt": true,
-    "lowBattPct": 20
+    "lowBattPct": 20,
+    "tgReply": true
   }
 }

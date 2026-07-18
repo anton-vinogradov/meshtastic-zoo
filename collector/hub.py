@@ -36,6 +36,7 @@ CFG = scan.CFG
 OUT_LIVE = ROOT.parent / "data" / "live.json"
 OUT_MSGS = ROOT.parent / "data" / "messages.json"
 OUT_CHAN = ROOT.parent / "data" / "channel.json"
+OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "cacheMaxAgeH",
@@ -45,6 +46,9 @@ lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
 messages = []  # личные: [{id, node, frm, frmName, text, ts, snr, read}]
 channel = []   # публичный канал: [{id, pid, frm, frmName, text, ts, ch, gotBy}]
+# маппинг для двустороннего Telegram-моста: telegram msg_id → {node, peer, ...}
+# (ответ-цитата в Telegram на зеркалированный DM → отправка в меш от той ноды)
+tgmap = {"offset": 0, "map": {}}
 
 
 def log(msg):
@@ -84,6 +88,27 @@ def load_messages():
     global messages, channel
     messages = load_list(OUT_MSGS)
     channel = load_list(OUT_CHAN)
+
+
+def load_tgmap():
+    global tgmap
+    try:
+        d = json.loads(OUT_TGMAP.read_text())
+        if isinstance(d, dict) and isinstance(d.get("map"), dict):
+            tgmap = {"offset": int(d.get("offset", 0)), "map": d["map"]}
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"⚠ tgmap: {e!r}")
+
+
+def save_tgmap():
+    with lock:
+        # держим только последние ~500 связок, чтобы файл не пух
+        keys = list(tgmap["map"])
+        for k in keys[:-500]:
+            del tgmap["map"][k]
+        atomic_write(OUT_TGMAP, json.dumps(tgmap, ensure_ascii=False))
 
 
 def save_messages():
@@ -251,8 +276,8 @@ def on_receive(packet=None, interface=None):
         save_messages()
         log(f"✉ {msg['frmName']} → {ent['id']}: {msg['text'][:60]!r}")
         if (CFG.get("alerts") or {}).get("dm", True):
-            own = (CFG.get("names") or {}).get(ent["id"], ent["id"])
-            alert(f"📡 Meshtastic DM → {own}\nот {msg['frmName']}:\n{text}")
+            threading.Thread(target=mirror_dm, daemon=True,
+                             args=(ent["id"], frm, msg["frmName"], msg.get("pid"), text)).start()
     except Exception as e:
         log(f"on_receive: {e!r}")
 
@@ -549,6 +574,129 @@ def check_batt(data):
             _batt_alerted.discard(nid)
 
 
+def clip_bytes(s, limit=200):
+    b = (s or "").encode("utf-8")
+    return s if len(b) <= limit else b[:limit].decode("utf-8", "ignore")
+
+
+def send_dm(node, to, text, reply_id=None):
+    """Отправить личное с ноды node адресату to + записать исходящее (как /api/send).
+    Возвращает (ok, err)."""
+    with lock:
+        ent = next((c for c in conns.values() if c.get("id") == node and c.get("iface")), None)
+    if not ent or not to or not text:
+        return False, "нода не на связи или пустой текст"
+    try:
+        pkt = ent["iface"].sendText(text, destinationId=to, wantAck=True, replyId=reply_id or None)
+        pid = getattr(pkt, "id", None)
+        out = dict(kind="out", id=f"out·{pid or int(time.time() * 1000)}", pktId=pid,
+                   frm=node, to=to, text=text, ts=int(time.time()), status="sent", read=True)
+        if reply_id:
+            out["replyTo"] = reply_id
+        with lock:
+            messages.append(out)
+        save_messages()
+        log(f"➤ {node} → {to}: {text[:60]!r} (pkt {pid})")
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def tg_send(text):
+    """Отправить в Telegram через telegram.sh с -I; вернуть список message_id."""
+    a = CFG.get("alerts") or {}
+    tok, chat = a.get("tgToken"), a.get("tgChat")
+    if not (a.get("enabled", True) and tok and chat):
+        return []
+    ids = []
+    try:
+        cmd = [ALERT_BIN, "-t", str(tok), "-a", "3", "-I"]
+        for c in str(chat).replace(",", " ").split():
+            cmd += ["-c", c]
+        cmd.append(text)
+        r = subprocess.run(cmd, timeout=90, capture_output=True)
+        for line in r.stdout.decode("utf-8", "replace").splitlines():
+            p = line.split()
+            if len(p) >= 3 and p[0] == "msgid":
+                try:
+                    ids.append(int(p[2]))
+                except ValueError:
+                    pass
+    except Exception as e:
+        log(f"tg_send: {e!r}")
+    return ids
+
+
+def mirror_dm(node, peer, peer_name, pid, text):
+    """Входящий DM → в Telegram; запомнить msg_id→(нода,адресат) для ответа-цитаты."""
+    own = (CFG.get("names") or {}).get(node, node)
+    ids = tg_send(f"📡 Meshtastic DM → {own}\nот {peer_name}:\n{text}")
+    if ids:
+        with lock:
+            for mid in ids:
+                tgmap["map"][str(mid)] = dict(node=node, peer=peer, peerName=peer_name, pid=pid)
+        save_tgmap()
+
+
+def tg_to_mesh(m, text):
+    """Ответ-цитата из Telegram → отправить в меш от исходной ноды (или лучшей)."""
+    node, peer = m.get("node"), m.get("peer")
+    text = clip_bytes(text, 200)
+    with lock:
+        online = any(c.get("id") == node and c.get("iface") for c in conns.values())
+    if not online:
+        alt = best_sender_for(peer)  # исходная нода оффлайн — шлём с лучшей слышащей
+        if alt:
+            node = alt["id"]
+    ok, err = send_dm(node, peer, text, reply_id=m.get("pid"))
+    if ok:
+        log(f"📩→📡 Telegram-ответ ушёл: {node} → {peer}: {text[:40]!r}")
+    else:
+        log(f"📩→📡 не отправлено ({err})")
+        tg_send(f"⚠️ не отправил {m.get('peerName', peer)}: {err}")
+
+
+def tg_poll_loop():
+    """Поллинг getUpdates: ответ-цитата в Telegram на зеркалированный DM → в меш."""
+    load_tgmap()
+    while True:
+        a = CFG.get("alerts") or {}
+        tok = a.get("tgToken")
+        if not (a.get("enabled", True) and a.get("tgReply", True) and tok):
+            time.sleep(30)
+            continue
+        proxy = a.get("tgProxy") or ""
+        try:
+            off = tgmap.get("offset", 0)
+            url = (f"https://api.telegram.org/bot{tok}/getUpdates?timeout=25"
+                   f"&offset={off + 1}&allowed_updates=%5B%22message%22%5D")
+            cmd = ["curl", "-s", "--max-time", "35"]
+            if proxy:
+                cmd += ["-x", proxy]
+            cmd.append(url)
+            r = subprocess.run(cmd, timeout=45, capture_output=True)
+            data = json.loads(r.stdout.decode("utf-8", "replace") or "{}")
+            if not data.get("ok"):
+                time.sleep(5)
+                continue
+            dirty = False
+            for upd in data.get("result", []):
+                tgmap["offset"] = max(tgmap.get("offset", 0), upd.get("update_id", 0))
+                dirty = True
+                msg = upd.get("message") or {}
+                text = (msg.get("text") or "").strip()
+                key = str((msg.get("reply_to_message") or {}).get("message_id"))
+                with lock:
+                    m = tgmap["map"].get(key)
+                if text and m:
+                    threading.Thread(target=tg_to_mesh, args=(m, text), daemon=True).start()
+            if dirty:
+                save_tgmap()
+        except Exception as e:
+            log(f"tg_poll: {e!r}")
+            time.sleep(5)
+
+
 _hist_last = 0.0
 _prune_last = 0.0
 
@@ -822,10 +970,12 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main():
     load_messages()
+    load_tgmap()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     threading.Thread(target=keeper, daemon=True).start()
     threading.Thread(target=topo_loop, daemon=True).start()
+    threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
 
