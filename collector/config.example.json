@@ -1,14 +1,11 @@
 {
   "subnets": [
-    "10.77.77.0/24",
-    "10.88.88.0/24"
+    "10.0.0.0/24"
   ],
   "port": 4403,
   "connectTimeoutS": 0.6,
   "queryTimeoutS": 45,
-  "fragile": [
-    "10.77.77."
-  ],
+  "fragile": [],
   "worldMaxAgeH": 24,
   "cacheMaxAgeH": 6,
   "hopSettleMin": 3,
@@ -24,21 +21,7 @@
     "floor": -20,
     "ideal": 10
   },
-  "mobile": [
-    "!702bde48"
-  ],
-  "known": {
-    "10.88.88.41": "!f69145b4",
-    "10.88.88.40": "!435ade20",
-    "10.88.88.42": "!702bde48",
-    "10.77.77.41": "!f696065c",
-    "10.77.77.40": "!435acda4"
-  },
-  "names": {
-    "!f69145b4": "FC1",
-    "!435ade20": "FCA",
-    "!702bde48": "FADV",
-    "!f696065c": "FC2",
-    "!435acda4": "FCB"
-  }
+  "mobile": [],
+  "known": {},
+  "names": {}
 }

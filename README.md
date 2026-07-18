@@ -22,25 +22,29 @@ is a list in `collector/config.json`.
 
 ### On a server (systemd)
 
-Put it on an always-on box that can reach your nodes (same LAN). Clone the
-repo and run the installer — it makes a venv, installs the dependency,
-copies `config.example.json` → `config.json` on first run, and registers a
-`meshtastic-zoo` systemd service:
+Put it on an always-on box that can reach your nodes (same LAN). One line —
+`install.sh` clones the repo (into `/opt/meshtastic-zoo`), makes a venv,
+installs the dependency, seeds `config.json` from `config.example.json`,
+and registers a `meshtastic-zoo` systemd service:
 
 ```sh
-git clone <repo-url> meshtastic-zoo
-cd meshtastic-zoo
-./install.sh          # run as your user, not root; it sudo's for systemd
+curl -fsSL https://raw.githubusercontent.com/anton-vinogradov/meshtastic-zoo/main/install.sh | bash
+# or, running as root:  … | sudo bash
 ```
 
-To update later:
+Re-run the same line to update (it's idempotent and git-pulls itself). Or,
+from a clone (works for a private repo without piping to a shell):
 
 ```sh
-git pull && ./install.sh
+git clone <repo-url> meshtastic-zoo && cd meshtastic-zoo && ./install.sh
 ```
 
-`config.json` is per-install (git-ignored), so updates never clobber the
-settings you change from the ⚙ panel. Logs: `journalctl -u meshtastic-zoo -f`.
+The one-liner needs the repo reachable by `git clone` — public, or with a
+credential helper configured on the server. `config.json` is per-install
+(git-ignored) and `config.example.json` is a generic template, so nothing
+private ships in the repo and updates never clobber your ⚙ settings. On
+first run, set your subnets in the ⚙ panel. Logs:
+`journalctl -u meshtastic-zoo -f`.
 
 ## What's on the map
 

@@ -23,24 +23,28 @@ python3 collector/hub.py
 ### На сервере (systemd)
 
 Ставь на всегда-включённую машину, которая достаёт до нод (та же сеть).
-Клонируй репозиторий и запусти установщик — он сделает venv, поставит
-зависимость, при первом запуске скопирует `config.example.json` →
-`config.json` и зарегистрирует systemd-сервис `meshtastic-zoo`:
+Одной строкой — `install.sh` сам клонирует репозиторий (в
+`/opt/meshtastic-zoo`), сделает venv, поставит зависимость, создаст
+`config.json` из `config.example.json` и зарегистрирует systemd-сервис
+`meshtastic-zoo`:
 
 ```sh
-git clone <repo-url> meshtastic-zoo
-cd meshtastic-zoo
-./install.sh          # от обычного пользователя, не root; sudo вызовется сам
+curl -fsSL https://raw.githubusercontent.com/anton-vinogradov/meshtastic-zoo/main/install.sh | bash
+# или от root:  … | sudo bash
 ```
 
-Обновление позже:
+Повтори ту же строку для обновления (идемпотентно, `git pull` делается
+сам). Либо из клона (работает и для приватного репо, без пайпа в шелл):
 
 ```sh
-git pull && ./install.sh
+git clone <repo-url> meshtastic-zoo && cd meshtastic-zoo && ./install.sh
 ```
 
-`config.json` — свой на каждой установке (в .gitignore), так что обновления
-не затирают настройки, которые ты меняешь в панели ⚙.
+Однострочнику нужно, чтобы репо клонировался (`git clone`) — публичный
+или с настроенным на сервере доступом. `config.json` — свой на каждой
+установке (в .gitignore), а `config.example.json` — обобщённый шаблон, так
+что ничего приватного в репо не уезжает и обновления не затирают твои
+⚙-настройки. При первом запуске задай подсети в панели ⚙.
 Логи: `journalctl -u meshtastic-zoo -f`.
 
 ## Что на карте
