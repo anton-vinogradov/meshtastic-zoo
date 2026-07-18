@@ -13,6 +13,7 @@
   let lang = localStorage.getItem("mzLang") || "en";
   let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
+  let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
 
   // Лимит текста Meshtastic (payload ~200 байт), Enter-отправка, авто-обрезка.
   const MAX_MSG_BYTES = 200;
@@ -97,6 +98,8 @@
       antOmni: "omni", antDir: "directional", antAzim: "az",
       geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
+      critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
+      critLine: "single point of failure: −{0} node(s) if it drops",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -151,6 +154,8 @@
       antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
       geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
+      critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
+      critLine: "единая точка отказа: −{0} нод при её отказе",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -251,6 +256,35 @@
       + `${extraLines}</svg>`;
   }
 
+  // Единые точки отказа (Фаза 4): для каждого ретранслятора считаем, сколько нод
+  // потеряют связь со ВСЕМ флотом при его отказе (BFS от своих нод без кандидата).
+  function computeCriticality(nodes, links) {
+    const adj = {}, ownSet = new Set();
+    nodes.forEach(n => { adj[n.id] = new Set(); if (n.own) ownSet.add(n.id); });
+    links.forEach(l => {
+      if (l.type !== "rf" || (l.snr == null && !l.hops)) return;  // «нет данных» не ребро
+      if (!adj[l.from] || !adj[l.to]) return;
+      adj[l.from].add(l.to); adj[l.to].add(l.from);
+    });
+    const reach = (excl) => {
+      const seen = new Set(), q = [];
+      ownSet.forEach(o => { if (o !== excl) { seen.add(o); q.push(o); } });
+      while (q.length) {
+        for (const nb of adj[q.pop()]) if (nb !== excl && !seen.has(nb)) { seen.add(nb); q.push(nb); }
+      }
+      return seen;
+    };
+    const base = reach(null), crit = {};
+    nodes.forEach(n => {
+      if (n.own || !base.has(n.id)) return;
+      const r = reach(n.id);
+      let lost = 0;
+      base.forEach(m => { if (m !== n.id && !r.has(m)) lost++; });
+      if (lost > 0) crit[n.id] = lost;
+    });
+    return crit;
+  }
+
   function render(D) {
     // Галочка «многохопы» снята → убираем серые hop-ноды и их плечи из данных
     // до раскладки (карта тогда вписывается только по реальным нодам)
@@ -262,6 +296,7 @@
         links: D.links.filter(l => !drop.has(l.from) && !drop.has(l.to)),
       };
     }
+    const crit = computeCriticality(D.nodes, D.links);  // единые точки отказа (Фаза 4)
     // Холст подстраивается под пропорции окна — свободного места не остаётся
     const box = document.getElementById("map").getBoundingClientRect();
     const H = 1150;
@@ -673,11 +708,16 @@
       // замок в углу, если публичный ключ ноды ещё не получен (нельзя слать DM)
       const keyBadge = n.key === false
         ? `<text x="${x + 6}" y="${y + n.h - 6}" font-size="11">🔒</text>` : "";
+      // единая точка отказа: жёлтая рамка + ⚠N (сколько теряем при отказе)
+      const critN = showCrit ? crit[n.id] : 0;
+      const critBadge = critN ? `<rect x="${x - 2}" y="${y - 2}" width="${n.w + 4}" height="${n.h + 4}" rx="${n.r + 2}"
+          fill="none" stroke="#e0a03c" stroke-width="2"/>
+        <text x="${x + n.w - 5}" y="${y + n.h - 5}" text-anchor="end" font-size="11" font-weight="700" fill="#e0a03c">⚠${critN}</text>` : "";
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
-        ${photo}${badge}${mailBadge}${keyBadge}
+        ${critBadge}${photo}${badge}${mailBadge}${keyBadge}
         <text x="${n.cx}" y="${y + 55}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 10 ? 10 : 11.5}" font-weight="700">${esc(nm)}</text>
         <text x="${n.cx}" y="${y + 71}" text-anchor="middle" fill="${subFill}"
@@ -738,6 +778,7 @@
           // ключ есть лишь у части нод — назвать у кого (у остальных DM упадёт)
           return [[t("keyLabel"), "✓ " + kb.map(shortName).join(", "), "#8fce6a"]];
         })(),
+        crit[id] ? [t("critLbl"), `⚠ −${crit[id]}`, "#e0a03c"] : [null, null],
       ].filter(([, v]) => v != null);
       // Раскрывающиеся разделы: прошивка / радио / устройство
       const cfg = n.cfg || {};
@@ -1117,6 +1158,8 @@
         <span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</label>
       <label class="item toggle" title="${esc(t("geoOrientTip"))}">
         <input type="checkbox" id="geoOrientToggle" ${geoOrient ? "checked" : ""}>🧭 ${t("geoOrientLbl")}</label>
+      <label class="item toggle" title="${esc(t("critTip"))}">
+        <input type="checkbox" id="critToggle" ${showCrit ? "checked" : ""}>⚠ ${t("critLbl")}</label>
       <span class="item">${t("nodeCount", D.nodes.length,
         D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
       <span class="item">${t("scan")} · ${esc(D.meta.updated)}
@@ -1381,6 +1424,9 @@
     } else if (e.target.id === "geoOrientToggle") {
       geoOrient = e.target.checked;
       localStorage.setItem("mzGeoOrient", geoOrient ? "1" : "0");
+    } else if (e.target.id === "critToggle") {
+      showCrit = e.target.checked;
+      localStorage.setItem("mzShowCrit", showCrit ? "1" : "0");
     } else return;
     if (lastLive) render(lastLive);
   });
