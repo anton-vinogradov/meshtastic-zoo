@@ -140,27 +140,49 @@
       const a = nodes[l.from], b = nodes[l.to];
       if (!a || !b) return;
       for (const [n, o] of [[a, b], [b, a]]) {
-        // порт — на той грани, которую линия реально пересекает
+        // порт — на грани, которую линия реально пересекает;
+        // bias даёт встречным плечам пары стабильный порядок с обоих
+        // концов — «мосты» идут двумя параллельными линиями, не крестом
         const dx = o.cx - n.cx, dy = o.cy - n.cy;
         const side = Math.abs(dx) / n.w > Math.abs(dy) / n.h
           ? (dx < 0 ? "left" : "right")
           : (dy < 0 ? "top" : "bottom");
         ((ports[n.id] ??= { top: [], bottom: [], left: [], right: [] })[side])
-          .push({ li, ox: o.cx, oy: o.cy });
+          .push({ li, ox: o.cx, oy: o.cy, bias: l.from < l.to ? 0.01 : -0.01 });
       }
     });
     for (const [nid, sides] of Object.entries(ports)) {
       const n = nodes[nid];
       for (const [side, list] of Object.entries(sides)) {
-        list.sort((p, q) => (side === "left" || side === "right") ? p.oy - q.oy : p.ox - q.ox);
-        list.forEach((p, i) => {
-          const f = (i + 1) / (list.length + 1);
+        const horiz = side === "top" || side === "bottom";
+        // естественная точка — пересечение луча к оппоненту с гранью
+        for (const p of list) {
+          const dx = p.ox - n.cx, dy = p.oy - n.cy;
+          const nat = horiz
+            ? n.cx + dx * (n.h / 2) / Math.max(1e-6, Math.abs(dy))
+            : n.cy + dy * (n.w / 2) / Math.max(1e-6, Math.abs(dx));
+          const lo = horiz ? n.cx - n.w / 2 + 12 : n.cy - n.h / 2 + 10;
+          const hiB = horiz ? n.cx + n.w / 2 - 12 : n.cy + n.h / 2 - 10;
+          p.nat = Math.max(lo, Math.min(hiB, nat)) + p.bias;
+        }
+        // совпавшие точки раздвигаются минимальным зазором
+        list.sort((p, q) => p.nat - q.nat);
+        const gap = 13;
+        for (let i = 1; i < list.length; i++) {
+          if (list[i].nat < list[i - 1].nat + gap) list[i].nat = list[i - 1].nat + gap;
+        }
+        let hi = horiz ? n.cx + n.w / 2 - 12 : n.cy + n.h / 2 - 10;
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i].nat > hi) list[i].nat = hi;
+          hi = list[i].nat - gap;
+        }
+        for (const p of list) {
           portPt[`${p.li}:${nid}`] =
-            side === "top" ? [n.cx - n.w / 2 + f * n.w, n.cy - n.h / 2] :
-            side === "bottom" ? [n.cx - n.w / 2 + f * n.w, n.cy + n.h / 2] :
-            side === "left" ? [n.cx - n.w / 2, n.cy - n.h / 2 + f * n.h] :
-            [n.cx + n.w / 2, n.cy - n.h / 2 + f * n.h];
-        });
+            side === "top" ? [p.nat, n.cy - n.h / 2] :
+            side === "bottom" ? [p.nat, n.cy + n.h / 2] :
+            side === "left" ? [n.cx - n.w / 2, p.nat] :
+            [n.cx + n.w / 2, p.nat];
+        }
       }
     }
 
