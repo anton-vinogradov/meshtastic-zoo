@@ -211,6 +211,89 @@ def node_info(src):
     return {k: v for k, v in out.items() if v is not None}
 
 
+def _hav_km(a, b):
+    r = math.radians
+    dla, dlo = r(b[0] - a[0]), r(b[1] - a[1])
+    h = math.sin(dla / 2) ** 2 + math.cos(r(a[0])) * math.cos(r(b[0])) * math.sin(dlo / 2) ** 2
+    return 2 * 6371 * math.asin(min(1, math.sqrt(h)))
+
+
+def estimate_positions(nodes, links, geo):
+    """Оценка географических позиций GPS-less нод (Фаза 5, «геолокация по
+    сигналу»): якоря = свои размещённые ноды (geo), SNR→расстояние калибруется
+    на GPS-соседях (известное расстояние ↔ измеренный SNR), затем мультилатерация
+    (взвешенный МНК) для нод, слышимых ≥3 якорями. Результат — облако с оценкой
+    неопределённости, добавляется как node['est']={lat,lon,unc(км),by}."""
+    anchors = {nid: (g["lat"], g["lon"]) for nid, g in (geo or {}).items()
+               if isinstance(g, dict) and g.get("lat") is not None}
+    if len(anchors) < 3:
+        return
+    gps = {}
+    for n in nodes:
+        i = n.get("info") or {}
+        if i.get("lat") is not None:
+            gps[n["id"]] = (i["lat"], i["lon"])
+    # кто-кого-слышит по якорям + калибровочные пары (якорь↔GPS-сосед)
+    heard, cal = {}, []
+    for l in links:
+        if l.get("type") != "rf" or l.get("snr") is None:
+            continue
+        frm, to = l.get("from"), l.get("to")
+        if to in anchors:
+            heard.setdefault(frm, []).append((to, l["snr"]))
+            if frm in gps:
+                d = _hav_km(anchors[to], gps[frm])
+                if d > 0.02:
+                    cal.append((math.log10(d), l["snr"]))
+    if len(cal) < 4:
+        return
+    # регрессия snr = A + B·log10(d), B<0 (сигнал падает с расстоянием)
+    n = len(cal)
+    sx = sum(x for x, _ in cal); sy = sum(y for _, y in cal)
+    sxx = sum(x * x for x, _ in cal); sxy = sum(x * y for x, y in cal)
+    den = n * sxx - sx * sx
+    if abs(den) < 1e-9:
+        return
+    B = (n * sxy - sx * sy) / den
+    A = (sy - B * sx) / n
+    if B >= 0:
+        return
+
+    def snr_km(snr):
+        return min(300.0, 10 ** ((snr - A) / B))
+
+    aps = list(anchors.values())
+    clat = sum(p[0] for p in aps) / len(aps)
+    clon = sum(p[1] for p in aps) / len(aps)
+    kmlat = 111.32
+    kmlon = 111.32 * math.cos(math.radians(clat))
+    for node in nodes:
+        nid = node["id"]
+        if nid in gps or nid in anchors or node.get("own"):
+            continue
+        hs = heard.get(nid, [])
+        if len(hs) < 3:
+            continue
+        pts = [((anchors[a][1] - clon) * kmlon, (anchors[a][0] - clat) * kmlat,
+                snr_km(s), max(0.1, s + 21.0)) for a, s in hs]
+        W = sum(p[3] for p in pts)
+        x = sum(p[0] * p[3] for p in pts) / W
+        y = sum(p[1] * p[3] for p in pts) / W
+        for _ in range(400):                 # градиентный спуск по Σ w·(|T−P|−r)²
+            gx = gy = 0.0
+            for px, py, r_, w in pts:
+                dx, dy = x - px, y - py
+                dist = math.hypot(dx, dy) or 1e-6
+                k = 2 * w * (dist - r_) / dist
+                gx += k * dx; gy += k * dy
+            x -= 0.08 * gx / W
+            y -= 0.08 * gy / W
+        res = math.sqrt(sum(w * (math.hypot(x - px, y - py) - r_) ** 2
+                            for px, py, r_, w in pts) / W)
+        node["est"] = dict(lat=round(clat + y / kmlat, 6), lon=round(clon + x / kmlon, 6),
+                           unc=round(res, 2), by=len(hs))
+
+
 def build(found, prev=None):
     """found: {ip: результат query или None} → структура для фронтенда."""
     now = time.time()
@@ -493,6 +576,12 @@ def build(found, prev=None):
                 names[oid] = nm
     for nid, n in stat.items():
         names.setdefault(nid, n.get("long") or n.get("short") or nid)
+
+    # Фаза 5: оценка позиций GPS-less нод по сигналу (если размещены ≥3 своих)
+    try:
+        estimate_positions(nodes, out_links, CFG.get("geo") or {})
+    except Exception as e:
+        log(f"estimate: {e!r}")
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
