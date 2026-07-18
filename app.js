@@ -655,7 +655,9 @@
         [t("role"), i.role],
         [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—"],
         ...(() => {
-          if (n.key == null) return [[null, null]];
+          // «Ключ» — про адресата, которому шлёшь; у своей ноды бессмысленно
+          // (и противоречит статусу конкретных исходящих) — не показываем
+          if (n.own || n.key == null) return [[null, null]];
           const kb = n.keyBy || [];
           const ownAll = (lastLive && lastLive.nodes || []).filter(x => x.own).map(x => x.id);
           if (!kb.length) return [[t("keyLabel"), "🔒 " + t("keyNo"), "#e0a03c"]];
