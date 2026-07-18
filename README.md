@@ -67,17 +67,19 @@ first run, set your subnets in the ⚙ panel. Logs:
   from one of your nodes that already has the recipient's key, so the
   panel lists exactly which of your nodes hold it. Keys arrive on their
   own with NodeInfo; the badge disappears once every node has one.
-- **Grey squares with a hop count** — a former direct (0-hop) neighbor
-  that has genuinely slipped to relay-only. Direct neighbors constantly
-  flap between 0 and 1–2 hops (normal RF), so a node turns grey only
-  after its direct signal has been gone for a few minutes straight — a
-  momentary flap doesn't count — and only while it's still within a
-  couple of hops (a jump to 3+ right after being direct is routing noise,
-  not a move). It keeps its place, drawn grey with a dashed frame, its
-  leg showing the hop count (`1 hop`, `2 hops`…) instead of an SNR. It's
-  held for up to an hour of no direct contact, then forgotten. A
-  **former neighbor** checkbox in the map's legend hides or shows these
-  grey nodes (your choice is remembered per browser).
+- **Grey squares** — a former direct (0-hop) neighbor that no longer
+  comes in directly. Direct neighbors constantly flap between 0 and a few
+  hops (normal RF), so a node only turns grey after its direct signal has
+  been gone for a few minutes straight — a momentary flap doesn't count.
+  Two things keep it grey rather than letting it vanish: it may now be
+  **reached over relays** (its leg shows the hop count — `1 hop`,
+  `3 hops`… — instead of an SNR, up to `hopMaxShow` hops), or it may have
+  **gone silent** (heard by nobody right now) yet was direct within the
+  last hour — then it stays put at its last spot so a node you just talked
+  to doesn't disappear without a trace. Either way it's drawn grey with a
+  dashed frame and held for up to an hour of no direct contact, then
+  forgotten. A **former neighbor** checkbox in the map's legend hides or
+  shows these grey nodes (your choice is remembered per browser).
 - **Arrows** show who hears whom: the head points at the listener.
   Color is link quality, from red (barely) to green (ideal); the label
   on the line is the SNR in dB; the exact percentage is in the tooltip.
@@ -205,8 +207,8 @@ panel. Every field, top to bottom:
 Changes apply on the fly and are saved to `collector/config.json`.
 A few rarely-touched keys live in that file only: `port` (the node
 API port, 4403), the connect/query timeouts, `hopMaxShow` (largest hop
-count a former neighbor may show at before it's treated as routing noise
-rather than a real move — default 2), `hopSettleMin` (minutes of no
+count a relayed former neighbor may show at before it's dropped as
+routing noise — default 7), `hopSettleMin` (minutes of no
 direct contact before a slipped neighbor turns grey, so momentary flaps
 are ignored — default 3), `hopStaleMin` (how long a grey multi-hop node
 is kept before it's forgotten — default 60), `autoKeyRequest` (on a "no
