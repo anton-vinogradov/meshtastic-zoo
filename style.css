@@ -121,6 +121,16 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #channel .chgot { font-size: 11px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 3px; }
 #channel .chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, .06); border-radius: 6px; padding: 1px 6px; }
 #channel .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+#channel .chip .hop { font-size: 9.5px; color: var(--muted); background: rgba(255, 255, 255, .08); border-radius: 4px; padding: 0 3px; }
+/* перетаскиваемый край панели канала — меняет её ширину */
+#channel .chresize {
+  position: absolute;
+  top: 0; right: -3px;
+  width: 8px; height: 100%;
+  cursor: col-resize;
+  z-index: 7;
+}
+#channel .chresize:hover { background: linear-gradient(90deg, transparent, rgba(140, 170, 255, .35)); }
 #channel .chcompose { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--zone-stroke); }
 #channel .chcompose select { background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 5px 6px; font-size: 12.5px; max-width: 78px; }
 #channel .chcompose input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 5px 8px; font-size: 13px; }

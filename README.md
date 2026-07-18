@@ -89,10 +89,12 @@ reactions and quoted replies from the mesh are shown the same way.
 
 A collapsible panel on the left (the 💬 tab) shows the **public channel**
 feed — the broadcast messages your nodes hear. Each message lists, right
-under it, **which of your nodes received it** and at what SNR, so you can
-see the coverage of a broadcast at a glance. You can also post to the
-channel from any of your online nodes. It stays collapsed by default;
-the tab remembers your choice.
+under it, **which of your nodes received it**, at what SNR, and **how
+many hops** it took to reach each one (`0 hop` = heard directly), so you
+can see both the coverage and the path of a broadcast at a glance. You
+can also post to the channel from any of your online nodes. Drag the
+panel's right edge to resize it. It stays collapsed by default; the tab
+remembers your choice and the width.
 
 ## Nice little things
 

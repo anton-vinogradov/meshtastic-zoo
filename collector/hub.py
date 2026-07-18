@@ -203,7 +203,15 @@ def on_receive(packet=None, interface=None):
                         m["replyTo"] = reply_id
                     channel.append(m)
                     del channel[:-300]
-                m["gotBy"][ent["id"]] = packet.get("rxSnr")
+                # хопы приёма = hopStart − hopLimit (0 = услышали напрямую).
+                # один пакет может прийти несколькими путями (оригинал +
+                # ретрансляции) — держим ЛУЧШИЙ (наименьшее число хопов)
+                hs, hl = packet.get("hopStart"), packet.get("hopLimit")
+                hops = hs - hl if isinstance(hs, int) and isinstance(hl, int) and hs >= hl else None
+                prev = m["gotBy"].get(ent["id"])
+                prev_hops = prev.get("hops") if isinstance(prev, dict) else None
+                if prev is None or (hops is not None and (prev_hops is None or hops < prev_hops)):
+                    m["gotBy"][ent["id"]] = {"snr": packet.get("rxSnr"), "hops": hops}
             save_channel()
             log(f"📡 канал: {frm_name} → всем (принял {ent['id']}): {text[:50]!r}")
             return

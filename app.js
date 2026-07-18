@@ -23,6 +23,7 @@
       chNoMsg: "no messages yet",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
       showHops: "former neighbor", showHopsTip: "show former direct neighbors now reached via relays",
+      resizeTip: "drag to resize",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
@@ -53,6 +54,7 @@
       chNoMsg: "пока пусто",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
       showHops: "бывший сосед", showHopsTip: "показывать бывших прямых соседей, теперь достижимых через ретрансляторы",
+      resizeTip: "потяните, чтобы изменить ширину",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
@@ -885,11 +887,15 @@
     const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
     const col = (snr) => snr == null ? "#8a8a90"
       : `hsl(${Math.round(Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor))) * 100) * 1.4}, 62%, 55%)`;
+    // значение gotBy: новый формат {snr, hops}, старый — просто число snr
+    const gv = (v) => (v && typeof v === "object") ? v : { snr: v, hops: null };
     const feed = chan.slice(-100).map(m => {
-      const got = Object.entries(m.gotBy || {}).sort((a, b) => (b[1] ?? -99) - (a[1] ?? -99))
-        .map(([id, snr]) => {
+      const got = Object.entries(m.gotBy || {}).map(([id, v]) => [id, gv(v)])
+        .sort((a, b) => (a[1].hops ?? 9) - (b[1].hops ?? 9) || (b[1].snr ?? -99) - (a[1].snr ?? -99))
+        .map(([id, g]) => {
           const nm = (nodesById[id] || {}).short || id.slice(-4);
-          return `<span class="chip"><span class="dot" style="background:${col(snr)}"></span>${esc(nm)}${snr != null ? " " + fmtSnrM(snr) : ""}</span>`;
+          const hp = g.hops != null ? `<span class="hop">${esc(t("hop", g.hops))}</span>` : "";
+          return `<span class="chip"><span class="dot" style="background:${col(g.snr)}"></span>${esc(nm)}${g.snr != null ? " " + fmtSnrM(g.snr) : ""}${hp}</span>`;
         }).join("");
       return `<div class="chmsg">
         <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span><span>${fmtAgoM(m.ts)}</span></div>
@@ -904,6 +910,7 @@
     const replyBar = replyChan ? `<div class="replybar">↩ ${esc((replyChan.text || "").slice(0, 40))}
       <button class="rcancel">×</button></div>` : "";
     el.innerHTML = `
+      <div class="chresize" title="${esc(t("resizeTip"))}"></div>
       <div class="chhead"><b>${esc(t("publicChannel"))}</b><button id="chclose" title="${esc(t("close"))}">‹</button></div>
       <div class="chfeed">${feed || `<div class="chempty">${esc(t("chNoMsg"))}</div>`}</div>
       ${owners.length ? `<div class="chcompose">${replyBar}<div class="crow2">
@@ -964,6 +971,27 @@
     showHops = e.target.checked;
     localStorage.setItem("mzShowHops", showHops ? "1" : "0");
     if (lastLive) render(lastLive);
+  });
+  // Ширина панели канала: применяем сохранённую + тянем за правый край
+  const chEl = document.getElementById("channel");
+  const savedChW = parseInt(localStorage.getItem("mzChanW"), 10);
+  if (savedChW) chEl.style.width = savedChW + "px";
+  let chDrag = false;
+  chEl.addEventListener("mousedown", (e) => {
+    if (!e.target.classList.contains("chresize")) return;
+    e.preventDefault();
+    chDrag = true;
+    document.body.style.userSelect = "none";
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!chDrag) return;
+    chEl.style.width = Math.max(220, Math.min(680, e.clientX)) + "px";
+  });
+  window.addEventListener("mouseup", () => {
+    if (!chDrag) return;
+    chDrag = false;
+    document.body.style.userSelect = "";
+    localStorage.setItem("mzChanW", parseInt(chEl.style.width, 10) || 300);
   });
   // канал по умолчанию свёрнут; вкладка слева разворачивает
   if (localStorage.getItem("mzChanOpen") !== "1") document.body.classList.add("chan-collapsed");
