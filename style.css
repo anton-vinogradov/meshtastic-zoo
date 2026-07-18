@@ -55,6 +55,75 @@ body {
   vertical-align: middle;
 }
 
+/* Левая сворачиваемая панель публичного канала */
+#chtab {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  background: var(--zone-bg);
+  border: 1px solid var(--zone-stroke);
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  padding: 11px 8px;
+  font-size: 18px;
+  color: var(--text);
+  cursor: pointer;
+  display: none;
+}
+body.chan-collapsed #chtab { display: block; }
+#channel {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  width: 300px;
+  background: var(--zone-bg);
+  border-right: 1px solid var(--zone-stroke);
+  box-shadow: 6px 0 28px rgba(0, 0, 0, .45);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  transition: transform .18s ease;
+}
+body.chan-collapsed #channel { transform: translateX(-100%); }
+#channel .chhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--zone-stroke);
+}
+#channel .chhead b { font-size: 15px; }
+#channel .chhead button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+#channel .chfeed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#channel .chempty { color: var(--muted); font-size: 13px; text-align: center; margin-top: 20px; }
+#channel .chmsg { background: rgba(255, 255, 255, .05); border-radius: 9px; padding: 7px 9px; font-size: 13px; }
+#channel .chmsg .mh { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--muted); }
+#channel .chmsg .mfrom { font-weight: 600; }
+#channel .chmsg .mtext { margin: 3px 0; white-space: pre-wrap; word-break: break-word; }
+#channel .chgot { font-size: 11px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 3px; }
+#channel .chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, .06); border-radius: 6px; padding: 1px 6px; }
+#channel .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+#channel .chcompose { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--zone-stroke); }
+#channel .chcompose select { background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 5px 6px; font-size: 12.5px; max-width: 78px; }
+#channel .chcompose input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 5px 8px; font-size: 13px; }
+#channel .chcompose button { background: rgba(255, 255, 255, .08); border: none; color: var(--text); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+
 /* Общий маркер непрочитанной почты */
 #mail {
   position: fixed;

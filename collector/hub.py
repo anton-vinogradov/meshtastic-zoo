@@ -30,6 +30,7 @@ import meshtastic.tcp_interface  # noqa: E402
 CFG = scan.CFG
 OUT_LIVE = ROOT.parent / "data" / "live.json"
 OUT_MSGS = ROOT.parent / "data" / "messages.json"
+OUT_CHAN = ROOT.parent / "data" / "channel.json"
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "cacheMaxAgeH",
@@ -37,7 +38,8 @@ EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "cacheMaxAgeH",
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
-messages = []  # [{id, node, frm, frmName, text, ts, snr, read}]
+messages = []  # личные: [{id, node, frm, frmName, text, ts, snr, read}]
+channel = []   # публичный канал: [{id, pid, frm, frmName, text, ts, ch, gotBy}]
 
 
 def log(msg):
@@ -45,16 +47,25 @@ def log(msg):
 
 
 def load_messages():
-    global messages
+    global messages, channel
     try:
         messages = json.loads(OUT_MSGS.read_text())
     except Exception:
         messages = []
+    try:
+        channel = json.loads(OUT_CHAN.read_text())
+    except Exception:
+        channel = []
 
 
 def save_messages():
     with lock:
         OUT_MSGS.write_text(json.dumps(messages, ensure_ascii=False, indent=1))
+
+
+def save_channel():
+    with lock:
+        OUT_CHAN.write_text(json.dumps(channel, ensure_ascii=False, indent=1))
 
 
 # ---------- связь с нодами ----------
@@ -133,14 +144,33 @@ def on_receive(packet=None, interface=None):
             return
         if dec.get("portnum") != "TEXT_MESSAGE_APP":
             return
-        if packet.get("to") != ent.get("num"):
-            return  # broadcast или чужое — не личное этой ноде
+        to = packet.get("to")
         frm_num = packet.get("from")
         frm = f"!{frm_num:08x}" if isinstance(frm_num, int) else str(frm_num)
         u = ((dict(interface.nodes or {}).get(frm) or {}).get("user") or {})
+        frm_name = u.get("longName") or u.get("shortName") or frm
+
+        if to in (0xFFFFFFFF, 4294967295, "^all", "!ffffffff"):
+            # публичный канал (broadcast): один пакет слышат несколько наших нод —
+            # группируем по id и копим, кто именно принял (с SNR)
+            pid = packet.get("id")
+            with lock:
+                m = next((x for x in channel if pid and x.get("pid") == pid), None)
+                if m is None:
+                    m = dict(id=f"ch·{pid or int(time.time() * 1000)}", pid=pid, frm=frm,
+                             frmName=frm_name, text=dec.get("text") or "",
+                             ts=int(time.time()), ch=packet.get("channel", 0), gotBy={})
+                    channel.append(m)
+                    del channel[:-300]
+                m["gotBy"][ent["id"]] = packet.get("rxSnr")
+            save_channel()
+            log(f"📡 канал: {frm_name} → всем (принял {ent['id']}): {(dec.get('text') or '')[:50]!r}")
+            return
+
+        if to != ent.get("num"):
+            return  # чужой DM — не наш
         msg = dict(id=f'{ent["id"]}·{packet.get("id")}', node=ent["id"], frm=frm,
-                   frmName=u.get("longName") or u.get("shortName") or frm,
-                   text=dec.get("text") or "", ts=int(time.time()),
+                   frmName=frm_name, text=dec.get("text") or "", ts=int(time.time()),
                    snr=packet.get("rxSnr"), read=False)
         with lock:
             if any(m["id"] == msg["id"] for m in messages):
@@ -279,6 +309,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/messages"):
             with lock:
                 self._json({"messages": messages[-200:]})
+        elif self.path.startswith("/api/channel"):
+            with lock:
+                self._json({"channel": channel[-200:]})
         elif self.path.startswith("/api/config"):
             with lock:
                 self._json({k: CFG.get(k) for k in EDITABLE})
@@ -321,6 +354,21 @@ class Handler(SimpleHTTPRequestHandler):
                 save_messages()
                 log(f"➤ {node} → {to}: {text[:60]!r} (pkt {pid})")
                 self._json({"ok": True, "msgId": out["id"]})
+            except Exception as e:
+                self._json({"ok": False, "error": repr(e)}, 500)
+        elif self.path == "/api/channel":
+            node = body.get("node")
+            text = (body.get("text") or "").strip()
+            with lock:
+                ent = next((c for c in conns.values()
+                            if c.get("id") == node and c.get("iface")), None)
+            if not ent or not text:
+                self._json({"ok": False, "error": "нода не на связи или пустой текст"}, 400)
+                return
+            try:
+                ent["iface"].sendText(text)  # без destinationId = broadcast
+                log(f"📡 {node} → канал: {text[:60]!r}")
+                self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": repr(e)}, 500)
         elif self.path == "/api/config":

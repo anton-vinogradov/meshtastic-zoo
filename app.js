@@ -18,6 +18,8 @@
       chUtil: "Channel util", ownTx: "Own TX", lastSeen: "Last seen",
       online: "online (answers over TCP)", conversation: "Conversation",
       keyLabel: "Key", keyYes: "received", keyNo: "not received (can't DM)",
+      publicChannel: "Public channel", gotByLabel: "received by",
+      chNoMsg: "no messages yet",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
@@ -44,6 +46,8 @@
       chUtil: "Загрузка эфира", ownTx: "Свой TX", lastSeen: "Видели",
       online: "онлайн (отвечает по TCP)", conversation: "Переписка",
       keyLabel: "Ключ", keyYes: "получен", keyNo: "не получен (DM нельзя)",
+      publicChannel: "Публичный канал", gotByLabel: "приняли",
+      chNoMsg: "пока пусто",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
@@ -173,6 +177,8 @@
       [/HELTEC_V3/, "heltec-v3.svg"], [/HELTEC/, "heltec_v4.svg"],
       [/STATION_G2/, "station-g2.svg"], [/T1000/, "tracker-t1000-e.svg"],
       [/NANO_G2/, "nano-g2-ultra.svg"], [/XIAO/, "seeed-xiao-s3.svg"],
+      [/T3_S3|TLORA_T3/, "tlora-t3s3-v1.svg"], [/TLORA_C6/, "tlora-c6.svg"],
+      [/TLORA/, "tlora-v2-1-1_6.svg"],
       [/RAK/, "rak4631.svg"], [/BEAM/, "tbeam.svg"], [/DIY/, "diy.svg"],
     ];
     const hwImg = (hw) => {
@@ -741,11 +747,82 @@
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
   let applySel = () => {}, hlPeer = () => {}; // подсветка выбора/наведения (устанавливаются в render)
+  let chan = [], chanSig = "";
   async function refreshMsgs() {
     try {
       const r = await fetch("/api/messages", { cache: "no-store" });
       if (r.ok) msgs = (await r.json()).messages || [];
     } catch { /* hub не запущен — карта работает и без почты */ }
+  }
+
+  // ---- Публичный канал (левая панель) ----
+  const fmtAgoM = (ts) => {
+    const s = Math.max(0, Date.now() / 1e3 - ts);
+    const a = s < 90 ? t("justNow") : s < 3600 ? Math.round(s / 60) + " " + t("unitMin")
+      : s < 86400 ? Math.round(s / 3600) + " " + t("unitH") : Math.round(s / 86400) + " " + t("unitD");
+    return a === t("justNow") ? a : t("ago", a);
+  };
+  const fmtSnrM = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
+  function renderChannel() {
+    const el = document.getElementById("channel");
+    if (!el) return;
+    const nodesById = {};
+    (lastLive && lastLive.nodes || []).forEach(n => nodesById[n.id] = n);
+    const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
+    const col = (snr) => snr == null ? "#8a8a90"
+      : `hsl(${Math.round(Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor))) * 100) * 1.4}, 62%, 55%)`;
+    const feed = chan.slice(-100).map(m => {
+      const got = Object.entries(m.gotBy || {}).sort((a, b) => (b[1] ?? -99) - (a[1] ?? -99))
+        .map(([id, snr]) => {
+          const nm = (nodesById[id] || {}).short || id.slice(-4);
+          return `<span class="chip"><span class="dot" style="background:${col(snr)}"></span>${esc(nm)}${snr != null ? " " + fmtSnrM(snr) : ""}</span>`;
+        }).join("");
+      return `<div class="chmsg">
+        <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span><span>${fmtAgoM(m.ts)}</span></div>
+        <div class="mtext">${esc(m.text)}</div>
+        ${got ? `<div class="chgot">${esc(t("gotByLabel"))}: ${got}</div>` : ""}
+      </div>`;
+    }).join("");
+    const owners = (lastLive && lastLive.nodes || []).filter(n => n.own && n.online);
+    const composeSel = owners.map(o => `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("");
+    el.innerHTML = `
+      <div class="chhead"><b>${esc(t("publicChannel"))}</b><button id="chclose" title="${esc(t("close"))}">‹</button></div>
+      <div class="chfeed">${feed || `<div class="chempty">${esc(t("chNoMsg"))}</div>`}</div>
+      ${owners.length ? `<div class="chcompose">
+        <select class="chfrom">${composeSel}</select>
+        <input class="chmsg-in" placeholder="${esc(t("message"))}">
+        <button class="chsend" title="${esc(t("send"))}">➤</button></div>` : ""}`;
+    const feedEl = el.querySelector(".chfeed");
+    if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
+    el.querySelector("#chclose").onclick = () => setChan(false);
+    const cs = el.querySelector(".chsend");
+    if (cs) cs.onclick = async () => {
+      const inp = el.querySelector(".chmsg-in");
+      const text = inp.value.trim();
+      if (!text) { inp.focus(); return; }
+      cs.disabled = true;
+      let res = { ok: false };
+      try {
+        res = await (await fetch("/api/channel", {
+          method: "POST", body: JSON.stringify({ node: el.querySelector(".chfrom").value, text }),
+        })).json();
+      } catch { }
+      cs.disabled = false;
+      if (res.ok) { inp.value = ""; await refreshChan(); }
+      else alert(t("failedSend") + " " + (res.error || "?"));
+    };
+  }
+  function setChan(open) {
+    document.body.classList.toggle("chan-collapsed", !open);
+    localStorage.setItem("mzChanOpen", open ? "1" : "0");
+  }
+  async function refreshChan() {
+    try {
+      const r = await fetch("/api/channel", { cache: "no-store" });
+      if (r.ok) chan = (await r.json()).channel || [];
+    } catch { return; }
+    const sig = chan.map(m => m.id + Object.keys(m.gotBy || {}).length).join(",");
+    if (sig !== chanSig) { chanSig = sig; renderChannel(); }
   }
   const refit = () => {
     clearTimeout(rsTimer);
@@ -753,6 +830,9 @@
   };
   window.addEventListener("resize", refit);
   new ResizeObserver(refit).observe(document.getElementById("map"));
+  // канал по умолчанию свёрнут; вкладка слева разворачивает
+  if (localStorage.getItem("mzChanOpen") !== "1") document.body.classList.add("chan-collapsed");
+  document.getElementById("chtab").onclick = () => setChan(true);
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#panel") && !e.target.closest(".node")) {
       document.getElementById("panel").classList.remove("open");
@@ -865,18 +945,20 @@
     lastStamp = live.meta.updated;
     lastLive = live;
     render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
+    renderChannel(); // подхватить свежие имена/качество узлов в списке «приняли»
   }
 
-  // Быстрый опрос почты: статус доставки и маркеры обновляются в течение
-  // секунд, а не раз в минуту; при набранном тексте панель не трогаем
+  // Быстрый опрос почты и канала: статусы обновляются в течение секунд
   let msgSig = "";
   async function msgTick() {
     await refreshMsgs();
     const sig = msgs.map(m => m.id + (m.read ? "1" : "0") + (m.status || "")).join(",");
     if (sig !== msgSig && lastLive) { msgSig = sig; render(lastLive); }
+    await refreshChan();
   }
 
   tick();
+  refreshChan();
   setInterval(tick, 60e3);
   setInterval(msgTick, 6e3);
 })();

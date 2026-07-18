@@ -63,11 +63,19 @@ tell which card a link goes to. The panel shows:
   read (✓) — the marker clears right away;
 - **Compose** — send a direct message to this node; a selector picks
   which of your nodes speaks (the closest one — that hears the recipient
-  loudest — is preselected
-  is preselected);
+  loudest — is preselected);
 - **Legs** — all the node's links: two-way ones grouped in "there and
   back" pairs, one-way ones separately, everything sorted by quality
   with the age of each measurement.
+
+## Public channel
+
+A collapsible panel on the left (the 💬 tab) shows the **public channel**
+feed — the broadcast messages your nodes hear. Each message lists, right
+under it, **which of your nodes received it** and at what SNR, so you can
+see the coverage of a broadcast at a glance. You can also post to the
+channel from any of your online nodes. It stays collapsed by default;
+the tab remembers your choice.
 
 ## Nice little things
 

@@ -1,3 +1,4 @@
 .DS_Store
 data/live.json
 data/messages.json
+data/channel.json
