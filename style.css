@@ -297,3 +297,8 @@ svg .edge.dim { opacity: 0.5; }
 svg.focus .edge.lit, svg.focus .node.lit { opacity: 1; }
 svg.focus .edge:not(.lit), svg.focus .node:not(.lit) { opacity: 0.15; }
 svg .node { cursor: default; }
+/* выбранная нода — оранжевый контур, всегда видима; наведение из «Плеч» — синий */
+svg .node.selected > rect { stroke: #e0a03c; stroke-width: 3; }
+svg .node.peerhi > rect { stroke: #6aa3ff; stroke-width: 3; }
+svg.focus .node.selected, svg.focus .node.peerhi { opacity: 1; }
+#panel [data-peer] { cursor: default; }

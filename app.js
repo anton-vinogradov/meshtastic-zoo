@@ -499,11 +499,11 @@
       };
       const legs =
         (pairsL.length ? `<div class="psub">${t("twoWay")}</div>` : "") +
-        pairsL.map(r => `<div class="pair"><div class="pwho" title="${esc(lbl(r.other))}">⇄ ${esc(shortOf(r.other))}</div>
+        pairsL.map(r => `<div class="pair" data-peer="${esc(r.other)}"><div class="pwho" title="${esc(lbl(r.other))}">⇄ ${esc(shortOf(r.other))}</div>
           ${legLine(r.out, "→")}${legLine(r.in, "←")}</div>`).join("") +
         (singles.length ? `<div class="psub">${t("oneWay")}</div>` : "") +
         `<div class="singles">${singles.map(r =>
-          legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(shortOf(r.other)), lbl(r.other))).join("")}</div>`;
+          `<div data-peer="${esc(r.other)}">${legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(shortOf(r.other)), lbl(r.other))}</div>`).join("")}</div>`;
       // История переписки этой ноды, хронологически. Дедуп: у сообщения
       // между двумя своими нодами есть и отправленная, и принятая копия —
       // для своей ноды берём отправленное этой нодой и принятое ей;
@@ -578,7 +578,13 @@
       // переписка прокручивается к последнему сообщению
       const th = panel.querySelector(".thread");
       if (th) th.scrollTop = th.scrollHeight;
-      panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; };
+      panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; applySel(); };
+      // подсветить выбранную ноду на карте; наведение на плечо — синий контур соседа
+      applySel();
+      panel.querySelectorAll("[data-peer]").forEach(el => {
+        el.addEventListener("mouseenter", () => hlPeer(el.dataset.peer, true));
+        el.addEventListener("mouseleave", () => hlPeer(el.dataset.peer, false));
+      });
       // после действия — обновить msgs и перерисовать (в т.ч. маркеры почты)
       const afterAction = async () => { await refreshMsgs(); forcePanel = true; render(lastLive); };
       panel.querySelectorAll(".msg .mact").forEach(row => {
@@ -626,25 +632,39 @@
       }
     }
 
-    // Наведение на ноду — подсветить её линки и соседей; клик — панель
+    // Наведение/выбор ноды: подсветка соседей + затемнение остального
     const svgEl = document.querySelector("#map svg");
+    const clearLit = () => { for (const e of svgEl.querySelectorAll(".lit")) e.classList.remove("lit"); };
+    const litNeighborhood = (id) => {
+      svgEl.querySelector(`.n-${CSS.escape(id)}`)?.classList.add("lit");
+      for (const e of svgEl.querySelectorAll(`.e-${CSS.escape(id)}`)) e.classList.add("lit");
+      for (const l of D.links) {
+        if (l.from === id) svgEl.querySelector(`.n-${CSS.escape(l.to)}`)?.classList.add("lit");
+        if (l.to === id) svgEl.querySelector(`.n-${CSS.escape(l.from)}`)?.classList.add("lit");
+      }
+    };
+    // выбранная нода: то же затемнение, что при наведении, + оранжевый контур
+    const applySelection = () => {
+      svgEl.classList.remove("focus");
+      clearLit();
+      for (const g of svgEl.querySelectorAll(".node.selected")) g.classList.remove("selected");
+      if (!openId || !nodes[openId]) return;
+      svgEl.classList.add("focus");
+      svgEl.querySelector(`.n-${CSS.escape(openId)}`)?.classList.add("selected");
+      litNeighborhood(openId);
+    };
+    applySel = applySelection;
+    hlPeer = (pid, on) => svgEl.querySelector(`.n-${CSS.escape(pid)}`)?.classList.toggle("peerhi", on);
     for (const g of svgEl.querySelectorAll(".node")) {
       g.addEventListener("click", (ev) => { ev.stopPropagation(); showPanel(g.dataset.id, true); });
       g.addEventListener("mouseenter", () => {
-        const id = g.dataset.id;
         svgEl.classList.add("focus");
-        g.classList.add("lit");
-        for (const e of svgEl.querySelectorAll(`.e-${CSS.escape(id)}`)) e.classList.add("lit");
-        for (const l of D.links) {
-          if (l.from === id) svgEl.querySelector(`.n-${CSS.escape(l.to)}`)?.classList.add("lit");
-          if (l.to === id) svgEl.querySelector(`.n-${CSS.escape(l.from)}`)?.classList.add("lit");
-        }
+        clearLit();
+        litNeighborhood(g.dataset.id);
       });
-      g.addEventListener("mouseleave", () => {
-        svgEl.classList.remove("focus");
-        for (const e of svgEl.querySelectorAll(".lit")) e.classList.remove("lit");
-      });
+      g.addEventListener("mouseleave", () => applySelection()); // вернуться к выбору
     }
+    applySelection();
 
     // Легенда: градиент «% от идеала» + прочее + источник данных
     const grad = `linear-gradient(90deg, ${[0, 25, 50, 75, 100]
@@ -684,6 +704,7 @@
   }
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
+  let applySel = () => {}, hlPeer = () => {}; // подсветка выбора/наведения (устанавливаются в render)
   async function refreshMsgs() {
     try {
       const r = await fetch("/api/messages", { cache: "no-store" });
@@ -700,6 +721,7 @@
     if (!e.target.closest("#panel") && !e.target.closest(".node")) {
       document.getElementById("panel").classList.remove("open");
       openId = null;
+      applySel();
     }
     if (!e.target.closest("#settings") && !e.target.closest("#gear")) {
       document.getElementById("settings").classList.remove("open");

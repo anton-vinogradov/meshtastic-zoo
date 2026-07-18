@@ -40,7 +40,10 @@ is a list in [`collector/config.json`](collector/config.json).
 ## Hover and click
 
 Hovering over a node highlights its links and dims everything else.
-Clicking opens the details panel:
+Clicking selects the node — it gets an orange outline, the same dimming
+stays put, and the details panel opens. Inside the panel, hovering a
+row in **Legs** outlines that neighbor in blue on the map, so you can
+tell which card a link goes to. The panel shows:
 
 - device photo and model, ID, callsign, IP;
 - battery, uptime, channel utilization, "last seen";
@@ -77,21 +80,44 @@ Clicking opens the details panel:
 
 ## Settings
 
-The **⚙** button in the top-right corner of the map. All the important
-things live there:
+The **⚙** button in the top-right corner of the map opens the settings
+panel. Every field, top to bottom:
 
-- **interface language** (English / Russian, remembered in your browser);
-- your sites' subnets — where to look for nodes;
-- the color scale: which SNR counts as zero and which as ideal;
-- how many hours to keep a silent neighbor on the map;
-- the map refresh and new-node discovery periods;
-- roaming nodes (dashed frame);
-- **slow subnets** — sites whose nodes choke on a full query, so the
-  collector polls them lightly (a site is listed by IP prefix).
+- **Language** — interface language, English or Russian. Stored in your
+  browser (not on the server), so each viewer picks their own.
+- **Site subnets** — the IP subnets (CIDR, one per line, e.g.
+  `10.88.88.0/24`) the collector scans for nodes. These are "your"
+  nodes — they show up as blue cards. Order doesn't matter.
+- **0% quality at SNR, dB** — the SNR that the color scale treats as the
+  worst (0%, red). Links at or below it are drawn fully red.
+- **100% quality at SNR, dB** — the SNR treated as perfect (100%,
+  green). Between the two values the color and the on-map distance
+  scale smoothly. Default −20 … +10 dB fits Meshtastic's usable range;
+  narrow it to make the coloring stricter.
+- **Keep a silent neighbor, hours** — how long an outside node stays on
+  the map after it was last heard on the air. Lower it (1–2 h) to keep
+  the map to currently active nodes; raise it to remember rare ones.
+- **Remember legs in cache, hours** — how long a link's last measured
+  SNR is reused when a node is reachable but didn't report that link
+  this round (e.g. it answered with a light query). Keeps the map from
+  flickering; doesn't invent data, only holds the last real reading.
+- **Map refresh, seconds** — how often the map is rebuilt from the live
+  node databases. Default 60 s.
+- **New-node discovery, seconds** — how often the subnets are re-scanned
+  for nodes that just came online. Default 300 s.
+- **Roaming nodes** — radio ids (one per line, e.g. `!702bde48`) of
+  nodes that move around and change IP; they get a dashed frame so you
+  don't trust their address.
+- **Slow subnets** — IP prefixes (one per line, e.g. `10.77.77.`) of
+  sites whose nodes choke when their full node database is pulled at
+  once. The collector queries those lightly after two failed full
+  attempts. An advanced knob — leave it empty unless a site keeps
+  timing out.
 
-Changes apply on the fly and are saved to `collector/config.json`;
-rare things like fallback node addresses (`known` / `names`) live in
-that file too.
+Changes apply on the fly and are saved to `collector/config.json`.
+A few rarely-touched keys live in that file only: `port` (the node
+API port, 4403), the connect/query timeouts, and `known` / `names` —
+fallback IP↔radio-id and name maps used when a node doesn't answer.
 
 ## Roadmap
 
