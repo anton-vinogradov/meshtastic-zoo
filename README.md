@@ -31,7 +31,9 @@ everything at once:
   `data/messages.json`; the map shows a global "✉ N" marker in the
   corner and an envelope on the node's token; the node panel shows the
   messages themselves, a reply to the sender **from that node** (the ➤
-  button) and a "mark as read" (✓);
+  button) and a "mark as read" (✓); every node also gets a **"Compose"**
+  block — with a choice of which of your own nodes to send from (the one
+  that hears the recipient best is preselected);
 - **topology**: every `topoEveryS` seconds `live.json` is rebuilt from
   the live nodeDBs — no reconnects, which fragile nodes appreciate;
 - **API**: `GET /api/messages`, `POST /api/send {node, to, text}`,
