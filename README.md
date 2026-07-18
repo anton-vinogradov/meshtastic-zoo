@@ -67,10 +67,12 @@ row in **Legs** outlines that neighbor in blue on the map, so you can
 tell which card a link goes to. The panel shows:
 
 - device photo and model, ID, callsign, IP, "last seen";
-- for your own nodes, collapsible **Firmware / Radio / Device** sections:
-  firmware version (with a check against the latest Meshtastic release),
-  hop limit, region, modem preset, TX power, battery, uptime, channel
-  utilization, WiFi/BT/PKI, rebroadcast mode and more;
+- collapsible detail sections. For your own nodes: **Firmware / Radio /
+  Device** — firmware version (with a check against the latest Meshtastic
+  release), hop limit, region, modem preset, TX power, battery, uptime,
+  WiFi/BT/PKI, rebroadcast mode and more. For neighbors: **Mesh** (hops
+  away, whether it came in over MQTT rather than RF, ham license) and
+  **Position** (its broadcast coordinates), when that data is available;
 - **Conversation** — the full message history with this node: incoming
   on the left, your replies on the right. Outgoing messages show a
   delivery status: ⏳ on air → ✓ delivered, ✗ error (with the reason

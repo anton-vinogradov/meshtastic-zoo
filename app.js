@@ -73,6 +73,9 @@
       cTxPower: "TX power", cTxEnabled: "TX enabled", cBoosted: "RX boosted gain",
       cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI keys", cRebroadcast: "Rebroadcast",
       cNodeInfo: "NodeInfo interval",
+      secMesh: "Mesh", secPos: "Position", cHopsAway: "Hops away", direct: "direct",
+      cViaMqtt: "Via MQTT", cLicensed: "Licensed (ham)",
+      cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude",
       publicChannel: "Public channel", gotByLabel: "received by",
       chNoMsg: "no messages yet",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
@@ -112,6 +115,9 @@
       cTxPower: "Мощность TX", cTxEnabled: "TX включён", cBoosted: "Усиление RX",
       cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI-ключи", cRebroadcast: "Ретрансляция",
       cNodeInfo: "Интервал NodeInfo",
+      secMesh: "Сеть", secPos: "Позиция", cHopsAway: "Прыжков до неё", direct: "напрямую",
+      cViaMqtt: "Через MQTT", cLicensed: "Лицензирована (ham)",
+      cLat: "Широта", cLon: "Долгота", cAlt: "Высота",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
       chNoMsg: "пока пусто",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
@@ -632,7 +638,19 @@
         [t("cRebroadcast"), cfg.rebroadcast],
         [t("cNodeInfo"), cfg.nodeInfoSecs == null ? null : Math.round(cfg.nodeInfoSecs / 60) + " " + t("unitMin")],
       ]);
-      const sections = secFw + secRadio + secDev;
+      // для чужих нод: как далеко в меше, через MQTT ли, лицензия; и позиция
+      const hopsAway = n.own ? null : (n.hop != null ? n.hop : 0);
+      const secMesh = n.own ? "" : section(t("secMesh"), [
+        [t("cHopsAway"), hopsAway == null ? null : (hopsAway === 0 ? t("direct") : hopsAway)],
+        [t("cViaMqtt"), i.mqtt ? "✓" : null],
+        [t("cLicensed"), i.licensed ? "✓" : null],
+      ]);
+      const secPos = section(t("secPos"), [
+        [t("cLat"), i.lat == null ? null : i.lat.toFixed(5)],
+        [t("cLon"), i.lon == null ? null : i.lon.toFixed(5)],
+        [t("cAlt"), i.alt == null ? null : i.alt + " m"],
+      ]);
+      const sections = secFw + secRadio + secMesh + secDev + secPos;
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
       const byOther = {};

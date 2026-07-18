@@ -194,14 +194,20 @@ def query_with_retries(ip):
 
 
 def node_info(src):
-    """Карточка телеметрии для панели подробностей."""
+    """Карточка телеметрии/сведений для панели подробностей."""
     dm = src.get("dm") or {}
     voltage = dm.get("voltage")
+    pos = src.get("pos") or {}
+    lat, lon = pos.get("latitudeI"), pos.get("longitudeI")
     out = dict(long=src.get("long"), role=src.get("role"),
                battery=dm.get("batteryLevel"),
                voltage=voltage if voltage and voltage > 0 else None,
                chUtil=dm.get("channelUtilization"), airTx=dm.get("airUtilTx"),
-               uptime=dm.get("uptimeSeconds"))
+               uptime=dm.get("uptimeSeconds"),
+               mqtt=True if src.get("mqtt") else None,
+               licensed=True if src.get("lic") else None,
+               lat=lat / 1e7 if lat else None, lon=lon / 1e7 if lon else None,
+               alt=pos.get("altitude"))
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -263,7 +269,9 @@ def build(found, prev=None):
                     if heard >= c["heard"]:
                         c["heard"] = int(heard)
                         for key, val in (("hw", u.get("hwModel")), ("long", u.get("longName")),
-                                         ("role", u.get("role")), ("dm", e.get("deviceMetrics"))):
+                                         ("role", u.get("role")), ("dm", e.get("deviceMetrics")),
+                                         ("mqtt", e.get("viaMqtt")), ("lic", u.get("isLicensed")),
+                                         ("pos", e.get("position"))):
                             if val:
                                 c[key] = val
             elif hops >= 1:
@@ -274,7 +282,8 @@ def build(found, prev=None):
                     c["hops"], c["via"] = hops, nid
                 c["heard"] = max(c["heard"], int(heard))
                 for key, val in (("hw", u.get("hwModel")), ("long", u.get("longName")),
-                                 ("role", u.get("role"))):
+                                 ("role", u.get("role")), ("mqtt", e.get("viaMqtt")),
+                                 ("lic", u.get("isLicensed")), ("pos", e.get("position"))):
                     if val and not c.get(key):
                         c[key] = val
 
