@@ -339,10 +339,13 @@ def build(found, prev=None):
         pn = prev_nodes.get(x)
         if not pn or pn.get("x") is None:
             continue
+        # якорь: свежее плечо к размещённой ноде — прямое (snr) в первый цикл
+        # молчания ИЛИ уже синтезированное hops-плечо в последующие (иначе
+        # молчащая держалась бы лишь один цикл и снова пропадала)
         leg = next((l for l in prev.get("links", [])
-                    if l.get("from") == x and l.get("to") in placed
-                    and l.get("snr") is not None and l.get("heard")
-                    and now - l["heard"] <= ttl_c), None)
+                    if l.get("from") == x and l.get("to") in placed and l.get("heard")
+                    and now - l["heard"] <= ttl_c
+                    and (l.get("snr") is not None or l.get("hops"))), None)
         if not leg:
             continue
         hp = pn.get("hop") or 1
