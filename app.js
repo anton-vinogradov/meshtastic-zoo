@@ -8,6 +8,66 @@
   const WCARD = { w: 120, h: 88, r: 11 };
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
+  // Язык интерфейса выбирается в настройках, хранится локально
+  let lang = localStorage.getItem("mzLang") || "en";
+  const T = {
+    en: {
+      callsign: "Callsign", model: "Model", role: "Role", battery: "Battery",
+      wallPower: "wall power", voltage: "Voltage", uptime: "Uptime",
+      chUtil: "Channel util", ownTx: "Own TX", lastSeen: "Last seen",
+      online: "online (answers over TCP)", conversation: "Conversation",
+      compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
+      onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
+      reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
+      sendFromWhich: "send from which node", message: "message…", send: "send",
+      close: "close", noData: "no data", ofIdeal100: "100% of ideal (SNR {0}…{1} dB)",
+      noSnrData: "no SNR data", scan: "scan", stale: "stale!", justNow: "just now",
+      unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
+      mailTip: "unread direct messages — click to open the node",
+      noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
+      noDataTip: "{0} → {1}: no data — {2} has not heard {3} directly (neither in a scan nor in cache)",
+      settings: "Settings", save: "Save", saved: "✓ saved", hubUnavail: "hub unavailable",
+      storedHint: "stored in collector/config.json; the map picks it up on the next refresh (within a minute)",
+      failedSend: "Failed to send:", failedSave: "Failed to save:",
+      mapAria: "Mesh network map", language: "Language",
+      fSubnets: "Site subnets (one per line)", fFloor: "0% quality at SNR, dB",
+      fIdeal: "100% quality at SNR, dB", fKeep: "Keep a silent neighbor, hours",
+      fCache: "Remember legs in cache, hours", fMap: "Map refresh, seconds",
+      fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
+      fFragile: "Slow subnets — polled lightly (prefix per line)",
+    },
+    ru: {
+      callsign: "Позывной", model: "Модель", role: "Роль", battery: "Батарея",
+      wallPower: "питание от сети", voltage: "Напряжение", uptime: "Аптайм",
+      chUtil: "Загрузка эфира", ownTx: "Свой TX", lastSeen: "Видели",
+      online: "онлайн (отвечает по TCP)", conversation: "Переписка",
+      compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
+      onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
+      reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
+      sendFromWhich: "от лица какой ноды", message: "сообщение…", send: "отправить",
+      close: "закрыть", noData: "нет данных", ofIdeal100: "100% от идеала (SNR {0}…{1} dB)",
+      noSnrData: "нет данных об SNR", scan: "скан", stale: "устарело!", justNow: "только что",
+      unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
+      mailTip: "непрочитанные личные сообщения — клик откроет ноду",
+      noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
+      noDataTip: "{0} → {1}: нет данных — {2} не слышала {3} напрямую (ни в скане, ни в кэше)",
+      settings: "Настройки", save: "Сохранить", saved: "✓ сохранено", hubUnavail: "hub недоступен",
+      storedHint: "хранится в collector/config.json; карта подхватит при следующем обновлении (до минуты)",
+      failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
+      mapAria: "Карта mesh-сети", language: "Язык",
+      fSubnets: "Подсети площадок (по одной на строку)", fFloor: "0% качества при SNR, дБ",
+      fIdeal: "100% качества при SNR, дБ", fKeep: "Держать молчащего соседа, часов",
+      fCache: "Помнить плечи в кэше, часов", fMap: "Обновление карты, секунд",
+      fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
+      fFragile: "Медленные подсети — лёгкий опрос (префикс на строке)",
+    },
+  };
+  const t = (k, ...a) => {
+    let s = (T[lang] && T[lang][k]) ?? T.en[k] ?? k;
+    a.forEach((v, i) => { s = s.split("{" + i + "}").join(v); });
+    return s;
+  };
+
   function render(D) {
     // Холст подстраивается под пропорции окна — свободного места не остаётся
     const box = document.getElementById("map").getBoundingClientRect();
@@ -93,10 +153,10 @@
     const fmtSnr = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
     const fmtAge = (ts) => {
       const s = Math.max(0, Date.now() / 1e3 - ts);
-      return s < 90 ? "just now" : s < 3600 ? Math.round(s / 60) + " min"
-        : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " d";
+      return s < 90 ? t("justNow") : s < 3600 ? Math.round(s / 60) + " " + t("unitMin")
+        : s < 86400 ? Math.round(s / 3600) + " " + t("unitH") : Math.round(s / 86400) + " " + t("unitD");
     };
-    const fmtAgo = (ts) => { const a = fmtAge(ts); return a === "just now" ? a : a + " ago"; };
+    const fmtAgo = (ts) => { const a = fmtAge(ts); return a === t("justNow") ? a : t("ago", a); };
 
     // Изображения девайсов (официальные рендеры из Meshtastic web-flasher)
     const HW_IMG = [
@@ -198,11 +258,11 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      const label = l.snr == null ? (l.note || "no data") : fmtSnr(l.snr);
+      const label = l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
       const tip = (l.snr == null
-        ? `${l.from} → ${l.to}: no data — ${lbl2(l.to)} has not heard ${lbl2(l.from)} directly (neither in a scan nor in cache)`
-        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% of ideal`)
-        + (l.heard ? ` · heard ${fmtAgo(l.heard)}` : "");
+        ? t("noDataTip", l.from, l.to, lbl2(l.to), lbl2(l.from))
+        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% ${t("ofIdeal")}`)
+        + (l.heard ? ` · ${t("heard", fmtAgo(l.heard))}` : "");
 
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
       const dim = a.world || b.world ? " dim" : "";
@@ -249,11 +309,11 @@
 
       // Подпись — «пилюля» прямо на линии (на дуге — по кривой),
       // повёрнутая вдоль неё: принадлежность очевидна, фон читается
-      const t = l.labelT ?? (side === 1 ? 0.38 : side === -1 ? 0.62 : 0.5);
+      const lt = l.labelT ?? (side === 1 ? 0.38 : side === -1 ? 0.62 : 0.5);
       const qp = (tq, p0, pc, p1) =>
         (1 - tq) ** 2 * p0 + 2 * (1 - tq) * tq * pc + tq ** 2 * p1;
-      const lx = bend ? qp(t, x1, qcx, x2) : x1 + (x2 - x1) * t;
-      const ly = bend ? qp(t, y1, qcy, y2) : y1 + (y2 - y1) * t;
+      const lx = bend ? qp(lt, x1, qcx, x2) : x1 + (x2 - x1) * lt;
+      const ly = bend ? qp(lt, y1, qcy, y2) : y1 + (y2 - y1) * lt;
       const ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
       const rot = (ang > 90 || ang < -90) ? ang + 180 : ang;
       const tw = label.length * 7.6 + 16;
@@ -306,14 +366,14 @@
 
     document.getElementById("map").innerHTML =
       `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img"
-        aria-label="Mesh network map"><defs>${rfMarkers.join("")}
+        aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="40" height="40" rx="7"/></clipPath></defs>${out.join("\n")}</svg>`;
 
     // Панель подробностей ноды (по клику)
     const panel = document.getElementById("panel");
     const fmtUp = (s) => {
       const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
-      return (d ? d + " d " : "") + (h ? h + " h " : "") + m + " m";
+      return (d ? d + " " + t("upD") + " " : "") + (h ? h + " " + t("upH") + " " : "") + m + " " + t("upM");
     };
     const lbl = (id) => (nodes[id] || { label: id }).label;
     async function markRead(ids) {
@@ -337,16 +397,16 @@
       const i = n.info || {};
       const rows = [
         ["ID", n.id],
-        ["Callsign", n.short && n.short !== n.label ? n.short : null],
+        [t("callsign"), n.short && n.short !== n.label ? n.short : null],
         ["IP", n.sub !== n.id ? n.sub : null],
-        ["Model", n.hw],
-        ["Role", i.role],
-        ["Battery", i.battery == null ? null : i.battery > 100 ? "wall power" : i.battery + " %"],
-        ["Voltage", i.voltage == null ? null : i.voltage.toFixed(2) + " V"],
-        ["Uptime", i.uptime == null ? null : fmtUp(i.uptime)],
-        ["Channel util", i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
-        ["Own TX", i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
-        ["Last seen", n.online ? "online (answers over TCP)" : n.heard ? fmtAgo(n.heard) : "—"],
+        [t("model"), n.hw],
+        [t("role"), i.role],
+        [t("battery"), i.battery == null ? null : i.battery > 100 ? t("wallPower") : i.battery + " %"],
+        [t("voltage"), i.voltage == null ? null : i.voltage.toFixed(2) + " V"],
+        [t("uptime"), i.uptime == null ? null : fmtUp(i.uptime)],
+        [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
+        [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
+        [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—"],
       ].filter(([, v]) => v != null);
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
@@ -362,20 +422,23 @@
       const rel = Object.values(byOther);
       const pairsL = rel.filter(r => r.in && r.out).sort((a, b) => bestQ(b) - bestQ(a));
       const singles = rel.filter(r => !(r.in && r.out)).sort((a, b) => bestQ(b) - bestQ(a));
-      const legLine = (l, who) => {
+      // короткий позывной в списке (полное имя — в тултипе), чтобы не обрезалось
+      const shortOf = (nid) => (nodes[nid] || {}).short || lbl(nid);
+      const legLine = (l, who, ttl) => {
         const col = colorOf(l);
-        const val = l.snr == null ? "no data" : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
+        const val = l.snr == null ? t("noData") : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
         return `<div class="leg"><span class="dot" style="background:${col}"></span>
-          <span class="who">${who}</span><span style="color:${col}">${val}</span>
+          <span class="who"${ttl ? ` title="${esc(ttl)}"` : ""}>${who}</span>
+          <span style="color:${col}">${val}</span>
           ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}</div>`;
       };
       const legs =
-        (pairsL.length ? `<div class="psub">two-way</div>` : "") +
-        pairsL.map(r => `<div class="pair"><div class="pwho">⇄ ${esc(lbl(r.other))}</div>
+        (pairsL.length ? `<div class="psub">${t("twoWay")}</div>` : "") +
+        pairsL.map(r => `<div class="pair"><div class="pwho" title="${esc(lbl(r.other))}">⇄ ${esc(shortOf(r.other))}</div>
           ${legLine(r.out, "→")}${legLine(r.in, "←")}</div>`).join("") +
-        (singles.length ? `<div class="psub">one-way</div>` : "") +
+        (singles.length ? `<div class="psub">${t("oneWay")}</div>` : "") +
         `<div class="singles">${singles.map(r =>
-          legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(lbl(r.other)))).join("")}</div>`;
+          legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(shortOf(r.other)), lbl(r.other))).join("")}</div>`;
       // История переписки этой ноды, хронологически. Дедуп: у сообщения
       // между двумя своими нодами есть и отправленная, и принятая копия —
       // для своей ноды берём отправленное этой нодой и принятое ей;
@@ -386,10 +449,10 @@
         : (isOwn ? m.node === id : m.frm === id))
         .sort((a, b) => a.ts - b.ts).slice(-40);
       const STATUS = {
-        sent: ["⏳", "on air", "var(--muted)"],
-        delivered: ["✓", "delivered", "#35c98e"],
-        failed: ["✗", "error", "#e05656"],
-        noack: ["⚠", "no ack", "#e0a03c"],
+        sent: ["⏳", t("onAir"), "var(--muted)"],
+        delivered: ["✓", t("delivered"), "#35c98e"],
+        failed: ["✗", t("error"), "#e05656"],
+        noack: ["⚠", t("noAck"), "#e0a03c"],
       };
       const rowHtml = (m) => {
         const bySelf = m.frm === id;
@@ -397,21 +460,21 @@
         const who = (bySelf ? "→ " : "← ") + esc(m.frmName && !bySelf ? m.frmName : lbl(peer));
         let foot = `<span class="age">${fmtAgo(m.ts)}</span>`;
         if (m.kind === "out") {
-          const [g, t, c] = STATUS[m.status] || ["", "", "var(--muted)"];
-          foot = `<span class="mstatus" style="color:${c}" title="${esc(t + (m.detail ? " · " + m.detail : ""))}">${g} ${esc(t)}</span>` + foot;
+          const [g, st, c] = STATUS[m.status] || ["", "", "var(--muted)"];
+          foot = `<span class="mstatus" style="color:${c}" title="${esc(st + (m.detail ? " · " + m.detail : ""))}">${g} ${esc(st)}</span>` + foot;
         }
         const canRead = m.kind !== "out" && m.node === id && !m.read;
         return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}">
           <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
           <div class="mtext">${esc(m.text)}</div>
           ${canRead ? `<div class="mact" data-mid="${esc(m.id)}" data-from="${esc(m.node)}" data-to="${esc(m.frm)}">
-            <input class="reply" placeholder="reply…">
-            <button class="msend" title="reply from ${esc(lbl(m.node))}">➤</button>
-            <button class="mok" title="mark as read">✓</button></div>` : ""}
+            <input class="reply" placeholder="${t("reply")}">
+            <button class="msend" title="${esc(t("replyFrom", lbl(m.node)))}">➤</button>
+            <button class="mok" title="${t("markRead")}">✓</button></div>` : ""}
         </div>`;
       };
       const msgHtml = thread.length
-        ? `<div class="pmsgs"><b>Conversation</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
+        ? `<div class="pmsgs"><b>${t("conversation")}</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
         : "";
 
       // «Написать»: этой ноде — от лица любой своей онлайн-ноды
@@ -429,23 +492,23 @@
       const owners = Object.values(nodes)
         .filter(v => v.own && v.online && v.id !== id)
         .sort((a2, b2) => qTo(b2.id) - qTo(a2.id));
-      const composeHtml = owners.length ? `<div class="pcompose"><b>Compose</b>
+      const composeHtml = owners.length ? `<div class="pcompose"><b>${t("compose")}</b>
         <div class="crow">
-          <select class="cfrom" title="send from which node">${owners.map(o =>
+          <select class="cfrom" title="${t("sendFromWhich")}">${owners.map(o =>
             `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>
-          <input class="reply cmsg" placeholder="message…">
-          <button class="csend" title="send">➤</button>
+          <input class="reply cmsg" placeholder="${t("message")}">
+          <button class="csend" title="${t("send")}">➤</button>
         </div></div>` : "";
 
       panel.innerHTML = `
-        <button id="pclose" aria-label="close">×</button>
+        <button id="pclose" aria-label="${t("close")}">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
           <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v]) => `<div class="prow"><span>${k}</span><span>${esc(String(v))}</span></div>`).join("")}
         ${msgHtml}
         ${composeHtml}
-        ${legs ? `<div class="plegs"><b>Legs</b>${legs}</div>` : ""}`;
+        ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;
       panel.classList.add("open");
       // переписка прокручивается к последнему сообщению
       const th = panel.querySelector(".thread");
@@ -460,7 +523,7 @@
           const text = inp.value.trim();
           if (!text) { inp.focus(); return; }
           row.querySelector(".msend").disabled = true;
-          let res = { ok: false, error: "hub unavailable" };
+          let res = { ok: false, error: t("hubUnavail") };
           try {
             res = await (await fetch("/api/send", {
               method: "POST", body: JSON.stringify({ node: from, to, text }),
@@ -469,7 +532,7 @@
           if (res.ok) { await markRead([mid]); await afterAction(); }
           else {
             row.querySelector(".msend").disabled = false;
-            alert("Failed to send: " + (res.error || "?"));
+            alert(t("failedSend") + " " + (res.error || "?"));
           }
         };
         row.querySelector(".mok").onclick = async () => {
@@ -484,7 +547,7 @@
           if (!text) { inp.focus(); return; }
           const btn = cw.querySelector(".csend");
           btn.disabled = true;
-          let res = { ok: false, error: "hub unavailable" };
+          let res = { ok: false, error: t("hubUnavail") };
           try {
             res = await (await fetch("/api/send", {
               method: "POST",
@@ -493,7 +556,7 @@
           } catch { }
           btn.disabled = false;
           if (res.ok) { inp.value = ""; await afterAction(); }
-          else alert("Failed to send: " + (res.error || "?"));
+          else alert(t("failedSend") + " " + (res.error || "?"));
         };
       }
     }
@@ -524,17 +587,17 @@
     const stale = D.meta.updatedTs && Date.now() - D.meta.updatedTs > 15 * 60e3;
     document.getElementById("legend").innerHTML = `
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
-        100% of ideal (SNR ${fmtSnr(S.floor)}…${fmtSnr(S.ideal)} dB)</span>
-      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>no SNR data</span>
-      <span class="item">scan · ${esc(D.meta.updated)}
-        ${stale ? '<b style="color:#e0a03c">· stale!</b>' : ""}</span>`;
+        ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
+      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
+      <span class="item">${t("scan")} · ${esc(D.meta.updated)}
+        ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
 
     // Общий маркер непрочитанной почты
     const mailEl = document.getElementById("mail");
     if (unreadTotal) {
       mailEl.hidden = false;
       mailEl.textContent = `✉ ${unreadTotal}`;
-      mailEl.title = "unread direct messages — click to open the node";
+      mailEl.title = t("mailTip");
       mailEl.onclick = () => {
         const nid = Object.keys(unread).find(k => nodes[k]);
         if (nid) showPanel(nid, true);
@@ -580,15 +643,15 @@
 
   // ---- Настройки (⚙): читаются и сохраняются через hub ----
   const SET_FIELDS = [
-    ["subnets", "Site subnets (one per line)", "area"],
-    ["snrScale.floor", "0% quality at SNR, dB", "num"],
-    ["snrScale.ideal", "100% quality at SNR, dB", "num"],
-    ["worldMaxAgeH", "Keep a silent neighbor, hours", "num"],
-    ["cacheMaxAgeH", "Remember legs in cache, hours", "num"],
-    ["topoEveryS", "Map refresh, seconds", "num"],
-    ["rescanS", "New-node discovery, seconds", "num"],
-    ["mobile", "Roaming nodes (id, one per line)", "area"],
-    ["fragile", "Fragile subnets (prefix, one per line)", "area"],
+    ["subnets", "fSubnets", "area"],
+    ["snrScale.floor", "fFloor", "num"],
+    ["snrScale.ideal", "fIdeal", "num"],
+    ["worldMaxAgeH", "fKeep", "num"],
+    ["cacheMaxAgeH", "fCache", "num"],
+    ["topoEveryS", "fMap", "num"],
+    ["rescanS", "fDisc", "num"],
+    ["mobile", "fRoam", "area"],
+    ["fragile", "fFragile", "area"],
   ];
   const setEl = document.getElementById("settings");
   const sfId = (k) => "sf-" + k.replace(".", "-");
@@ -598,28 +661,37 @@
     try {
       cfg = await (await fetch("/api/config", { cache: "no-store" })).json();
     } catch {
-      setEl.innerHTML = "<b class='stitle'>Settings</b><div class='shint'>hub unavailable</div>";
+      setEl.innerHTML = `<b class='stitle'>${t("settings")}</b><div class='shint'>${t("hubUnavail")}</div>`;
       setEl.classList.add("open");
       return;
     }
     const val = (k) => k.includes(".")
       ? (cfg[k.split(".")[0]] || {})[k.split(".")[1]]
       : cfg[k];
-    setEl.innerHTML = `<button id="sclose" aria-label="close">×</button>
-      <b class="stitle">Settings</b>` +
+    const langOpt = (v, name) => `<option value="${v}"${lang === v ? " selected" : ""}>${name}</option>`;
+    setEl.innerHTML = `<button id="sclose" aria-label="${t("close")}">×</button>
+      <b class="stitle">${t("settings")}</b>
+      <label class="srow"><span>${t("language")}</span>
+        <select id="sf-lang">${langOpt("en", "English")}${langOpt("ru", "Русский")}</select></label>` +
       SET_FIELDS.map(([k, label, kind]) => kind === "area"
-        ? `<label class="srow"><span>${label}</span>
+        ? `<label class="srow"><span>${t(label)}</span>
             <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
-        : `<label class="srow"><span>${label}</span>
+        : `<label class="srow"><span>${t(label)}</span>
             <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
       ).join("") +
-      `<button id="ssave">Save</button>
-       <div class="shint">stored in collector/config.json;
-         the map picks it up on the next refresh (within a minute)</div>`;
+      `<button id="ssave">${t("save")}</button>
+       <div class="shint">${t("storedHint")}</div>`;
     setEl.classList.add("open");
     document.getElementById("panel").classList.remove("open");
     openId = null;
     setEl.querySelector("#sclose").onclick = () => setEl.classList.remove("open");
+    setEl.querySelector("#sf-lang").onchange = (e) => {
+      lang = e.target.value;
+      localStorage.setItem("mzLang", lang);
+      document.getElementById("gear").title = t("settings");
+      if (lastLive) render(lastLive);
+      openSettings(); // перестроить настройки на новом языке
+    };
     setEl.querySelector("#ssave").onclick = async () => {
       const g = (k) => document.getElementById(sfId(k));
       const lines = (el) => el.value.split("\n").map(s => s.trim()).filter(Boolean);
@@ -635,7 +707,7 @@
       };
       const btn = setEl.querySelector("#ssave");
       btn.disabled = true;
-      let res = { ok: false, error: "hub unavailable" };
+      let res = { ok: false, error: t("hubUnavail") };
       try {
         res = await (await fetch("/api/config", {
           method: "POST", body: JSON.stringify(body),
@@ -643,10 +715,10 @@
       } catch { }
       btn.disabled = false;
       if (res.ok) {
-        btn.textContent = "✓ saved";
-        setTimeout(() => { btn.textContent = "Save"; }, 1800);
+        btn.textContent = t("saved");
+        setTimeout(() => { btn.textContent = t("save"); }, 1800);
       } else {
-        alert("Failed to save: " + (res.error || "?"));
+        alert(t("failedSave") + " " + (res.error || "?"));
       }
     };
   }
@@ -654,6 +726,7 @@
     if (setEl.classList.contains("open")) setEl.classList.remove("open");
     else openSettings();
   };
+  document.getElementById("gear").title = t("settings");
   async function tick() {
     await refreshMsgs();
     const live = await loadLive();
@@ -661,7 +734,7 @@
       if (lastStamp !== "empty") {
         lastStamp = "empty";
         document.getElementById("map").innerHTML =
-          '<p class="empty">No data yet — run <code>python3 collector/hub.py</code></p>';
+          `<p class="empty">${t("noDataYet")} <code>python3 collector/hub.py</code></p>`;
         document.getElementById("legend").innerHTML = "";
       }
       return;

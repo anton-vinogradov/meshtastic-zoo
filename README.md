@@ -78,11 +78,14 @@ Clicking opens the details panel:
 The **⚙** button in the top-right corner of the map. All the important
 things live there:
 
+- **interface language** (English / Russian, remembered in your browser);
 - your sites' subnets — where to look for nodes;
 - the color scale: which SNR counts as zero and which as ideal;
 - how many hours to keep a silent neighbor on the map;
 - the map refresh and new-node discovery periods;
-- roaming nodes (dashed frame) and "fragile" subnets.
+- roaming nodes (dashed frame);
+- **slow subnets** — sites whose nodes choke on a full query, so the
+  collector polls them lightly (a site is listed by IP prefix).
 
 Changes apply on the fly and are saved to `collector/config.json`;
 rare things like fallback node addresses (`known` / `names`) live in
