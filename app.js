@@ -743,16 +743,13 @@
       ]);
       // Позиция — сразу миникартой (OSM-эмбед с маркером; грузится лениво,
       // только когда раздел раскрыт). Координаты broadcast — приблизительные.
-      const secPos = i.lat == null ? "" : (() => {
-        const d = 0.008, bb = `${i.lon - d},${i.lat - d},${i.lon + d},${i.lat + d}`;
-        return `<details class="psec"><summary>${esc(t("secPos"))}</summary>
-          <iframe class="minimap" loading="lazy" referrerpolicy="no-referrer"
-            src="https://www.openstreetmap.org/export/embed.html?bbox=${bb}&layer=mapnik&marker=${i.lat},${i.lon}"></iframe>
+      const secPos = i.lat == null ? "" :
+        `<details class="psec" id="sec-pos"><summary>${esc(t("secPos"))}</summary>
+          <div class="minimap" id="pmini"></div>
           <div class="prow"><span>${esc(t("cLat"))} / ${esc(t("cLon"))}</span><span>${i.lat.toFixed(5)}, ${i.lon.toFixed(5)}</span></div>
           ${i.alt == null ? "" : `<div class="prow"><span>${esc(t("cAlt"))}</span><span>${i.alt} m</span></div>`}
           <a class="osmlink" href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lon}#map=15/${i.lat}/${i.lon}" target="_blank" rel="noopener noreferrer">${esc(t("openMap"))}</a>
         </details>`;
-      })();
       // История — наполняется асинхронно после отрисовки (fillHistory ниже)
       const secHist = `<details class="psec" id="sec-hist"><summary>${esc(t("secHist"))}</summary>`
         + `<div id="hist-body" class="hist-body">…</div></details>`;
@@ -909,6 +906,13 @@
         if (openSecs.has(d.querySelector("summary").textContent.trim())) d.open = true;
       });
       panel.classList.add("open");
+      // мини-карта позиции: инициализируем при раскрытии секции (и если уже раскрыта)
+      const posSec = panel.querySelector("#sec-pos");
+      if (posSec && i.lat != null) {
+        const drawMini = () => showMini(panel.querySelector("#pmini"), i.lat, i.lon);
+        posSec.addEventListener("toggle", () => { if (posSec.open) drawMini(); });
+        if (posSec.open) setTimeout(drawMini, 30);
+      }
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
       (async () => {
         const body = panel.querySelector("#hist-body");
@@ -1637,6 +1641,18 @@
   }
   document.getElementById("viewtab").onclick = () => setGeoView(!geoView);
   setGeoView(geoView);  // применить сохранённое состояние вида
+
+  // мини-карта позиции в панели ноды (Leaflet — зум работает, в отличие от
+  // OSM-embed iframe, у которого «минус» упирался в bbox)
+  let miniMap = null;
+  function showMini(el, lat, lon) {
+    if (!el || typeof L === "undefined") return;
+    if (miniMap) { try { miniMap.remove(); } catch { } miniMap = null; }
+    miniMap = L.map(el, { attributionControl: false }).setView([lat, lon], 13);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(miniMap);
+    L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 2, fillColor: "#e0a03c", fillOpacity: 1 }).addTo(miniMap);
+    setTimeout(() => miniMap && miniMap.invalidateSize(), 30);
+  }
 
   async function tick() {
     await refreshMsgs();
