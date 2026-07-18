@@ -6,6 +6,10 @@ A live map of your Meshtastic node zoo: who is on the air, who hears
 whom and how well, and which node has unread mail. Everything updates
 by itself while the page is open.
 
+![The connectivity map: own nodes tinted by site, neighbors heard over the radio, arrows colored by link quality with the SNR on each line.](docs/screenshot.png)
+
+*(Own nodes' addresses and neighbors' names are redacted in this shot.)*
+
 ## Running
 
 Quick, for a look:
