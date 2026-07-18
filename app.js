@@ -20,6 +20,7 @@
       keyLabel: "Key", keyYes: "received", keyNo: "not received (can't DM)",
       publicChannel: "Public channel", gotByLabel: "received by",
       chNoMsg: "no messages yet",
+      hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
       reply: "reply…", replyFrom: "reply from {0}", markRead: "mark as read",
@@ -48,6 +49,7 @@
       keyLabel: "Ключ", keyYes: "получен", keyNo: "не получен (DM нельзя)",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
       chNoMsg: "пока пусто",
+      hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
       reply: "ответить…", replyFrom: "ответить с {0}", markRead: "прочитано",
@@ -326,10 +328,13 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      const label = l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
-      const tip = (l.snr == null
-        ? t("noDataTip", l.from, l.to, lbl2(l.to), lbl2(l.from))
-        : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% ${t("ofIdeal")}`)
+      const label = l.hops ? t("hop", l.hops)
+        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
+      const tip = (l.hops
+        ? t("hopTip", l.from, l.to, l.hops)
+        : l.snr == null
+          ? t("noDataTip", l.from, l.to, lbl2(l.to), lbl2(l.from))
+          : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% ${t("ofIdeal")}`)
         + (l.heard ? ` · ${t("heard", fmtAgo(l.heard))}` : "");
 
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
@@ -405,9 +410,10 @@
     // Карточки нод (поверх рёбер)
     for (const n of Object.values(nodes)) {
       const x = n.cx - n.w / 2, y = n.cy - n.h / 2;
-      const fill = n.world ? "var(--world-card)" : "var(--card-fill)";
-      const stroke = n.world ? "#3a3a3e" : "var(--card-stroke)";
-      const subFill = n.world ? "var(--muted)" : "var(--card-sub)";
+      const isHop = n.hop != null;
+      const fill = isHop ? "#24242a" : n.world ? "var(--world-card)" : "var(--card-fill)";
+      const stroke = isHop ? "#55555c" : n.world ? "#3a3a3e" : "var(--card-stroke)";
+      const subFill = isHop ? "#7a7a80" : n.world ? "var(--muted)" : "var(--card-sub)";
       const long = (n.info || {}).long;
       const tipTxt = [long !== n.label ? long : null, n.hw, n.hint].filter(Boolean).join(" · ");
       const name = String(n.label);
@@ -484,9 +490,16 @@
         [t("chUtil"), i.chUtil == null ? null : i.chUtil.toFixed(1) + " %"],
         [t("ownTx"), i.airTx == null ? null : i.airTx.toFixed(1) + " %"],
         [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—"],
-        n.key == null ? [null, null] :
-          [t("keyLabel"), n.key ? "✓ " + t("keyYes") : "🔒 " + t("keyNo"),
-            n.key ? "#35c98e" : "#e0a03c"],
+        ...(() => {
+          if (n.key == null) return [[null, null]];
+          const kb = n.keyBy || [];
+          const ownAll = (lastLive && lastLive.nodes || []).filter(x => x.own).map(x => x.id);
+          if (!kb.length) return [[t("keyLabel"), "🔒 " + t("keyNo"), "#e0a03c"]];
+          if (kb.length >= ownAll.filter(x => x !== id).length || kb.length >= ownAll.length)
+            return [[t("keyLabel"), "✓ " + t("keyYes"), "#35c98e"]];
+          // ключ есть лишь у части нод — назвать у кого (у остальных DM упадёт)
+          return [[t("keyLabel"), "✓ " + kb.map(shortName).join(", "), "#8fce6a"]];
+        })(),
       ].filter(([, v]) => v != null);
       // Плечи: двусторонние пары («мосты») — группами, одиночные — отдельно,
       // всё отсортировано по качеству
@@ -506,7 +519,7 @@
       const shortOf = (nid) => (nodes[nid] || {}).short || lbl(nid);
       const legLine = (l, who, ttl) => {
         const col = colorOf(l);
-        const val = l.snr == null ? t("noData") : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
+        const val = l.hops ? t("hop", l.hops) : l.snr == null ? t("noData") : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
         return `<div class="leg"><span class="dot" style="background:${col}"></span>
           <span class="who"${ttl ? ` title="${esc(ttl)}"` : ""}>${who}</span>
           <span style="color:${col}">${val}</span>
@@ -598,15 +611,18 @@
         return best;
       };
       const distTo = (v) => Math.hypot(v.cx - n.cx, v.cy - n.cy);
+      // ключ адресата нужен ИМЕННО отправителю → сначала ноды с ключом
+      const hasKey = (ownId) => (n.keyBy || []).includes(ownId);
       const owners = Object.values(nodes)
         .filter(v => v.own && v.online && v.id !== id)
-        .sort((a2, b2) => (qTo(b2.id) - qTo(a2.id)) || (distTo(a2) - distTo(b2)));
+        .sort((a2, b2) => (hasKey(b2.id) - hasKey(a2.id))
+          || (qTo(b2.id) - qTo(a2.id)) || (distTo(a2) - distTo(b2)));
       const replyBar = replyDM ? `<div class="replybar">↩ ${esc((replyDM.text || "").slice(0, 40))}
         <button class="rcancel">×</button></div>` : "";
       const composeHtml = owners.length ? `<div class="pcompose"><b>${t("compose")}</b>
         ${replyBar}<div class="crow">
           <select class="cfrom" title="${t("sendFromWhich")}">${owners.map(o =>
-            `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>
+            `<option value="${esc(o.id)}">${esc(o.short || o.label)}${n.key != null && !hasKey(o.id) ? " 🔒" : ""}</option>`).join("")}</select>
           <input class="reply cmsg" placeholder="${t("message")}">
           <button class="csend" title="${t("send")}">➤</button>
         </div></div>` : "";

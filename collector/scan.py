@@ -229,38 +229,54 @@ def build(found, prev=None):
                          hw=i.get("hw"), long=i.get("long"), role=i.get("role"),
                          dm=i.get("dm") or {}, db=i.get("db") or {})
 
-    # У каких нод получен публичный ключ (без него шифрованный DM не уйдёт —
-    # PKI_SEND_FAIL_PUBLIC_KEY). Ключ приходит с NodeInfo и оседает в nodeDB.
-    keys_known = set()
-    for n in stat.values():
+    # У каких СВОИХ нод есть публичный ключ каждой ноды. Ключ нужен именно
+    # отправителю: без него его DM падает с PKI_SEND_FAIL_PUBLIC_KEY, даже
+    # если ключ есть у другой моей ноды. keys_by[oid] = {свои ноды с ключом}.
+    keys_by = {}
+    for nid, n in stat.items():
         for oid, e in n["db"].items():
             if isinstance(e, dict) and (e.get("user") or {}).get("publicKey"):
-                keys_known.add(oid)
+                keys_by.setdefault(oid, set()).add(nid)
 
     # Линки: запись в nodeDB ноды N про ноду X = «N слышит X» → плечо X→N.
-    # Берём только прямые (hopsAway 0) и свежие.
-    rf, world_cand = [], {}
+    # Прямые (hopsAway 0, с SNR) — цветные; многохоповые (hopsAway ≥ 1) —
+    # серые, с числом хопов вместо силы сигнала.
+    rf, world_cand, hop_cand = [], {}, {}
     for nid, n in stat.items():
         for oid, e in n["db"].items():
             if oid == nid or not isinstance(e, dict):
                 continue
-            snr, heard = e.get("snr"), e.get("lastHeard") or 0
-            if snr is None or e.get("hopsAway", 0) != 0 or now - heard > max_age:
+            heard = e.get("lastHeard") or 0
+            if now - heard > max_age:
                 continue
-            if oid in stat:
-                rf.append(dict(frm=oid, to=nid, snr=snr, heard=int(heard)))
-            else:
-                u = e.get("user") or {}
-                c = world_cand.setdefault(oid, dict(id=oid, best=-99, heard=0, hears=[],
-                                                    short=u.get("shortName") or oid[-4:]))
-                c["best"] = max(c["best"], snr)
-                c["hears"].append((oid, nid, snr, int(heard)))
-                if heard >= c["heard"]:
-                    c["heard"] = int(heard)
-                    for key, val in (("hw", u.get("hwModel")), ("long", u.get("longName")),
-                                     ("role", u.get("role")), ("dm", e.get("deviceMetrics"))):
-                        if val:
-                            c[key] = val
+            hops = e.get("hopsAway", 0) or 0
+            snr = e.get("snr")
+            u = e.get("user") or {}
+            if hops == 0 and snr is not None:
+                if oid in stat:
+                    rf.append(dict(frm=oid, to=nid, snr=snr, heard=int(heard)))
+                else:
+                    c = world_cand.setdefault(oid, dict(id=oid, best=-99, heard=0, hears=[],
+                                                        short=u.get("shortName") or oid[-4:]))
+                    c["best"] = max(c["best"], snr)
+                    c["hears"].append((oid, nid, snr, int(heard)))
+                    if heard >= c["heard"]:
+                        c["heard"] = int(heard)
+                        for key, val in (("hw", u.get("hwModel")), ("long", u.get("longName")),
+                                         ("role", u.get("role")), ("dm", e.get("deviceMetrics"))):
+                            if val:
+                                c[key] = val
+            elif hops >= 1:
+                # многохоповый: помним минимальное число хопов и через кого
+                c = hop_cand.setdefault(oid, dict(id=oid, hops=99, heard=0, via=None,
+                                                  short=u.get("shortName") or oid[-4:]))
+                if hops < c["hops"] or (hops == c["hops"] and heard >= c["heard"]):
+                    c["hops"], c["via"] = hops, nid
+                c["heard"] = max(c["heard"], int(heard))
+                for key, val in (("hw", u.get("hwModel")), ("long", u.get("longName")),
+                                 ("role", u.get("role"))):
+                    if val and not c.get(key):
+                        c[key] = val
 
     # Внешний мир: кого слышит больше стационарных нод и громче; topN 0 = все
     topn = CFG["worldTopN"] or len(world_cand)
@@ -269,9 +285,19 @@ def build(found, prev=None):
     for c in world:
         rf.extend(dict(frm=o, to=n, snr=s, heard=hd) for o, n, s, hd in c["hears"])
 
+    # Многохоповые ноды — ТОЛЬКО те, что были на карте раньше (в прошлом
+    # live.json), но напрямую больше не слышны: бывшие прямые соседи,
+    # деградировавшие в многохоп. Не весь меш (в nodeDB сотни дальних нод).
+    direct_ids = set(stat) | {c["id"] for c in world}
+    prev_ids = {n.get("id") for n in (prev.get("nodes", []) if prev else [])}
+    hops_nodes = [c for c in hop_cand.values()
+                  if c["id"] not in direct_ids and c["via"] and c["id"] in prev_ids]
+    for c in hops_nodes:
+        rf.append(dict(frm=c["id"], to=c["via"], snr=None, hops=c["hops"], heard=c["heard"]))
+
     # Кэш: плечи из прошлого live.json, которых не хватило в этом скане
     # (нода могла отдаться лёгким хендшейком без своей базы)
-    node_ids = set(stat) | {c["id"] for c in world}
+    node_ids = direct_ids | {c["id"] for c in hops_nodes}
     have = {(l["frm"], l["to"]) for l in rf}
     if prev:
         ttl = CFG.get("cacheMaxAgeH", 24) * 3600
@@ -327,6 +353,16 @@ def build(found, prev=None):
         fresh = 1.2 if age < 900 else 1.0 if age < 3600 else 0.8 if age < 6 * 3600 else 0.6
         wts[key] = (1.6 if two_way else 1.0) * fresh
 
+    # Многохоповые: 1 хоп = дистанция при 0% сигнала (D0), дальше каждый хоп
+    # добавляет половину предыдущего шага (+50%, +25%, +12.5%…) — не улетают
+    D0 = 0.12 + 0.62
+    for l in rf:
+        if l.get("hops"):
+            key = tuple(sorted((l["frm"], l["to"])))
+            if key not in des:
+                des[key] = D0 * (2 - 0.5 ** (l["hops"] - 1))
+                wts[key] = 0.4  # непрямая связь — тянет слабо
+
     pos = layout(sorted(node_ids), des, wts)
 
     # Карточки нод
@@ -337,7 +373,7 @@ def build(found, prev=None):
         x, y = pos[nid]
         node = dict(id=nid, label=label, sub=n["ip"], short=n["short"], own=True,
                     x=round(x, 4), y=round(y, 4), online=True, heard=int(now),
-                    key=nid in keys_known)
+                    key=bool(keys_by.get(nid)), keyBy=sorted(keys_by.get(nid, ())))
         if n.get("hw"):
             node["hw"] = n["hw"]
         info = node_info(n)
@@ -351,7 +387,19 @@ def build(found, prev=None):
         x, y = pos[c["id"]]
         node = dict(id=c["id"], label=label, sub=c["id"], short=c["short"],
                     x=round(x, 4), y=round(y, 4), heard=c["heard"] or None,
-                    key=c["id"] in keys_known)
+                    key=bool(keys_by.get(c["id"])), keyBy=sorted(keys_by.get(c["id"], ())))
+        if c.get("hw"):
+            node["hw"] = c["hw"]
+        info = node_info(c)
+        if info:
+            node["info"] = info
+        nodes.append(node)
+    for c in hops_nodes:
+        label = c.get("long") or c["short"]
+        x, y = pos[c["id"]]
+        node = dict(id=c["id"], label=label, sub=c["id"], short=c["short"], hop=c["hops"],
+                    x=round(x, 4), y=round(y, 4), heard=c["heard"] or None,
+                    key=bool(keys_by.get(c["id"])), keyBy=sorted(keys_by.get(c["id"], ())))
         if c.get("hw"):
             node["hw"] = c["hw"]
         info = node_info(c)
@@ -363,6 +411,8 @@ def build(found, prev=None):
     for l in rf:
         d = {"from": l["frm"], "to": l["to"], "type": "rf",
              "snr": None if l["snr"] is None else round(l["snr"], 2)}
+        if l.get("hops"):
+            d["hops"] = l["hops"]
         if l.get("heard"):
             d["heard"] = l["heard"]
         out_links.append(d)

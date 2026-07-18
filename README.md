@@ -30,8 +30,15 @@ is a list in [`collector/config.json`](collector/config.json).
   the node with the letter.
 - **A lock 🔒** — the node's public key hasn't been received yet, so an
   encrypted DM to it can't be sent (the `PKI_SEND_FAIL_PUBLIC_KEY`
-  error). Keys arrive on their own with NodeInfo; the badge disappears
-  once one does. The panel shows the key status for every node.
+  error). The key is held **per sending node**: a DM only goes through
+  from one of your nodes that already has the recipient's key, so the
+  panel lists exactly which of your nodes hold it. Keys arrive on their
+  own with NodeInfo; the badge disappears once every node has one.
+- **Grey squares with a hop count** — a node that used to be a direct
+  (0-hop) neighbor but now only reaches you through relays. It keeps its
+  place on the map but is drawn grey with a dashed frame, and its leg
+  shows the hop count (`1 hop`, `2 hops`…) instead of an SNR — there is
+  no direct link to measure. The more hops, the farther out it drifts.
 - **Arrows** show who hears whom: the head points at the listener.
   Color is link quality, from red (barely) to green (ideal); the label
   on the line is the SNR in dB; the exact percentage is in the tooltip.
