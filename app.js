@@ -396,12 +396,17 @@
         route = best;
       }
       let [x1, y1] = route.pa, [x2, y2] = route.pb;
-      const dl = Math.hypot(x2 - x1, y2 - y1) || 1;
-      const ux = (x2 - x1) / dl, uy = (y2 - y1) / dl;
-      x1 += ux * 3; y1 += uy * 3; x2 -= ux * 11; y2 -= uy * 11;
       const bend = route.bend, nxv = route.nxv, nyv = route.nyv;
+      // контрольная точка дуги — по портам на гранях (до отступа концов)
       const qcx = (x1 + x2) / 2 + nxv * bend * 2;
       const qcy = (y1 + y2) / 2 + nyv * bend * 2;
+      // Отступ концов — вдоль КАСАТЕЛЬНОЙ кривой (на дуге она ≠ прямая a→b),
+      // иначе остриё стрелки уезжает вбок от грани. Малый зазор у стрелки —
+      // чтобы она упиралась точно в грань узла, а не мимо угла.
+      const along = (dx, dy, d) => { const l = Math.hypot(dx, dy) || 1; return [dx / l * d, dy / l * d]; };
+      const [sdx, sdy] = along(qcx - x1, qcy - y1, 3);
+      const [edx, edy] = along(x2 - qcx, y2 - qcy, 6);
+      x1 += sdx; y1 += sdy; x2 -= edx; y2 -= edy;
       const geom = bend
         ? `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${qcx.toFixed(1)} ${qcy.toFixed(1)}
             ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${col}" stroke-width="2"
