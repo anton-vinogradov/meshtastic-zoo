@@ -22,17 +22,19 @@ CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
 
 
-def layout(ids, des):
-    """Жадная укладка «от самых связных» + пружинная полировка.
+def layout(ids, des, wts=None):
+    """Жадная затравка «от самых связных» + weighted SMACOF.
 
-    Сначала компонуется ядро — ноды с наибольшей связностью (число
-    соседей, затем суммарное качество плеч); остальные добавляются по
-    убыванию связности. Кандидаты для новичка — точки на окружностях
-    желаемых дистанций вокруг уже размещённых соседей; выбирается
-    позиция с минимальной ошибкой пружин плюс штраф за близость к
-    чужим (нодам без связи) — штраф растёт с каждой итерацией.
-    Возвращает СЫРЫЕ честные координаты; посадку под окно делает
-    рендерер."""
+    Затравка: ядро — ноды с наибольшей связностью, остальные по убыванию
+    (кандидаты на окружностях желаемых дистанций вокруг размещённых
+    соседей). Затем — стресс-мажоризация (SMACOF): итеративно двигаем
+    каждый узел в взвешенно-оптимальную точку по всем его плечам, минимизируя
+    суммарный «стресс» несоответствия дистанций. Веса `wts` — доверие к
+    плечу (двусторонние/свежие тянут сильнее). Это математически честнее
+    жадной пружины: находит наилучший компромисс, когда SNR-дистанции
+    противоречивы (треугольник не сходится из-за мощности/асимметрии).
+    Возвращает СЫРЫЕ координаты; посадку под окно делает рендерер."""
+    wts = wts or {}
     neigh = {}
     for (a, b), d in des.items():
         q = max(0.0, 1 - (d - 0.12) / 0.62)
@@ -82,23 +84,34 @@ def layout(ids, des):
 
         placed[nid] = min(cands, key=score)
 
-    # Пружинная полировка: подтянуть точные дистанции, не разрушая композицию
+    # Weighted SMACOF (стресс-мажоризация). Список плеч на узел:
+    # (сосед, желаемая дистанция, вес доверия).
     pos = {nid: list(p) for nid, p in placed.items()}
     idl = list(ids)
-    steps = 320
-    for it in range(steps):
-        t = 1.0 - it / steps
-        # пружины желаемых дистанций (сильнее — чтобы связи держались честно)
-        for (a, b), d in des.items():
-            if a not in pos or b not in pos:
-                continue
-            dx = pos[b][0] - pos[a][0]
-            dy = pos[b][1] - pos[a][1]
-            dist = math.hypot(dx, dy) or 1e-6
-            mv = (dist - d) / dist * 0.22 * t
-            pos[a][0] += dx * mv; pos[a][1] += dy * mv
-            pos[b][0] -= dx * mv; pos[b][1] -= dy * mv
-        # мягкое расталкивание несвязанных: только чтобы не наезжали, не раздувая
+    adj = {nid: [] for nid in idl}
+    for (a, b), d in des.items():
+        if a in adj and b in adj:
+            w = wts.get((a, b), 1.0)
+            adj[a].append((b, d, w))
+            adj[b].append((a, d, w))
+    for _ in range(240):
+        # шаг мажоризации (Гаусса–Зейделя, обновление на месте — быстрее сходится):
+        # каждый узел → взвешенное среднее «идеальных» точек по всем его плечам
+        for i in idl:
+            nx = ny = den = 0.0
+            xi, yi = pos[i]
+            for (j, d, w) in adj[i]:
+                xj, yj = pos[j]
+                dx, dy = xi - xj, yi - yj
+                dist = math.hypot(dx, dy) or 1e-6
+                nx += w * (xj + d * dx / dist)
+                ny += w * (yj + d * dy / dist)
+                den += w
+            if den > 0:
+                pos[i][0] = nx / den
+                pos[i][1] = ny / den
+        # лёгкое расталкивание несвязанных — только против наложения,
+        # реже и слабее, чтобы не искажать связанные дистанции
         for i in range(len(idl)):
             for j in range(i + 1, len(idl)):
                 a, b = idl[i], idl[j]
@@ -107,8 +120,8 @@ def layout(ids, des):
                 dx = pos[b][0] - pos[a][0]
                 dy = pos[b][1] - pos[a][1]
                 dist = math.hypot(dx, dy) or 1e-6
-                if dist < 0.42:
-                    mv = (0.42 - dist) / dist * 0.14 * t
+                if dist < 0.28:
+                    mv = (0.28 - dist) / dist * 0.06
                     pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
                     pos[b][0] += dx * mv; pos[b][1] += dy * mv
     return {nid: (round(p[0], 4), round(p[1], 4)) for nid, p in pos.items()}
@@ -279,25 +292,34 @@ def build(found, prev=None):
     def pct(snr):
         return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
 
-    # Качество пары. Для пары СВОИХ нод обратка знаема в принципе, поэтому
-    # берём среднее двух направлений, а отсутствующее направление считаем
-    # нулём — одностороннее «соседство» сомнительно и отъезжает дальше.
-    # У внешних нод их «слух» недоступен — там берём лучшее известное.
-    pair_pct = {}
+    # Качество пары + вес надёжности для укладки (weighted SMACOF).
+    # Для пары СВОИХ нод обратка знаема — берём среднее двух направлений
+    # (отсутствующее = 0, одностороннее соседство сомнительно). У внешних
+    # «слух» недоступен — берём лучшее известное. Вес: двусторонние и
+    # свежие замеры тянут сильнее (им больше веры), старые/односторонние —
+    # мягче.
+    pair_info = {}
     for l in rf:
         if l["snr"] is None:
             continue
         key = tuple(sorted((l["frm"], l["to"])))
-        pair_pct.setdefault(key, []).append(pct(l["snr"]))
-    des = {}
-    for key, ps in pair_pct.items():
+        pi = pair_info.setdefault(key, {"ps": [], "heard": 0})
+        pi["ps"].append(pct(l["snr"]))
+        pi["heard"] = max(pi["heard"], l.get("heard") or 0)
+    des, wts = {}, {}
+    for key, pi in pair_info.items():
+        ps = pi["ps"]
         if key[0] in stat and key[1] in stat:
             q = (max(ps) + (min(ps) if len(ps) > 1 else 0)) / 2
         else:
             q = max(ps)
         des[key] = 0.12 + (1 - q) * 0.62
+        two_way = len(ps) >= 2
+        age = now - pi["heard"] if pi["heard"] else 9e9
+        fresh = 1.2 if age < 900 else 1.0 if age < 3600 else 0.8 if age < 6 * 3600 else 0.6
+        wts[key] = (1.6 if two_way else 1.0) * fresh
 
-    pos = layout(sorted(node_ids), des)
+    pos = layout(sorted(node_ids), des, wts)
 
     # Карточки нод
     nodes = []

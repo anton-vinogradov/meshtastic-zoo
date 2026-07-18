@@ -33,9 +33,13 @@ is a list in [`collector/config.json`](collector/config.json).
   on the line is the SNR in dB; the exact percentage is in the tooltip.
   A grey "no data" arrow means that direction has never been caught.
 - **Distance = quality.** The better a pair hears each other, the
-  closer their tokens; nodes with no shared links drift apart. Roaming
-  nodes get a dashed frame. The map fits the window entirely and
-  re-lays itself out when the window is resized.
+  closer their tokens; nodes with no shared links drift apart. The
+  positions come from stress-majorization (weighted MDS) that lays out
+  all links at once and finds the best compromise when signal distances
+  disagree — two-way and fresh measurements are trusted more. It's a
+  connectivity map, not a geographic one: SNR reflects link quality, not
+  raw distance (power, antennas and terrain all bend it). Roaming nodes
+  get a dashed frame. The map fits the window and re-lays out on resize.
 
 ## Hover and click
 

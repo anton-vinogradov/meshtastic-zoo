@@ -9,7 +9,7 @@
   "fragile": [
     "10.77.77."
   ],
-  "worldMaxAgeH": 6,
+  "worldMaxAgeH": 24,
   "cacheMaxAgeH": 6,
   "topoEveryS": 30,
   "rescanS": 60,
