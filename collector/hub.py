@@ -49,6 +49,8 @@ channel = []   # публичный канал: [{id, pid, frm, frmName, text, t
 # маппинг для двустороннего Telegram-моста: telegram msg_id → {node, peer, ...}
 # (ответ-цитата в Telegram на зеркалированный DM → отправка в меш от той ноды)
 tgmap = {"offset": 0, "map": {}}
+pending_traces = set()  # id адресатов, чей traceroute-ответ ждём (Фаза 4, ч.3)
+traces = {}             # id → {path:[{id,snr}], ts} — результат последней трассировки
 
 
 def log(msg):
@@ -211,6 +213,36 @@ def on_receive(packet=None, interface=None):
                 log(f"{'✓ доставлено' if ok else '✗ NAK ' + str(err)} (rid={rid})")
             if pki_fail:
                 solicit_key(pki_fail["to"])  # попросить ключ; доставим, как услышим
+            return
+        if dec.get("portnum") == "TRACEROUTE_APP":
+            # ответ на нашу трассировку: путь + SNR по хопам (Фаза 4, ч.3)
+            fn, tn = packet.get("from"), packet.get("to")
+            frm = f"!{fn:08x}" if isinstance(fn, int) else str(fn)
+            with lock:
+                waited = frm in pending_traces
+            if not waited:
+                return
+            try:
+                from meshtastic import mesh_pb2
+                import google.protobuf.json_format as jf
+                rd = mesh_pb2.RouteDiscovery()
+                rd.ParseFromString(dec.get("payload") or b"")
+                ad = jf.MessageToDict(rd)
+            except Exception as e:
+                log(f"trace parse: {e!r}")
+                ad = {}
+            nums = [tn] + [int(x) for x in ad.get("route", [])] + [fn]  # мы → хопы → цель
+            snrs = ad.get("snrTowards", [])
+            path = []
+            for i, num in enumerate(nums):
+                e = {"id": f"!{num:08x}" if isinstance(num, int) else str(num)}
+                if i > 0 and i - 1 < len(snrs) and snrs[i - 1] != -128:
+                    e["snr"] = round(snrs[i - 1] / 4, 2)
+                path.append(e)
+            with lock:
+                pending_traces.discard(frm)
+                traces[frm] = {"path": path, "ts": int(time.time())}
+            log(f"🧭 traceroute {frm}: {' → '.join(p['id'] for p in path)}")
             return
         if dec.get("portnum") != "TEXT_MESSAGE_APP":
             return
@@ -803,6 +835,10 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/geo"):
             with lock:
                 self._json({"geo": CFG.get("geo", {})})
+        elif self.path.startswith("/api/trace"):
+            tid = (parse_qs(urlparse(self.path).query).get("to") or [""])[0]
+            with lock:
+                self._json({"trace": traces.get(tid), "pending": tid in pending_traces})
         elif self.path.startswith("/api/history/"):
             self._history()
         elif self.path.startswith("/api/dbentry"):
@@ -1007,6 +1043,30 @@ class Handler(SimpleHTTPRequestHandler):
                 atomic_write(ROOT / "config.json",
                              json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
             self._json({"ok": True, "geo": CFG.get("geo", {})})
+        elif self.path == "/api/trace":
+            # traceroute (АКТИВНАЯ проба: шлёт пакет в эфир) от ноды node к to
+            node, to = body.get("node"), body.get("to")
+            with lock:
+                ent = next((c for c in conns.values()
+                            if c.get("id") == node and c.get("iface")), None)
+            if not ent or not to:
+                self._json({"ok": False, "error": "нода не на связи"}, 400)
+                return
+
+            def _trace():
+                with lock:
+                    pending_traces.add(to)
+                    traces.pop(to, None)
+                try:
+                    ent["iface"].sendTraceRoute(to, 7)  # блокируется до ответа/таймаута
+                except Exception as e:
+                    log(f"🧭 trace {to}: {e!r}")
+                # ответ ловит on_receive; если не пришёл — снимаем ожидание по таймауту
+                time.sleep(2)
+                with lock:
+                    pending_traces.discard(to)
+            threading.Thread(target=_trace, daemon=True).start()
+            self._json({"ok": True})
         else:
             self._json({"ok": False, "error": "нет такого API"}, 404)
 

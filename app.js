@@ -101,6 +101,8 @@
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
       critLine: "single point of failure: −{0} node(s) if it drops",
+      traceBtn: "🧭 trace route", traceRunning: "tracing… (sends a probe over the air)",
+      traceFail: "no response (node silent or too far)", traceNoNode: "no online node to trace from",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
       noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
@@ -158,6 +160,8 @@
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
       critLine: "единая точка отказа: −{0} нод при её отказе",
+      traceBtn: "🧭 трассировка", traceRunning: "трассирую… (шлёт пробу в эфир)",
+      traceFail: "нет ответа (нода молчит или далеко)", traceNoNode: "нет онлайн-ноды для запроса",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
       noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
@@ -984,6 +988,8 @@
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${sections}
+        <div class="ptrace"><button class="do-trace">${t("traceBtn")}</button>
+          <div class="trace-out"></div></div>
         ${msgHtml}
         ${composeHtml}
         ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;
@@ -998,6 +1004,32 @@
         posSec.addEventListener("toggle", () => { if (posSec.open) drawMini(); });
         if (posSec.open) setTimeout(drawMini, 30);
       }
+      // Трассировка (Фаза 4, ч.3): активная проба — шлём запрос, поллим ответ с путём
+      const traceBtn = panel.querySelector(".do-trace");
+      if (traceBtn) traceBtn.onclick = async () => {
+        const out = panel.querySelector(".trace-out");
+        const owner = (lastLive && lastLive.nodes || []).find(o => o.own && o.online);
+        if (!owner) { out.textContent = t("traceNoNode"); return; }
+        traceBtn.disabled = true;
+        out.innerHTML = `<span class="trace-run">${esc(t("traceRunning"))}</span>`;
+        try { await fetch("/api/trace", { method: "POST", body: JSON.stringify({ node: owner.id, to: id }) }); } catch { }
+        for (let k = 0; k < 9; k++) {
+          await new Promise(r => setTimeout(r, 1800));
+          if (openId !== id) return;
+          let d = null;
+          try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
+          if (d && d.trace) {
+            out.innerHTML = d.trace.path.map(p =>
+              `<span class="thop">${esc(lbl(p.id))}${p.snr != null ? ` <span class="tsnr">${fmtSnr(p.snr)}dB</span>` : ""}</span>`)
+              .join('<span class="tarrow">→</span>');
+            traceBtn.disabled = false;
+            return;
+          }
+          if (d && !d.pending) break;
+        }
+        out.textContent = t("traceFail");
+        traceBtn.disabled = false;
+      };
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
       (async () => {
         const body = panel.querySelector("#hist-body");
