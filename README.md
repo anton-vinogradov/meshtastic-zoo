@@ -44,8 +44,11 @@ Clicking opens the details panel:
 
 - device photo and model, ID, callsign, IP;
 - battery, uptime, channel utilization, "last seen";
-- **Messages** — unread on top; a reply goes on the air from the very
-  node that was written to (➤), or just mark it as read (✓);
+- **Conversation** — the full message history with this node: incoming
+  on the left, your replies on the right. Outgoing messages show a
+  delivery status: ⏳ on air → ✓ delivered, ✗ error or ⚠ no ack. A reply
+  goes on the air from the very node that was written to (➤), or just
+  mark it as read (✓) — the marker clears right away;
 - **Compose** — send a direct message to this node; a selector picks
   which of your nodes speaks (the one that hears the recipient loudest
   is preselected);
@@ -88,5 +91,6 @@ that file too.
 ## Roadmap
 
 - [x] Live map with honest distances and device photos
-- [x] Mail: unread markers, replying and sending from the right node
+- [x] Mail: unread markers, conversation history, delivery status,
+      replying and sending from the right node
 - [ ] Measurement history and link quality charts

@@ -111,6 +111,26 @@ def on_receive(packet=None, interface=None):
             return
         ent["last"] = time.time()
         dec = (packet or {}).get("decoded") or {}
+        if dec.get("portnum") == "ROUTING_APP":
+            # квитанция: матчим requestId с id отправленных пакетов
+            rid = dec.get("requestId") or packet.get("requestId")
+            if not rid:
+                return
+            err = (dec.get("routing") or {}).get("errorReason")
+            ok = err in (None, 0, "NONE")
+            changed = False
+            with lock:
+                for m in messages:
+                    if (m.get("kind") == "out" and m.get("pktId") == rid
+                            and m.get("status") == "sent"):
+                        m["status"] = "delivered" if ok else "failed"
+                        if not ok:
+                            m["detail"] = str(err)
+                        changed = True
+            if changed:
+                save_messages()
+                log(f"{'✓ доставлено' if ok else '✗ NAK ' + str(err)} (rid={rid})")
+            return
         if dec.get("portnum") != "TEXT_MESSAGE_APP":
             return
         if packet.get("to") != ent.get("num"):
@@ -214,6 +234,19 @@ def topo_loop():
                 OUT_LIVE.write_text(json.dumps(data, ensure_ascii=False, indent=1))
         except Exception as e:
             log(f"topo: {e!r}")
+        # исходящие без квитанции дольше 90 с — помечаем честно
+        try:
+            dirty = False
+            with lock:
+                for m in messages:
+                    if (m.get("kind") == "out" and m.get("status") == "sent"
+                            and time.time() - m["ts"] > 90):
+                        m["status"] = "noack"
+                        dirty = True
+            if dirty:
+                save_messages()
+        except Exception:
+            pass
         time.sleep(CFG.get("topoEveryS", 60))
 
 
@@ -271,9 +304,16 @@ class Handler(SimpleHTTPRequestHandler):
                             "error": "нода не на связи или пустой текст"}, 400)
                 return
             try:
-                ent["iface"].sendText(text, destinationId=to)
-                log(f"➤ {node} → {to}: {text[:60]!r}")
-                self._json({"ok": True})
+                pkt = ent["iface"].sendText(text, destinationId=to, wantAck=True)
+                pid = getattr(pkt, "id", None)
+                out = dict(kind="out", id=f"out·{pid or int(time.time() * 1000)}",
+                           pktId=pid, frm=node, to=to, text=text,
+                           ts=int(time.time()), status="sent", read=True)
+                with lock:
+                    messages.append(out)
+                save_messages()
+                log(f"➤ {node} → {to}: {text[:60]!r} (pkt {pid})")
+                self._json({"ok": True, "msgId": out["id"]})
             except Exception as e:
                 self._json({"ok": False, "error": repr(e)}, 500)
         elif self.path == "/api/config":

@@ -375,20 +375,43 @@
         (singles.length ? `<div class="psub">одиночные</div>` : "") +
         `<div class="singles">${singles.map(r =>
           legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(lbl(r.other)))).join("")}</div>`;
-      // Сообщения этой ноды: непрочитанные сверху, с формой ответа
-      const nodeMsgs = msgs.filter(m => m.node === id)
-        .sort((a, b) => (a.read - b.read) || (b.ts - a.ts)).slice(0, 8);
-      const msgHtml = nodeMsgs.length ? `<div class="pmsgs"><b>Сообщения</b>` +
-        nodeMsgs.map(m => `
-          <div class="msg${m.read ? " done" : ""}">
-            <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}</span>
-              <span class="age">${fmtAgo(m.ts)}</span></div>
-            <div class="mtext">${esc(m.text)}</div>
-            ${m.read ? "" : `<div class="mact" data-mid="${esc(m.id)}" data-to="${esc(m.frm)}">
-              <input class="reply" placeholder="ответить от ${esc(n.label)}…">
-              <button class="msend" title="отправить с этой ноды">➤</button>
-              <button class="mok" title="пометить прочитанным">✓</button></div>`}
-          </div>`).join("") + `</div>` : "";
+      // История переписки этой ноды, хронологически. Дедуп: у сообщения
+      // между двумя своими нодами есть и отправленная, и принятая копия —
+      // для своей ноды берём отправленное этой нодой и принятое ей;
+      // для внешней — отправленное ей и принятое от неё.
+      const isOwn = !!n.own;
+      const thread = msgs.filter(m => m.kind === "out"
+        ? (isOwn ? m.frm === id : m.to === id)
+        : (isOwn ? m.node === id : m.frm === id))
+        .sort((a, b) => a.ts - b.ts).slice(-40);
+      const STATUS = {
+        sent: ["⏳", "в эфире", "var(--muted)"],
+        delivered: ["✓", "доставлено", "#35c98e"],
+        failed: ["✗", "ошибка", "#e05656"],
+        noack: ["⚠", "без квитанции", "#e0a03c"],
+      };
+      const rowHtml = (m) => {
+        const bySelf = m.frm === id;
+        const peer = bySelf ? (m.kind === "out" ? m.to : m.node) : m.frm;
+        const who = (bySelf ? "→ " : "← ") + esc(m.frmName && !bySelf ? m.frmName : lbl(peer));
+        let foot = `<span class="age">${fmtAgo(m.ts)}</span>`;
+        if (m.kind === "out") {
+          const [g, t, c] = STATUS[m.status] || ["", "", "var(--muted)"];
+          foot = `<span class="mstatus" style="color:${c}" title="${esc(t + (m.detail ? " · " + m.detail : ""))}">${g} ${esc(t)}</span>` + foot;
+        }
+        const canRead = m.kind !== "out" && m.node === id && !m.read;
+        return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}">
+          <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
+          <div class="mtext">${esc(m.text)}</div>
+          ${canRead ? `<div class="mact" data-mid="${esc(m.id)}" data-from="${esc(m.node)}" data-to="${esc(m.frm)}">
+            <input class="reply" placeholder="ответить…">
+            <button class="msend" title="ответить с ${esc(lbl(m.node))}">➤</button>
+            <button class="mok" title="пометить прочитанным">✓</button></div>` : ""}
+        </div>`;
+      };
+      const msgHtml = thread.length
+        ? `<div class="pmsgs"><b>Переписка</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
+        : "";
 
       // «Написать»: этой ноде — от лица любой своей онлайн-ноды
       // (по умолчанию та, что слышит адресата лучше всех)
@@ -424,9 +447,11 @@
         ${legs ? `<div class="plegs"><b>Плечи</b>${legs}</div>` : ""}`;
       panel.classList.add("open");
       panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; };
+      // после действия — обновить msgs и перерисовать (в т.ч. маркеры почты)
+      const afterAction = async () => { await refreshMsgs(); forcePanel = true; render(lastLive); };
       panel.querySelectorAll(".msg .mact").forEach(row => {
         const inp = row.querySelector(".reply");
-        const mid = row.dataset.mid, to = row.dataset.to;
+        const mid = row.dataset.mid, from = row.dataset.from, to = row.dataset.to;
         row.querySelector(".msend").onclick = async () => {
           const text = inp.value.trim();
           if (!text) { inp.focus(); return; }
@@ -434,18 +459,17 @@
           let res = { ok: false, error: "hub недоступен" };
           try {
             res = await (await fetch("/api/send", {
-              method: "POST", body: JSON.stringify({ node: id, to, text }),
+              method: "POST", body: JSON.stringify({ node: from, to, text }),
             })).json();
           } catch { }
-          if (res.ok) { await markRead([mid]); showPanel(id, true); }
+          if (res.ok) { await markRead([mid]); await afterAction(); }
           else {
             row.querySelector(".msend").disabled = false;
             alert("Не отправилось: " + (res.error || "?"));
           }
         };
         row.querySelector(".mok").onclick = async () => {
-          await markRead([mid]);
-          showPanel(id, true);
+          await markRead([mid]); await afterAction();
         };
       });
       const cw = panel.querySelector(".pcompose");
@@ -464,13 +488,8 @@
             })).json();
           } catch { }
           btn.disabled = false;
-          if (res.ok) {
-            inp.value = "";
-            btn.textContent = "✓";
-            setTimeout(() => { btn.textContent = "➤"; }, 1500);
-          } else {
-            alert("Не отправилось: " + (res.error || "?"));
-          }
+          if (res.ok) { inp.value = ""; await afterAction(); }
+          else alert("Не отправилось: " + (res.error || "?"));
         };
       }
     }
@@ -520,7 +539,8 @@
       mailEl.hidden = true;
     }
 
-    if (openId) showPanel(openId); // обновить открытую панель свежими данными
+    if (openId) showPanel(openId, forcePanel); // обновить открытую панель свежими данными
+    forcePanel = false;
   }
 
   // ---- Опрос live.json раз в минуту; без него — подсказка запустить сборщик ----
@@ -531,7 +551,13 @@
     } catch { return null; }
   }
 
-  let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [];
+  let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
+  async function refreshMsgs() {
+    try {
+      const r = await fetch("/api/messages", { cache: "no-store" });
+      if (r.ok) msgs = (await r.json()).messages || [];
+    } catch { /* hub не запущен — карта работает и без почты */ }
+  }
   const refit = () => {
     clearTimeout(rsTimer);
     rsTimer = setTimeout(() => { if (lastLive) render(lastLive); }, 200);
@@ -625,16 +651,13 @@
     else openSettings();
   };
   async function tick() {
-    try {
-      const r = await fetch("/api/messages", { cache: "no-store" });
-      if (r.ok) msgs = (await r.json()).messages || [];
-    } catch { /* hub не запущен — карта работает и без почты */ }
+    await refreshMsgs();
     const live = await loadLive();
     if (!live) {
       if (lastStamp !== "empty") {
         lastStamp = "empty";
         document.getElementById("map").innerHTML =
-          '<p class="empty">Данных пока нет — запусти <code>python3 collector/scan.py</code></p>';
+          '<p class="empty">Данных пока нет — запусти <code>python3 collector/hub.py</code></p>';
         document.getElementById("legend").innerHTML = "";
       }
       return;
@@ -643,6 +666,17 @@
     lastLive = live;
     render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
   }
+
+  // Быстрый опрос почты: статус доставки и маркеры обновляются в течение
+  // секунд, а не раз в минуту; при набранном тексте панель не трогаем
+  let msgSig = "";
+  async function msgTick() {
+    await refreshMsgs();
+    const sig = msgs.map(m => m.id + (m.read ? "1" : "0") + (m.status || "")).join(",");
+    if (sig !== msgSig && lastLive) { msgSig = sig; render(lastLive); }
+  }
+
   tick();
   setInterval(tick, 60e3);
+  setInterval(msgTick, 6e3);
 })();
