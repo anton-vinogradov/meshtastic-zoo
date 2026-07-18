@@ -98,6 +98,7 @@ body {
 #panel .msg .mfrom { font-weight: 600; }
 #panel .msg .mfoot { display: flex; gap: 6px; white-space: nowrap; }
 #panel .msg .mtext { margin: 3px 0 4px; white-space: pre-wrap; word-break: break-word; }
+#panel .msg .merr { color: #e05656; font-size: 11.5px; margin-top: 1px; overflow-wrap: anywhere; }
 #panel .msg .mact { display: flex; gap: 6px; margin-top: 2px; }
 #panel .msg .reply {
   flex: 1;

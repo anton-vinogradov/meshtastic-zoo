@@ -519,19 +519,44 @@
         failed: ["✗", t("error"), "#e05656"],
         noack: ["⚠", t("noAck"), "#e0a03c"],
       };
+      // читаемая расшифровка причины ошибки доставки (Routing.Error)
+      const REASON = {
+        NO_ROUTE: { en: "no route", ru: "нет маршрута" },
+        GOT_NAK: { en: "rejected (NAK)", ru: "отказ (NAK)" },
+        TIMEOUT: { en: "timeout", ru: "таймаут" },
+        NO_INTERFACE: { en: "no interface", ru: "нет интерфейса" },
+        MAX_RETRANSMIT: { en: "no ack (retries used up)", ru: "нет ACK (попытки исчерпаны)" },
+        NO_CHANNEL: { en: "no channel", ru: "нет канала" },
+        TOO_LARGE: { en: "message too large", ru: "сообщение слишком большое" },
+        NO_RESPONSE: { en: "no response", ru: "нет ответа" },
+        DUTY_CYCLE_LIMIT: { en: "airtime limit", ru: "лимит эфирного времени" },
+        BAD_REQUEST: { en: "bad request", ru: "неверный запрос" },
+        NOT_AUTHORIZED: { en: "not authorized", ru: "не авторизовано" },
+        PKI_FAILED: { en: "encryption failed", ru: "шифрование не удалось" },
+        PKI_UNKNOWN_PUBKEY: { en: "recipient key unknown", ru: "ключ адресата неизвестен" },
+        PKI_SEND_FAIL_PUBLIC_KEY: {
+          en: "no recipient key — encrypted DM can't be sent",
+          ru: "нет ключа адресата — шифрованный DM не отправить",
+        },
+        RATE_LIMIT_EXCEEDED: { en: "rate limit", ru: "лимит частоты" },
+      };
+      const reasonText = (d) => { const r = REASON[d]; return r ? (r[lang] || r.en) : (d || ""); };
       const rowHtml = (m) => {
         const bySelf = m.frm === id;
         const peer = bySelf ? (m.kind === "out" ? m.to : m.node) : m.frm;
         const who = (bySelf ? "→ " : "← ") + esc(m.frmName && !bySelf ? m.frmName : lbl(peer));
         let foot = `<span class="age">${fmtAgo(m.ts)}</span>`;
+        let errLine = "";
         if (m.kind === "out") {
           const [g, st, c] = STATUS[m.status] || ["", "", "var(--muted)"];
-          foot = `<span class="mstatus" style="color:${c}" title="${esc(st + (m.detail ? " · " + m.detail : ""))}">${g} ${esc(st)}</span>` + foot;
+          const why = m.status === "failed" && m.detail ? reasonText(m.detail) : "";
+          foot = `<span class="mstatus" style="color:${c}" title="${esc(st + (why ? " · " + why : ""))}">${g} ${esc(st)}</span>` + foot;
+          if (why) errLine = `<div class="merr">${esc(why)}</div>`;
         }
         const canRead = m.kind !== "out" && m.node === id && !m.read;
         return `<div class="msg ${bySelf ? "self" : "peer"}${canRead ? " unread" : ""}">
           <div class="mh"><span class="mfrom">${who}</span><span class="mfoot">${foot}</span></div>
-          <div class="mtext">${esc(m.text)}</div>
+          <div class="mtext">${esc(m.text)}</div>${errLine}
           ${canRead ? `<div class="mact" data-mid="${esc(m.id)}" data-from="${esc(m.node)}" data-to="${esc(m.frm)}">
             <input class="reply" placeholder="${t("reply")}">
             <button class="msend" title="${esc(t("replyFrom", lbl(m.node)))}">➤</button>
@@ -542,8 +567,9 @@
         ? `<div class="pmsgs"><b>${t("conversation")}</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
         : "";
 
-      // «Написать»: этой ноде — от лица любой своей онлайн-ноды
-      // (по умолчанию та, что слышит адресата лучше всех)
+      // «Написать»: этой ноде — от лица любой своей онлайн-ноды. По умолчанию
+      // — ближайшая: сначала та, что слышит адресата лучше всех, при отсутствии
+      // прямой связи — ближайшая по карте (дистанция ∝ качество сигнала)
       const qTo = (ownId) => {
         let best = -1;
         for (const l of D.links) {
@@ -554,9 +580,10 @@
         }
         return best;
       };
+      const distTo = (v) => Math.hypot(v.cx - n.cx, v.cy - n.cy);
       const owners = Object.values(nodes)
         .filter(v => v.own && v.online && v.id !== id)
-        .sort((a2, b2) => qTo(b2.id) - qTo(a2.id));
+        .sort((a2, b2) => (qTo(b2.id) - qTo(a2.id)) || (distTo(a2) - distTo(b2)));
       const composeHtml = owners.length ? `<div class="pcompose"><b>${t("compose")}</b>
         <div class="crow">
           <select class="cfrom" title="${t("sendFromWhich")}">${owners.map(o =>

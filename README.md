@@ -49,11 +49,13 @@ tell which card a link goes to. The panel shows:
 - battery, uptime, channel utilization, "last seen";
 - **Conversation** — the full message history with this node: incoming
   on the left, your replies on the right. Outgoing messages show a
-  delivery status: ⏳ on air → ✓ delivered, ✗ error or ⚠ no ack. A reply
-  goes on the air from the very node that was written to (➤), or just
-  mark it as read (✓) — the marker clears right away;
+  delivery status: ⏳ on air → ✓ delivered, ✗ error (with the reason
+  spelled out, e.g. "no recipient key") or ⚠ no ack. A reply goes on the
+  air from the very node that was written to (➤), or just mark it as
+  read (✓) — the marker clears right away;
 - **Compose** — send a direct message to this node; a selector picks
-  which of your nodes speaks (the one that hears the recipient loudest
+  which of your nodes speaks (the closest one — that hears the recipient
+  loudest — is preselected
   is preselected);
 - **Legs** — all the node's links: two-way ones grouped in "there and
   back" pairs, one-way ones separately, everything sorted by quality
