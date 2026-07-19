@@ -1663,6 +1663,17 @@
   document.getElementById("mz-out")?.addEventListener("click", () => setMapZoom(mapZoom / 1.3));
   zoomLbl?.addEventListener("click", () => setMapZoom(1));
   showZoom();
+  // Двигать зазумленную карту двухпальцевым жестом трекпада (wheel с deltaX/deltaY).
+  // При overflow:auto это и так скроллит нативно, но явный обработчик гарантирует
+  // жест независимо от кэша/квирков и работает на мыши (колесо → по вертикали);
+  // deltaMode нормализуем (строки/страницы → пиксели). Гео-вид (Leaflet) не трогаем.
+  zMapEl.addEventListener("wheel", (e) => {
+    if (mapZoom <= 1.001 || document.body.classList.contains("geo-on")) return;
+    const f = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? zMapEl.clientHeight : 1;
+    zMapEl.scrollLeft += e.deltaX * f;
+    zMapEl.scrollTop += e.deltaY * f;
+    e.preventDefault();
+  }, { passive: false });
   // Тумблеры отображения карты: делегируем на #settings (панель пересобирается)
   document.getElementById("settings").addEventListener("change", (e) => {
     if (e.target.id === "hopToggle") {
