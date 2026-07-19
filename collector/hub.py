@@ -920,15 +920,26 @@ def _do_geocode():
         addr = {}
     names = (data.get("meta") or {}).get("names") or {}
     byid = {n["id"]: n for n in data.get("nodes", []) or []}
+    own = {n["id"] for n in data.get("nodes", []) if n.get("own")}
+    # центр кучки якорей — санити «геокод не в другом городе»
+    geo = CFG.get("geo") or {}
+    aps = [(g["lat"], g["lon"]) for g in geo.values()
+           if isinstance(g, dict) and g.get("lat") is not None]
+    ctr = (sum(p[0] for p in aps) / len(aps), sum(p[1] for p in aps) / len(aps)) if aps else None
     new = 0
     for nid, nm in names.items():
-        if nid in addr:                       # уже пробовали — не дёргаем повторно
+        if nid in addr or nid in own:         # уже пробовали / своя нода — пропуск
             continue
         if not geocode.normalize(nm):         # на адрес не похоже — без сети
             continue
         g = geocode.geocode(nm, str(GEO_CACHE))
         if not g:
             addr[nid] = None                  # запомнить «пусто», чтобы не повторять
+            new += 1
+            continue
+        # санити: геокод дальше 80 км от кластера якорей = ошибочный (чужой город)
+        if ctr and geocode._hav_km(ctr, (g["lat"], g["lon"])) > 80:
+            addr[nid] = None
             new += 1
             continue
         rec = dict(lat=g["lat"], lon=g["lon"], q=g["q"], name=nm,

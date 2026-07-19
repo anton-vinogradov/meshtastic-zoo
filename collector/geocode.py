@@ -51,26 +51,45 @@ _JUNK = re.compile(
     r"mf|lf|ham|prim|kolp|nakenaked)\b", re.I)
 
 
+# устойчивые признаки «это улица»: суффиксы прилагательных-улиц и типы
+_STREET = re.compile(r"(ская|ский|ское|ского|ская|skaya|skiy|skoe|skogo|ovsk|"
+                     r"insk|шоссе|проспект|улиц|переул|бульвар|набереж|"
+                     r"street|prospekt|shosse|pereul)", re.I)
+# device/generic-слова: если «улица» = такое слово, это не адрес, а имя ноды
+_NOTSTREET = re.compile(r"^(mesh\w*|node|tracker|base|gateway|sensor|repeater|"
+                        r"test|pixel|sun\w*|solar|red|black|white|green|orange|"
+                        r"router|client|relay|ping|echo|bot)$", re.I)
+
+
 def normalize(name):
     """Имя ноды → строка-адрес или None, если на адрес не похоже. Возвращает
-    (query, is_place): is_place=True для посёлков (номер = не дом, отбросить)."""
+    (query, is_place): is_place=True для посёлков (номер = не дом, отбросить).
+    СТРОГО: нужен чистый номер дома + уличное слово — иначе геокодили бы имена
+    вроде «Meshtastic 6be0» (спам Nominatim)."""
     place = re.match(r"^\s*(Мартышкино|Ломоносов|Ораниенбаум|Кронштадт|Сестрорецк|"
                      r"Петергоф|Пушкин|Колпино|Шушары)\b", name, re.I)
+    if place:
+        return place.group(1), True                   # посёлок: номер = не дом
     s = _JUNK.sub(" ", name)
     s = re.sub(r"[_/]+", " ", s)
+    s = re.sub(r"([А-Яа-яA-Za-z])(\d)", r"\1 \2", s)   # svetlanovskiy105 → … 105
     s = re.sub(r"\s+", " ", s).strip()
-    # вставить пробел между буквами и приклеенными цифрами: svetlanovskiy105
-    s = re.sub(r"([А-Яа-яA-Za-z])(\d)", r"\1 \2", s)
-    # диапазон домов «7-9» → «7»; корпус «7k1»/«7к1» оставить как «7к1»
-    s = re.sub(r"(\d+)\s*-\s*\d+", r"\1", s)
-    s = re.sub(r"(\d+)\s*[kк]\s*(\d)", r"\1к\2", s)
-    s = re.sub(r"[.,]0\b", "", s)                     # «2.0» → «2»
-    if not re.search(r"[А-Яа-яA-Za-z]{4,}", s):
+    s = re.sub(r"(\d+)\s*-\s*\d+", r"\1", s)           # «7-9» → «7»
+    s = re.sub(r"(\d+)\s*[kк]\s*(\d)", r"\1к\2", s)    # корпус «7k1» → «7к1»
+    # ЧИСТЫЙ номер дома в конце: только цифры (+ опц. корпус), НЕ «6be0»
+    m = re.search(r"\b(\d{1,4}(?:к\d)?)$", s)
+    if not m:
         return None
-    if place:
-        # посёлок: только название, номер = индекс ноды, не дом
-        return place.group(1), True
-    if not re.search(r"\d", s):
+    street = s[:m.start()].strip()
+    letters = re.sub(r"[^А-Яа-яA-Za-z-]", "", street)
+    if len(letters.replace("-", "")) < 5:
+        return None
+    if _NOTSTREET.match(street.strip()):
+        return None
+    # ТРЕБУЕМ явный уличный суффикс/тип — иначе Word+число ловит имена нод
+    # (Kondrat62, Batters99). Улицы-фамилии без суффикса (Есенина) теряем ради
+    # точности: ложный якорь хуже пропущенного.
+    if not _STREET.search(s):
         return None
     return s, False
 
