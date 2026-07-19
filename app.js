@@ -15,7 +15,7 @@
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
   let mapZoom = Math.min(5, Math.max(1, +localStorage.getItem("mzMapZoom") || 1)); // масштаб карты весов (кнопки +/−), 1 = влезает в экран
-  let zoomScrollInit = false, zoomScrollT = null;             // восстановление позиции зазумленной карты после перезагрузки
+  let zoomScrollInit = false;                                 // на первой отрисовке после загрузки центрируем зум на кластере нод
   let nodeCap = parseInt(localStorage.getItem("mzNodeCap"), 10);  // лимит соседей (0/NaN = все)
   if (!(nodeCap >= 0)) nodeCap = 120;                          // дефолт: топ-120 по силе
 
@@ -844,11 +844,16 @@
           _map.style.overflow = "hidden";
           _svg.style.width = ""; _svg.style.height = "";
         }
-        if (!zoomScrollInit && mapZoom > 1.001) {   // первая отрисовка после загрузки: вернуть сохранённый вид (или центр)
-          let fr = null; try { fr = JSON.parse(localStorage.getItem("mzMapScroll") || "null"); } catch { }
-          const maxX = _map.scrollWidth - _map.clientWidth, maxY = _map.scrollHeight - _map.clientHeight;
-          _map.scrollLeft = fr ? fr.fx * maxX : maxX / 2;
-          _map.scrollTop = fr ? fr.fy * maxY : maxY / 2;
+        if (!zoomScrollInit && mapZoom > 1.001) {   // первая отрисовка после загрузки: в ЦЕНТР кластера нод
+          const xs = Object.values(px).map(p => p[0]), ys = Object.values(px).map(p => p[1]);
+          if (xs.length) {                          // bbox-центр узлов → в user-координатах → в пиксели → в центр вьюпорта
+            const cxC = (Math.min(...xs) + Math.max(...xs)) / 2, cyC = (Math.min(...ys) + Math.max(...ys)) / 2;
+            _map.scrollLeft = cxC * (_map.scrollWidth / CW) - _map.clientWidth / 2;
+            _map.scrollTop = cyC * (_map.scrollHeight / CH) - _map.clientHeight / 2;
+          } else {
+            _map.scrollLeft = (_map.scrollWidth - _map.clientWidth) / 2;
+            _map.scrollTop = (_map.scrollHeight - _map.clientHeight) / 2;
+          }
         } else {
           _map.scrollLeft = _sl; _map.scrollTop = _st;
         }
@@ -1657,17 +1662,6 @@
   document.getElementById("mz-out")?.addEventListener("click", () => setMapZoom(mapZoom / 1.3));
   zoomLbl?.addEventListener("click", () => setMapZoom(1));
   showZoom();
-  // помним позицию зазумленной карты между перезагрузками (доля, устойчива к смене размера окна)
-  zMapEl.addEventListener("scroll", () => {
-    clearTimeout(zoomScrollT);
-    zoomScrollT = setTimeout(() => {
-      if (mapZoom <= 1.001) return;
-      const maxX = zMapEl.scrollWidth - zMapEl.clientWidth, maxY = zMapEl.scrollHeight - zMapEl.clientHeight;
-      localStorage.setItem("mzMapScroll", JSON.stringify({
-        fx: maxX > 0 ? zMapEl.scrollLeft / maxX : 0.5,
-        fy: maxY > 0 ? zMapEl.scrollTop / maxY : 0.5 }));
-    }, 250);
-  }, { passive: true });
   // Тумблеры отображения карты: делегируем на #settings (панель пересобирается)
   document.getElementById("settings").addEventListener("change", (e) => {
     if (e.target.id === "hopToggle") {
