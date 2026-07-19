@@ -81,8 +81,9 @@
       cNodeInfo: "NodeInfo interval",
       secMesh: "Mesh", secPos: "Position", cHopsAway: "Hops away", direct: "direct",
       posSus: "claims {0} km away, yet heard directly ({1} dB) — position likely wrong or stale",
-      geoSec: "Geolocation", gpsSrc: "reported by the node (GPS)", estSrc: "estimated from signal (radio)", addrSrc: "geocoded from name",
-      geoUnc: "uncertainty", geoByAnchors: "heard by (sites)", geoSide: "side", geoSideOk: "resolved via {0}", geoSideMirror: "mirror — not resolved",
+      geoSec: "Geolocation", gpsSrc: "reported by the node (GPS)", estSrc: "estimated from signal (radio)", estCoarse: "rough guess from signal", addrSrc: "geocoded from name",
+      geoUnc: "uncertainty", geoByAnchors: "heard by (sites)", geoNear: "nearest site", geoSide: "side", geoSideOk: "resolved via {0}", geoSideMirror: "mirror — not resolved",
+      estCoarseNote: "no distance calibration — placed toward the sites that hear it loudest; direction/range are approximate",
       geoVerif: "check", geoVerified: "GPS-verified", geoSoft: "unverified", geoQuery: "address", geoOffGps: "off the node's GPS", geoNone: "no location data",
       cViaMqtt: "Via MQTT", cLicensed: "Licensed (ham)",
       cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude", openMap: "open on OpenStreetMap →",
@@ -155,8 +156,9 @@
       cNodeInfo: "Интервал NodeInfo",
       secMesh: "Сеть", secPos: "Позиция", cHopsAway: "Прыжков до неё", direct: "напрямую",
       posSus: "заявлено {0} км, но слышна напрямую ({1} дБ) — позиция, вероятно, неверна или устарела",
-      geoSec: "Геопозиция", gpsSrc: "передана узлом (GPS)", estSrc: "оценка по сигналу (радио)", addrSrc: "геокод по имени",
-      geoUnc: "неопределённость", geoByAnchors: "слышат площадок", geoSide: "сторона", geoSideOk: "разрешена ({0})", geoSideMirror: "зеркало — не разрешена",
+      geoSec: "Геопозиция", gpsSrc: "передана узлом (GPS)", estSrc: "оценка по сигналу (радио)", estCoarse: "грубая прикидка по сигналу", addrSrc: "геокод по имени",
+      geoUnc: "неопределённость", geoByAnchors: "слышат площадок", geoNear: "ближайшая площадка", geoSide: "сторона", geoSideOk: "разрешена ({0})", geoSideMirror: "зеркало — не разрешена",
+      estCoarseNote: "без калибровки дальности — тянется к площадкам, что слышат громче; направление и дальность приблизительны",
       geoVerif: "сверка", geoVerified: "сверено по GPS", geoSoft: "не сверено", geoQuery: "адрес", geoOffGps: "отклонение от GPS ноды", geoNone: "данных о положении нет",
       cViaMqtt: "Через MQTT", cLicensed: "Лицензирована (ham)",
       cLat: "Широта", cLon: "Долгота", cAlt: "Высота", openMap: "открыть на OpenStreetMap →",
@@ -959,11 +961,14 @@
         + `<a class="osmlink" href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lon}#map=15/${i.lat}/${i.lon}" target="_blank" rel="noopener noreferrer">${esc(t("openMap"))}</a></div>`;
       if (n.est) {
         const e = n.est;
-        geoBody += `<div class="geosrc"><b>📐 ${esc(t("estSrc"))}</b>${llRow(e.lat, e.lon)}`
+        geoBody += `<div class="geosrc"><b>📐 ${esc(t(e.coarse ? "estCoarse" : "estSrc"))}</b>${llRow(e.lat, e.lon)}`
           + `<div class="prow"><span>${esc(t("geoUnc"))}</span><span>±${esc(kmFmt(e.unc))}</span></div>`
           + `<div class="prow"><span>${esc(t("geoByAnchors"))}</span><span>${e.by}</span></div>`
-          + `<div class="prow"><span>${esc(t("geoSide"))}</span><span>${esc(e.side ? t("geoSideOk", lbl(e.side)) : t("geoSideMirror"))}</span></div>`
-          + `${offGps(e.lat, e.lon)}</div>`;
+          + (e.near ? `<div class="prow"><span>${esc(t("geoNear"))}</span><span>${esc(lbl(e.near))}</span></div>` : "")
+          + (e.coarse ? "" : `<div class="prow"><span>${esc(t("geoSide"))}</span><span>${esc(e.side ? t("geoSideOk", lbl(e.side)) : t("geoSideMirror"))}</span></div>`)
+          + offGps(e.lat, e.lon)
+          + (e.coarse ? `<div class="shint">${esc(t("estCoarseNote"))}</div>` : "")
+          + `</div>`;
       }
       if (n.addr) {
         const a = n.addr;

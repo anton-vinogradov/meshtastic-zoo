@@ -185,7 +185,7 @@ def estimate_positions(nodes, links, geo, xlinks=None):
     раздуваем неопределённость (как раньше). node['est']={lat,lon,unc,by,side}."""
     anchors = {nid: (g["lat"], g["lon"]) for nid, g in (geo or {}).items()
                if isinstance(g, dict) and g.get("lat") is not None}
-    if len(anchors) < 3:
+    if len(anchors) < 2:
         return {"ok": False, "reason": "anchors", "nCal": 0}
     gps = {}
     for n in nodes:
@@ -204,27 +204,58 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                 d = _hav_km(anchors[to], gps[frm])
                 if d > 0.02:
                     cal.append((math.log10(d), l["snr"]))
-    if len(cal) < 4:
-        return {"ok": False, "reason": "cal", "nCal": len(cal)}
-    # регрессия snr = A + B·log10(d), B<0 (сигнал падает с расстоянием)
-    n = len(cal)
-    sx = sum(x for x, _ in cal); sy = sum(y for _, y in cal)
-    sxx = sum(x * x for x, _ in cal); sxy = sum(x * y for x, y in cal)
-    syy = sum(y * y for _, y in cal)
-    den = n * sxx - sx * sx
-    if abs(den) < 1e-9:
-        return {"ok": False, "reason": "degenerate", "nCal": n}
-    B = (n * sxy - sx * sy) / den
-    A = (sy - B * sx) / n
-    # Калибровка годна ТОЛЬКО если SNR реально убывает с расстоянием: нужен
-    # отрицательный наклон И заметная корреляция. Плоская подгонка (B≈0, r≈0 —
-    # типично для co-located якорей в шумном городском меше) даёт бессмысленные
-    # кольца (всё ~0 или ~300 км) и переполняла snr_km → OverflowError рушил
-    # всю оценку. Тогда честно молчим (est=0), а не выдаём мусор.
-    vy = n * syy - sy * sy
-    r = (n * sxy - sx * sy) / math.sqrt(den * vy) if vy > 1e-9 else 0.0
-    if B >= 0 or r > -0.4:
-        return {"ok": False, "reason": "flat", "nCal": n, "r": round(r, 2)}
+
+    def coarse_est(nid):
+        """ГРУБАЯ оценка БЕЗ калибровки дальности: взвешенный по громкости
+        центроид слышащих площадок (тянется к тем, кто слышит громче) +
+        ближайшая площадка. Нужно ≥2 РАЗНЫЕ площадки. Неопределённость большая
+        — это «примерно здесь, у громких площадок», не точка. coarse=True."""
+        hs = heard.get(nid, [])
+        if len({a for a, _ in hs}) < 2:
+            return None
+        wl = [(a, max(0.1, s + 21.0)) for a, s in hs]
+        W = sum(w for _, w in wl)
+        la = sum(anchors[a][0] * w for a, w in wl) / W
+        lo = sum(anchors[a][1] * w for a, w in wl) / W
+        near = max(hs, key=lambda x: x[1])[0]
+        spread = max((_hav_km(anchors[near], anchors[a]) for a, _ in hs), default=0.0)
+        return dict(lat=round(la, 6), lon=round(lo, 6),
+                    unc=round(max(1.5, spread * 2.0), 2), by=len(hs),
+                    coarse=True, near=near)
+
+    def apply_coarse():
+        c = 0
+        for node in nodes:
+            nid = node["id"]
+            if nid in gps or nid in anchors or node.get("own") or node.get("est"):
+                continue
+            e = coarse_est(nid)
+            if e:
+                node["est"] = e
+                c += 1
+        return c
+
+    # Калибровка для ТОЧНОЙ билатерации: регрессия snr = A + B·log10(d), нужен
+    # реальный отрицательный наклон И корреляция. Плоская подгонка (B≈0, r≈0 —
+    # типично для co-located якорей в шумном городском меше) не даёт колец (всё
+    # ~0/300 км) → НЕ молчим, а уходим на грубую оценку центроидом (coarse_est).
+    A = B = r = None
+    if len(cal) >= 4:
+        n = len(cal)
+        sx = sum(x for x, _ in cal); sy = sum(y for _, y in cal)
+        sxx = sum(x * x for x, _ in cal); sxy = sum(x * y for x, y in cal)
+        syy = sum(y * y for _, y in cal)
+        den = n * sxx - sx * sx
+        if abs(den) >= 1e-9:
+            B = (n * sxy - sx * sy) / den
+            A = (sy - B * sx) / n
+            vy = n * syy - sy * sy
+            r = (n * sxy - sx * sy) / math.sqrt(den * vy) if vy > 1e-9 else 0.0
+    calib_ok = A is not None and B < 0 and r <= -0.4
+    if not calib_ok:                       # точных колец нет → только грубые оценки
+        c = apply_coarse()
+        return {"ok": bool(c), "reason": "coarse", "nCal": len(cal),
+                "r": (round(r, 2) if r is not None else None), "nCoarse": c}
 
     def snr_km(snr):
         # показатель клампим в безопасный диапазон: без этого при малом |B| он
@@ -344,8 +375,10 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                            unc=round(res, 2), by=len(hs))
         if side:
             node["est"]["side"] = side
-    n_est = sum(1 for nd in nodes if nd.get("est"))
-    return {"ok": True, "reason": "ok", "nCal": n, "r": round(r, 2), "nEst": n_est}
+    n_coarse = apply_coarse()             # ноды без точной оценки → грубая (центроид)
+    n_est = sum(1 for nd in nodes if nd.get("est") and not nd["est"].get("coarse"))
+    return {"ok": True, "reason": "ok", "nCal": len(cal), "r": round(r, 2),
+            "nEst": n_est, "nCoarse": n_coarse}
 
 
 def flag_position_lies(nodes, links, geo):
