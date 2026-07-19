@@ -826,6 +826,12 @@
     // нод от hub (чтобы подписать даже адресата, ушедшего с карты), иначе id
     const NAMES = (D.meta && D.meta.names) || {};
     const lbl = (id) => (nodes[id] || {}).label || NAMES[id] || id;
+    // маршрут трассировки → вертикальный список (по хопу на строку)
+    const traceHtml = (path) => `<div class="tpath">` + path.map((p, i) =>
+      `<div class="thop">${i ? `<span class="tarrow">↳</span>` : ""}`
+      + `<span class="tname">${esc(lbl(p.id))}</span>`
+      + `${p.snr != null ? `<span class="tsnr">${fmtSnr(p.snr)} dB</span>` : ""}</div>`)
+      .join("") + `</div>`;
     async function markRead(ids) {
       try {
         await fetch("/api/read", { method: "POST", body: JSON.stringify({ ids }) });
@@ -1071,7 +1077,7 @@
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${sections}
         <div class="ptrace"><button class="do-trace">${t("traceBtn")}</button>
-          <div class="trace-out"></div></div>
+          <div class="trace-out">${lastTrace[id] ? traceHtml(lastTrace[id]) : ""}</div></div>
         ${msgHtml}
         ${composeHtml}
         ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;
@@ -1101,11 +1107,8 @@
           let d = null;
           try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
           if (d && d.trace) {
-            out.innerHTML = `<div class="tpath">` + d.trace.path.map((p, i) =>
-              `<div class="thop">${i ? `<span class="tarrow">↳</span>` : ""}`
-              + `<span class="tname">${esc(lbl(p.id))}</span>`
-              + `${p.snr != null ? `<span class="tsnr">${fmtSnr(p.snr)} dB</span>` : ""}</div>`)
-              .join("") + `</div>`;
+            lastTrace[id] = d.trace.path;         // пережить пере-рендер панели
+            out.innerHTML = traceHtml(d.trace.path);
             traceBtn.disabled = false;
             return;
           }
@@ -1114,6 +1117,17 @@
         out.textContent = t("traceFail");
         traceBtn.disabled = false;
       };
+      // после F5 клиентский кеш пуст, но бэкенд хранит последний маршрут в
+      // traces[id] — подтянем и покажем, чтобы трассировка не пропадала
+      if (traceBtn && !lastTrace[id]) (async () => {
+        let d = null;
+        try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
+        if (d && d.trace && openId === id && !lastTrace[id]) {
+          lastTrace[id] = d.trace.path;
+          const out = panel.querySelector(".trace-out");
+          if (out) out.innerHTML = traceHtml(d.trace.path);
+        }
+      })();
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
       (async () => {
         const body = panel.querySelector("#hist-body");
@@ -1325,6 +1339,7 @@
   }
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
+  const lastTrace = {};  // id → путь последней трассировки (переживает пере-рендер панели)
   let applySel = () => {}, hlPeer = () => {}, openPanel = () => {}; // ставятся в render
   let chan = [], chanSig = "", chanDraft = "";  // черновик канала переживает ре-рендеры
   async function refreshMsgs() {
