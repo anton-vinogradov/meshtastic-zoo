@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS xlink_hist(
   ts INTEGER, a TEXT, b TEXT, snr REAL, via TEXT,
   PRIMARY KEY(ts, a, b, via));
 CREATE INDEX IF NOT EXISTS ix_xlink_pair ON xlink_hist(a, b, ts);
+CREATE TABLE IF NOT EXISTS metrics_hist(
+  ts INTEGER PRIMARY KEY, chutil REAL, cache INTEGER, live INTEGER,
+  est INTEGER, possus INTEGER, tracenbr INTEGER, keyless INTEGER,
+  traces_done INTEGER, msgs INTEGER, chan INTEGER);
 """
 
 _lock = threading.Lock()
@@ -127,15 +131,38 @@ def xlink_pairs(hours=168):
                  best=r[5], last=r[6]) for r in rows]
 
 
+_METRIC_COLS = ("chutil", "cache", "live", "est", "possus", "tracenbr",
+                "keyless", "traces_done", "msgs", "chan")
+
+
+def record_metrics(m, ts=None):
+    """Срез метрик воркеров/сервиса во времени (для графиков на странице статуса)."""
+    ts = int(ts or time.time())
+    with _lock:
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO metrics_hist(ts," + ",".join(_METRIC_COLS) + ") "
+                  "VALUES(" + ",".join("?" * (1 + len(_METRIC_COLS))) + ")",
+                  (ts, *(m.get(k) for k in _METRIC_COLS)))
+        c.commit()
+
+
+def metrics_series(hours=6):
+    """Ряд метрик за окно (сырой, 1 точка/цикл ридера ~60с)."""
+    since = int(time.time()) - int(hours * 3600)
+    with _lock:
+        rows = _db().execute(
+            "SELECT ts," + ",".join(_METRIC_COLS) + " FROM metrics_hist "
+            "WHERE ts>=? ORDER BY ts", (since,)).fetchall()
+    return [dict(ts=r[0], **{k: r[i + 1] for i, k in enumerate(_METRIC_COLS)}) for r in rows]
+
+
 def prune(days=30):
     """Удалить срезы старше days суток."""
     cutoff = int(time.time()) - int(days) * 86400
     with _lock:
         c = _db()
-        c.execute("DELETE FROM node_hist WHERE ts < ?", (cutoff,))
-        c.execute("DELETE FROM link_hist WHERE ts < ?", (cutoff,))
-        c.execute("DELETE FROM rx_hist WHERE ts < ?", (cutoff,))
-        c.execute("DELETE FROM xlink_hist WHERE ts < ?", (cutoff,))
+        for t in ("node_hist", "link_hist", "rx_hist", "xlink_hist", "metrics_hist"):
+            c.execute(f"DELETE FROM {t} WHERE ts < ?", (cutoff,))
         c.commit()
 
 

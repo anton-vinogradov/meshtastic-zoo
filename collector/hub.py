@@ -58,6 +58,7 @@ pending_traces = set()  # id адресатов, чей traceroute-ответ ж
 traces = {}             # id → {path:[{id,snr}], ts} — результат последней трассировки
 START_TS = time.time()  # старт hub — для uptime на странице статуса
 worker_beats = {}       # имя воркера → {ts, note}: пульс для /api/status
+_traces_done = 0        # накопительный счётчик завершённых трассировок (для графиков)
 
 
 def beat(name, note=""):
@@ -317,6 +318,8 @@ def on_receive(packet=None, interface=None):
                 if i > 0 and i - 1 < len(snrs) and snrs[i - 1] != -128:
                     e["snr"] = round(snrs[i - 1] / 4, 2)
                 path.append(e)
+            global _traces_done
+            _traces_done += 1
             with lock:
                 pending_traces.discard(frm)
                 traces[frm] = {"path": path, "ts": int(time.time())}
@@ -1214,7 +1217,19 @@ def reader_loop():
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
                                           for n in data.get("nodes", []) if n.get("x") is not None})
                 check_batt(data)
-                beat("reader", f"{len(data.get('nodes', []))} нод на карте")
+                ln = data.get("nodes", [])
+                beat("reader", f"{len(ln)} нод на карте")
+                try:                        # срез метрик во времени (графики статуса)
+                    history.record_metrics({
+                        "chutil": chan_util(), "cache": nodestore.stats().get("nodes"),
+                        "live": len(ln), "traces_done": _traces_done,
+                        "est": sum(1 for n in ln if n.get("est")),
+                        "possus": sum(1 for n in ln if n.get("posSus")),
+                        "tracenbr": sum(1 for n in ln if n.get("traceNbr")),
+                        "keyless": sum(1 for n in ln if not n.get("own") and not n.get("key")),
+                        "msgs": len(messages), "chan": len(channel)})
+                except Exception as e:
+                    log(f"metrics: {e!r}")
         except Exception as e:
             log(f"reader: {e!r}")
         time.sleep(CFG.get("renderEveryS", 60))
@@ -1266,6 +1281,12 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/config"):
             with lock:
                 self._json({k: CFG.get(k) for k in EDITABLE})
+        elif self.path.startswith("/api/status/history"):
+            try:
+                hours = float((parse_qs(urlparse(self.path).query).get("hours") or [6])[0])
+            except ValueError:
+                hours = 6
+            self._json({"series": history.metrics_series(hours=hours)})
         elif self.path.startswith("/api/status"):
             self._json(self._status())
         elif self.path.startswith("/api/geo"):

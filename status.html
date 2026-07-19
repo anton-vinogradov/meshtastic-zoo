@@ -26,6 +26,10 @@
     .tile { background:var(--panel); border:1px solid var(--stroke); border-radius:10px; padding:10px 12px; }
     .tile .v { font-size:20px; font-weight:600; }
     .tile .k { color:var(--muted); font-size:11.5px; margin-top:1px; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+    @media(max-width:560px){ .grid2 { grid-template-columns:1fr; } }
+    .tile.grf .v { font-size:16px; margin-top:4px; }
+    .tile .rate { color:var(--muted); font-size:11.5px; margin-top:3px; }
     .nrow { display:grid; grid-template-columns:14px 1fr auto; gap:10px; align-items:center; }
     .meta { color:var(--muted); font-size:12px; }
     .meta b { color:var(--text); font-weight:500; }
@@ -37,6 +41,8 @@
   <div id="upd"></div>
   <h1>meshtastic-zoo · статус</h1>
   <div class="sub" id="head">загрузка…</div>
+  <h2>Загруженность и тренды <span class="meta" style="text-transform:none;letter-spacing:0">· 6ч</span></h2>
+  <div id="graphs"></div>
   <h2>Воркеры</h2><div id="workers"></div>
   <h2>Свои ноды</h2><div id="nodes"></div>
   <h2>Данные</h2><div class="grid" id="data"></div>
@@ -99,7 +105,51 @@
         `<div class="tile"><div class="v">${v ?? "—"}</div><div class="k">${k}</div></div>`).join("");
     }
     function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-    tick(); setInterval(tick, 5000);
+
+    function spark(vals, o = {}) {
+      const h = o.h || 40, color = o.color || "#6ea8ff", fill = o.fill !== false;
+      const clean = vals.filter(v => v != null);
+      if (clean.length < 2) return `<svg height="${h}" style="width:100%;height:${h}px"></svg>`;
+      const mn = o.min ?? Math.min(...clean), mx = o.max ?? Math.max(...clean), rng = (mx - mn) || 1, n = vals.length, W = 300;
+      let d = "", started = false;
+      vals.forEach((v, i) => { if (v == null) return; const x = i / (n - 1) * W, y = h - 2 - (v - mn) / rng * (h - 6);
+        d += (started ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1) + " "; started = true; });
+      const area = fill ? `<path d="${d}L${W} ${h}L0 ${h}Z" fill="${color}" fill-opacity="0.13"/>` : "";
+      return `<svg viewBox="0 0 ${W} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px">${area}<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+    }
+
+    async function tickHist() {
+      let hh;
+      try { hh = (await (await fetch("/api/status/history?hours=6", { cache: "no-store" })).json()).series || []; }
+      catch { return; }
+      if (hh.length < 2) { el("graphs").innerHTML = '<div class="meta">графики появятся через несколько минут накопления</div>'; return; }
+      const col = k => hh.map(p => p[k]);
+      const spanH = Math.max(0.05, (hh[hh.length - 1].ts - hh[0].ts) / 3600);
+      const fmt = v => v == null ? "—" : Number.isInteger(v) ? v : (+v).toFixed(1);
+      const last = k => { const c = col(k).filter(v => v != null); return c.length ? c[c.length - 1] : null; };
+      const rate = k => { const c = col(k).filter(v => v != null); return c.length < 2 ? 0 : (c[c.length - 1] - c[0]) / spanH; };
+      const big = (title, k, unit, color) =>
+        `<div class="tile grf"><div class="k">${title}</div>${spark(col(k), { h: 56, color })}
+          <div class="v">${fmt(last(k))}${unit || ""}</div></div>`;
+      const trend = (title, k, color) => { const r = rate(k);
+        return `<div class="tile"><div class="v">${fmt(last(k))}</div><div class="k">${title}</div>
+          ${spark(col(k), { h: 26, color, fill: false })}
+          <div class="rate">${r >= 0 ? "+" : ""}${r.toFixed(1)}/ч</div></div>`; };
+      el("graphs").innerHTML =
+        `<div class="grid2">${big("канал (chUtil %)", "chutil", "%", "#e0a03c")}${big("узлов на карте", "live", "", "#6ea8ff")}</div>
+         <div class="grid">
+           ${trend("в кеше", "cache", "#35c98e")}
+           ${trend("подтв. соседей", "tracenbr", "#35c98e")}
+           ${trend("без ключа", "keyless", "#e0533c")}
+           ${trend("трассировок", "traces_done", "#b98bff")}
+           ${trend("оценок est", "est", "#b98bff")}
+           ${trend("подозр. позиций", "possus", "#e0533c")}
+         </div>`;
+    }
+
+    tick(); tickHist();
+    setInterval(tick, 5000);
+    setInterval(tickHist, 30000);
   </script>
 </body>
 </html>
