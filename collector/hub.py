@@ -969,6 +969,51 @@ def survey_loop():
             log(f"survey: {e!r}")
 
 
+_keyfetch_last = {}   # id -> ts последнего запроса ключа
+
+
+def keyfetch_loop():
+    """Тихий фоновый ДОБОР ключей у keyless-нод в эфире (как survey_loop): по
+    ОДНОЙ за такт, скип при загруженном канале, приоритет posSus-нарушителям,
+    один заход на ноду не чаще keyFetchPerNodeH часов. Только напрямую слышимые
+    keyless-ноды — solicit_key шлёт наш NodeInfo с wantResponse, они отвечают
+    своим (с publicKey). Не залпом, чтобы не спамить эфир."""
+    time.sleep(35)   # дать первому скану наполнить live.json
+    while True:
+        time.sleep(max(120, CFG.get("keyFetchEveryS", 300)))
+        try:
+            if not CFG.get("keyFetchEnabled", True):
+                continue
+            try:
+                data = json.loads(OUT_LIVE.read_text())
+            except Exception:
+                continue
+            ch = [(n.get("info") or {}).get("chUtil")
+                  for n in data.get("nodes", []) if n.get("own")]
+            ch = [c for c in ch if c is not None]
+            if ch and max(ch) > CFG.get("surveyMaxChUtil", 25):
+                continue                                # эфир занят — пропускаем такт
+            now = time.time()
+            fresh = CFG.get("keyFetchFreshMin", 30) * 60
+            per = CFG.get("keyFetchPerNodeH", 3) * 3600
+            # кандидаты: keyless, слышимые НАПРЯМУЮ (hop=None) и недавно (в эфире),
+            # не дёрганные за per часов
+            elig = [n for n in data.get("nodes", [])
+                    if not n.get("own") and not n.get("key") and n.get("hop") is None
+                    and n.get("heard") and now - n["heard"] < fresh
+                    and now - _keyfetch_last.get(n["id"], 0) >= per]
+            if not elig:
+                continue
+            # приоритет: сначала posSus-нарушители, затем давно не дёрганные
+            elig.sort(key=lambda n: (0 if n.get("posSus") else 1, _keyfetch_last.get(n["id"], 0)))
+            target = elig[0]["id"]
+            _keyfetch_last[target] = now
+            log(f"🔑 добор ключа у {target} ({len(elig)} в очереди)")
+            solicit_key(target)
+        except Exception as e:
+            log(f"keyfetch: {e!r}")
+
+
 def geocode_loop():
     """Геокодинг адресных имён нод (Фаза 6-В, пул мягких якорей): раз в сутки
     превращаем «Pulkovskoe 65» → координаты через Nominatim. Кэш персистентный,
@@ -1412,6 +1457,7 @@ def main():
     threading.Thread(target=pruner_loop, daemon=True).start()   # №3 чистка кеша
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
     threading.Thread(target=survey_loop, daemon=True).start()   # жатва чужих звеньев
+    threading.Thread(target=keyfetch_loop, daemon=True).start() # тихий добор ключей у keyless
     threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
