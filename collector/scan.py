@@ -14,6 +14,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CFG = json.loads((ROOT / "config.json").read_text())
+# дефолты для окон удержания — чтобы устаревший config.json (без ключей после
+# миграции на кеш) не давал None ни в классификации, ни в /api/config.
+CFG.setdefault("directWindowH", 24)
+CFG.setdefault("formerWindowH", 1)
 OUT = ROOT.parent / "data" / "live.json"
 
 
