@@ -821,6 +821,207 @@ def build(found, prev=None, xlinks=None, direct_live=None):
     )
 
 
+def build_from_store(store, found=None, xlinks=None):
+    """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
+    nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
+    last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
+    — из живого опроса `found` (свежие), остальное — из кеша. Раскладка засеяна
+    сохранёнными x,y. Прунер удаляет вышедших за окно отдельно."""
+    now = time.time()
+    known, subnets = CFG.get("known", {}), CFG["subnets"]
+    directW = CFG.get("directWindowH", 24) * 3600
+    formerW = CFG.get("formerWindowH", 1) * 3600
+
+    def subnet_of(ip):
+        a = ipaddress.ip_address(ip)
+        return next((s for s in subnets if a in ipaddress.ip_network(s)), None)
+
+    # свои ноды из живого опроса
+    stat = {}
+    for ip, info in (found or {}).items():
+        nid = (info or {}).get("id") or known.get(ip)
+        if not nid:
+            continue
+        i = info or {}
+        stat[nid] = dict(id=nid, ip=ip, subnet=subnet_of(ip),
+                         short=i.get("short") or nid[-4:], hw=i.get("hw"),
+                         long=i.get("long"), role=i.get("role"),
+                         dm=i.get("dm") or {}, db=i.get("db") or {}, cfg=i.get("cfg") or {})
+    keys_by = {}
+    for nid, n in stat.items():
+        for oid, e in n["db"].items():
+            if isinstance(e, dict) and (e.get("user") or {}).get("publicKey"):
+                keys_by.setdefault(oid, set()).add(nid)
+    own = set(stat)
+
+    def src_of(n):  # поля, которые читает node_info()
+        s = dict(long=n.get("name"), role=n.get("role"), mqtt=n.get("mqtt"),
+                 lic=n.get("licensed"),
+                 dm={"batteryLevel": n.get("batt"), "voltage": n.get("volt"),
+                     "channelUtilization": n.get("chutil"), "airUtilTx": n.get("air"),
+                     "uptimeSeconds": n.get("uptime")})
+        if n.get("lat") is not None:
+            s["pos"] = {"latitudeI": int(n["lat"] * 1e7),
+                        "longitudeI": int((n.get("lon") or 0) * 1e7), "altitude": n.get("alt")}
+        return s
+
+    world, hops_nodes, rf, direct_seen, seed_pos, names = [], [], [], {}, {}, {}
+    for n in store:
+        nid = n["id"]
+        if n.get("name"):
+            names[nid] = n["name"]
+        if nid in own:
+            continue
+        if n.get("x") is not None:
+            seed_pos[nid] = (n["x"], n["y"])
+        ld = n.get("last_direct") or 0
+        hb = n.get("heard_by") or {}
+        dlegs = [(o, e) for o, e in hb.items()
+                 if o in own and not e.get("hops") and e.get("snr") is not None]
+        if ld and now - ld < directW and dlegs:            # ЧЁРНАЯ (прямой сосед)
+            direct_seen[nid] = int(ld)
+            c = src_of(n)
+            c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
+                     heard=int(ld), best=max(e["snr"] for _, e in dlegs))
+            world.append(c)
+            for o, e in dlegs:
+                rf.append(dict(frm=nid, to=o, snr=e["snr"], heard=int(e.get("ts") or ld)))
+        elif ld and now - ld < directW + formerW:          # СЕРАЯ (бывший 0)
+            direct_seen[nid] = int(ld)
+            relay = [(o, e) for o, e in hb.items() if o in own and e.get("hops")]
+            best = min(relay, key=lambda x: x[1]["hops"]) if relay else None
+            hops = best[1]["hops"] if best else (n.get("hops") or 1)
+            via = best[0] if best else (next(iter(own), None))
+            c = src_of(n)
+            c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
+                     hops=hops, heard=int(n.get("last_heard") or ld), silent=not best)
+            hops_nodes.append(c)
+            if via:
+                rf.append(dict(frm=nid, to=via, snr=None, hops=hops,
+                               heard=int(n.get("last_heard") or ld)))
+        # иначе — за окном, пропускаем (прунер удалит ключ)
+
+    # плечи между своими (из nodeDB) + обе стрелки
+    for nid, n in stat.items():
+        for oid, e in n["db"].items():
+            if oid == nid or not isinstance(e, dict) or oid not in own:
+                continue
+            if not (e.get("hopsAway") or 0) and e.get("snr") is not None:
+                rf.append(dict(frm=oid, to=nid, snr=e["snr"],
+                               heard=int(e.get("lastHeard") or now)))
+    for nid in own:
+        direct_seen[nid] = int(now)
+    have = {(l["frm"], l["to"]) for l in rf}
+    sids = sorted(stat)
+    for i1, a in enumerate(sids):
+        for b in sids[i1 + 1:]:
+            fwd, rev = (a, b) in have, (b, a) in have
+            if fwd != rev:
+                frm, to = ((b, a) if fwd else (a, b))
+                rf.append(dict(frm=frm, to=to, snr=None, heard=None))
+
+    node_ids = own | {c["id"] for c in world} | {c["id"] for c in hops_nodes}
+    names.update({nid: (n.get("long") or n["short"]) for nid, n in stat.items()})
+
+    # желаемые дистанции/веса (как в build)
+    S = CFG["snrScale"]
+
+    def pct(snr):
+        return max(0.0, min(1.0, (snr - S["floor"]) / (S["ideal"] - S["floor"])))
+
+    pair = {}
+    for l in rf:
+        if l["snr"] is None:
+            continue
+        k = tuple(sorted((l["frm"], l["to"])))
+        p = pair.setdefault(k, {"ps": [], "heard": 0})
+        p["ps"].append(pct(l["snr"]))
+        p["heard"] = max(p["heard"], l.get("heard") or 0)
+    des, wts = {}, {}
+    for k, p in pair.items():
+        ps = p["ps"]
+        q = (max(ps) + (min(ps) if len(ps) > 1 else 0)) / 2 if k[0] in stat and k[1] in stat else max(ps)
+        des[k] = 0.12 + (1 - q) * 0.62
+        age = now - p["heard"] if p["heard"] else 9e9
+        fresh = 1.2 if age < 900 else 1.0 if age < 3600 else 0.8 if age < 6 * 3600 else 0.6
+        wts[k] = (1.6 if len(ps) >= 2 else 1.0) * fresh
+    D0 = 0.12 + 0.62
+    for l in rf:
+        if l.get("hops"):
+            k = tuple(sorted((l["frm"], l["to"])))
+            if k not in des:
+                des[k] = D0 * (2 - 0.5 ** (l["hops"] - 1))
+                wts[k] = 0.4
+    pos = layout(sorted(node_ids), des, wts, seed=seed_pos or None)
+
+    # карточки
+    nodes = []
+    for nid in sorted(stat):
+        n = stat[nid]
+        x, y = pos[nid]
+        node = dict(id=nid, label=n.get("long") or n["short"], sub=n["ip"], short=n["short"],
+                    own=True, x=round(x, 4), y=round(y, 4), online=True, heard=int(now),
+                    key=bool(keys_by.get(nid)), keyBy=sorted(keys_by.get(nid, ())))
+        if n.get("hw"):
+            node["hw"] = n["hw"]
+        if node_info(n):
+            node["info"] = node_info(n)
+        if n.get("cfg"):
+            node["cfg"] = n["cfg"]
+        if nid in CFG.get("mobile", []):
+            node.update(mobile=True, hint="roaming node, IP changes")
+        nodes.append(node)
+    for c in world + hops_nodes:
+        x, y = pos[c["id"]]
+        node = dict(id=c["id"], label=c.get("long") or c["short"], sub=c["id"], short=c["short"],
+                    x=round(x, 4), y=round(y, 4), heard=c.get("heard") or None,
+                    key=bool(keys_by.get(c["id"])), keyBy=sorted(keys_by.get(c["id"], ())))
+        if c.get("hops"):
+            node["hop"] = c["hops"]
+        if c.get("silent"):
+            node["silent"] = True
+        if c.get("hw"):
+            node["hw"] = c["hw"]
+        if node_info(c):
+            node["info"] = node_info(c)
+        nodes.append(node)
+
+    out_links = []
+    for l in rf:
+        d = {"from": l["frm"], "to": l["to"], "type": "rf",
+             "snr": None if l["snr"] is None else round(l["snr"], 2)}
+        if l.get("hops"):
+            d["hops"] = l["hops"]
+        if l.get("heard"):
+            d["heard"] = l["heard"]
+        out_links.append(d)
+
+    # геолокация (как в build): адрес → оценка → флаг вранья
+    try:
+        addr = json.loads((OUT.parent / "geo_addr.json").read_text())
+        for n in nodes:
+            r = addr.get(n["id"])
+            if r and (n.get("info") or {}).get("lat") is None:
+                n["addr"] = dict(lat=r["lat"], lon=r["lon"], q=r.get("q"),
+                                 verified=bool(r.get("verified")))
+    except Exception:
+        pass
+    try:
+        estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
+    except Exception as e:
+        log(f"estimate: {e!r}")
+    try:
+        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
+    except Exception as e:
+        log(f"posflag: {e!r}")
+
+    return dict(
+        meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
+                  updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  updatedTs=int(now * 1000), directSeen=direct_seen, names=names),
+        nodes=nodes, links=out_links)
+
+
 def run_once():
     prev = None
     try:

@@ -39,5 +39,9 @@
   "surveyEveryS": 900,
   "surveyMaxChUtil": 25,
   "geocodeEnabled": true,
-  "geocodeEveryS": 86400
+  "geocodeEveryS": 86400,
+  "directWindowH": 24,
+  "formerWindowH": 1,
+  "renderEveryS": 60,
+  "pruneEveryS": 300
 }

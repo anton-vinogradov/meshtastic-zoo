@@ -874,10 +874,6 @@ def feed_store(found):
                          uptime=dm.get("uptimeSeconds"), dm_ts=heard)
             if f:
                 nodestore.upsert(did, ts=heard, **f)
-    try:
-        nodestore.prune(CFG.get("worldMaxAgeH", 24) * 3600 * 2)
-    except Exception:
-        pass
 
 
 def rx_flush():
@@ -1024,43 +1020,39 @@ def _do_geocode():
         log(f"🏠 геокодинг: +{new} имён, всего с координатами {got}")
 
 
-def topo_loop():
+last_found = {}    # последний снимок своих нод (писатель → читатель)
+last_xlinks = []
+
+
+def _store_keep_s():
+    return max(CFG.get("directWindowH", 24) + CFG.get("formerWindowH", 1),
+              CFG.get("worldMaxAgeH", 24)) * 3600
+
+
+def writer_loop():
+    """Воркер №1 (ПИСАТЕЛЬ): опрос своих нод → nodestore. Про отображение не
+    думает; on_receive пишет туда же событийно. Плюс таймауты исходящих."""
+    global last_found, last_xlinks
     while True:
         try:
             with lock:
                 live = {ip: c for ip, c in conns.items() if c.get("iface")}
             if live:
                 found = {ip: snapshot(c) for ip, c in live.items()}
-                prev = None
+                last_found = found
                 try:
-                    prev = json.loads(OUT_LIVE.read_text())
+                    last_xlinks = history.xlink_pairs(hours=CFG.get("xlinkHours", 336))
                 except Exception:
                     pass
-                xlinks = []
-                try:
-                    xlinks = history.xlink_pairs(hours=CFG.get("xlinkHours", 336))
-                except Exception:
-                    pass
+                feed_store(found)
                 with rx_lock:
-                    dlive = dict(direct_live)         # прямые приёмы из живого потока
-                data = scan.build(found, prev, xlinks=xlinks, direct_live=dlive)
-                atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
-                hist_tick(data)
+                    dlive = dict(direct_live)
+                for did, dv in dlive.items():       # точные прямые из потока (батч)
+                    nodestore.note_leg(did, dv[2] or "?", dv[1], 0, ts=int(dv[0]))
                 rx_flush()
-                try:                       # переход на кеш: наполняем (build не читает)
-                    feed_store(found)
-                    for did, dv in dlive.items():   # точные прямые из потока (батч)
-                        nodestore.note_leg(did, dv[2] or "?", dv[1], 0, ts=int(dv[0]))
-                    nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
-                                              for n in data.get("nodes", []) if n.get("x") is not None})
-                except Exception as e:
-                    log(f"nodestore: {e!r}")
-                check_batt(data)
         except Exception as e:
-            log(f"topo: {e!r}")
-        # исходящие без квитанции дольше 90 с — помечаем честно; «waiting»
-        # дольше keyWaitMin (адресат так и не появился в эфире) — сдаёмся
-        try:
+            log(f"writer: {e!r}")
+        try:                                        # статусы исходящих (из topo)
             dirty = False
             now, wait_ttl = time.time(), CFG.get("keyWaitMin", 120) * 60
             with lock:
@@ -1077,6 +1069,36 @@ def topo_loop():
         except Exception:
             pass
         time.sleep(CFG.get("topoEveryS", 60))
+
+
+def reader_loop():
+    """Воркер №2 (ЧИТАТЕЛЬ): nodestore → live.json. Идёт по всем ключам,
+    таймеры last_direct (24ч чёрная / +1ч серая), раскладка, геолокация.
+    Независим от прихода данных. Свои ноды/keys_by — из last_found."""
+    time.sleep(4)
+    while True:
+        try:
+            if last_found:
+                store = nodestore.load(_store_keep_s())
+                data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks)
+                atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
+                hist_tick(data)
+                nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
+                                          for n in data.get("nodes", []) if n.get("x") is not None})
+                check_batt(data)
+        except Exception as e:
+            log(f"reader: {e!r}")
+        time.sleep(CFG.get("renderEveryS", 60))
+
+
+def pruner_loop():
+    """Воркер №3 (ПРУНЕР): удаляет ключи, вышедшие за все лимиты (кроме своих)."""
+    while True:
+        time.sleep(CFG.get("pruneEveryS", 300))
+        try:
+            nodestore.prune(_store_keep_s())
+        except Exception as e:
+            log(f"pruner: {e!r}")
 
 
 # ---------- HTTP: статика + API ----------
@@ -1390,7 +1412,9 @@ def main():
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     threading.Thread(target=keeper, daemon=True).start()
-    threading.Thread(target=topo_loop, daemon=True).start()
+    threading.Thread(target=writer_loop, daemon=True).start()   # №1 опрос → кеш
+    threading.Thread(target=reader_loop, daemon=True).start()   # №2 кеш → live.json
+    threading.Thread(target=pruner_loop, daemon=True).start()   # №3 чистка кеша
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
     threading.Thread(target=survey_loop, daemon=True).start()   # жатва чужих звеньев
     threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
