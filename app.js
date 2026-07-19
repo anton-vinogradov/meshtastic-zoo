@@ -101,6 +101,8 @@
       geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
       antOmni: "omni", antDir: "directional", antAzim: "az",
       geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
+      geoEstNone: "no estimates right now — SNR shows no distance gradient (r≈0); needs spread-out anchor nodes",
+      geoEstThin: "no estimates yet — not enough placed anchors or GPS neighbors to calibrate",
       geoAddr: "geocoded from name", geoAddrTip: "nodes whose name is a street address, placed via OSM geocoding (solid = GPS-verified, dashed = unverified)",
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
@@ -166,6 +168,8 @@
       geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
       antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
       geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
+      geoEstNone: "оценок сейчас нет — SNR не даёт градиента дальности (r≈0); нужны разнесённые опорные ноды",
+      geoEstThin: "оценок пока нет — мало размещённых опор или GPS-соседей для калибровки",
       geoAddr: "геокод по имени", geoAddrTip: "ноды, чьё имя — адрес улицы; ставятся геокодингом OSM (сплошной = сверено по GPS, пунктир — не сверено)",
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
@@ -1928,8 +1932,12 @@
     const ctl = document.getElementById("geoctl");
     if (!ctl) return;
     const own = (lastLive && lastLive.nodes || []).filter(n => n.own);
+    const gc = (lastLive && lastLive.meta || {}).geoCal;
+    const estHint = geoEst && (!gc || !gc.nEst)
+      ? `<div class="geoctl-h geo-est-none">${esc(t(gc && (gc.reason === "anchors" || gc.reason === "cal") ? "geoEstThin" : "geoEstNone"))}</div>`
+      : "";
     ctl.innerHTML = `<label class="geo-est-tog" title="${esc(t("geoEstTip"))}">
-        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>
+        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>${estHint}
       <label class="geo-est-tog" title="${esc(t("geoAddrTip"))}">
         <input type="checkbox" id="geo-addr-cb"${geoAddr ? " checked" : ""}> ${esc(t("geoAddr"))}</label>`
       + `<div class="geoctl-h">${esc(t("geoPlaceHint"))}</div>` + own.map(n => {

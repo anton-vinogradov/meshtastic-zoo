@@ -186,7 +186,7 @@ def estimate_positions(nodes, links, geo, xlinks=None):
     anchors = {nid: (g["lat"], g["lon"]) for nid, g in (geo or {}).items()
                if isinstance(g, dict) and g.get("lat") is not None}
     if len(anchors) < 3:
-        return
+        return {"ok": False, "reason": "anchors", "nCal": 0}
     gps = {}
     for n in nodes:
         i = n.get("info") or {}
@@ -205,21 +205,31 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                 if d > 0.02:
                     cal.append((math.log10(d), l["snr"]))
     if len(cal) < 4:
-        return
+        return {"ok": False, "reason": "cal", "nCal": len(cal)}
     # регрессия snr = A + B·log10(d), B<0 (сигнал падает с расстоянием)
     n = len(cal)
     sx = sum(x for x, _ in cal); sy = sum(y for _, y in cal)
     sxx = sum(x * x for x, _ in cal); sxy = sum(x * y for x, y in cal)
+    syy = sum(y * y for _, y in cal)
     den = n * sxx - sx * sx
     if abs(den) < 1e-9:
-        return
+        return {"ok": False, "reason": "degenerate", "nCal": n}
     B = (n * sxy - sx * sy) / den
     A = (sy - B * sx) / n
-    if B >= 0:
-        return
+    # Калибровка годна ТОЛЬКО если SNR реально убывает с расстоянием: нужен
+    # отрицательный наклон И заметная корреляция. Плоская подгонка (B≈0, r≈0 —
+    # типично для co-located якорей в шумном городском меше) даёт бессмысленные
+    # кольца (всё ~0 или ~300 км) и переполняла snr_km → OverflowError рушил
+    # всю оценку. Тогда честно молчим (est=0), а не выдаём мусор.
+    vy = n * syy - sy * sy
+    r = (n * sxy - sx * sy) / math.sqrt(den * vy) if vy > 1e-9 else 0.0
+    if B >= 0 or r > -0.4:
+        return {"ok": False, "reason": "flat", "nCal": n, "r": round(r, 2)}
 
     def snr_km(snr):
-        return min(300.0, 10 ** ((snr - A) / B))
+        # показатель клампим в безопасный диапазон: без этого при малом |B| он
+        # улетает в ±1e3 и 10**exp переполняет float (OverflowError).
+        return min(300.0, max(0.01, 10 ** max(-4.0, min(4.0, (snr - A) / B))))
 
     aps = list(anchors.values())
     clat = sum(p[0] for p in aps) / len(aps)
@@ -334,6 +344,8 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                            unc=round(res, 2), by=len(hs))
         if side:
             node["est"]["side"] = side
+    n_est = sum(1 for nd in nodes if nd.get("est"))
+    return {"ok": True, "reason": "ok", "nCal": n, "r": round(r, 2), "nEst": n_est}
 
 
 def flag_position_lies(nodes, links, geo):
@@ -572,8 +584,9 @@ def build_from_store(store, found=None, xlinks=None):
                                  verified=bool(r.get("verified")))
     except Exception:
         pass
+    geocal = None
     try:
-        estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
+        geocal = estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
     except Exception as e:
         log(f"estimate: {e!r}")
     try:
@@ -584,7 +597,8 @@ def build_from_store(store, found=None, xlinks=None):
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  updatedTs=int(now * 1000), directSeen=direct_seen, names=names),
+                  updatedTs=int(now * 1000), directSeen=direct_seen, names=names,
+                  geoCal=geocal),
         nodes=nodes, links=out_links)
 
 
