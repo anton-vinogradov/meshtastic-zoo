@@ -1036,8 +1036,10 @@ last_xlinks = []
 
 
 def _store_keep_s():
-    return max(CFG.get("directWindowH", 24) + CFG.get("formerWindowH", 1),
-              CFG.get("worldMaxAgeH", 24)) * 3600
+    # Кэш держит ноду ровно пока она может быть на карте: «прямой» + «бывший».
+    # Дальше build_from_store её всё равно отбрасывает, а график истории живёт в
+    # отдельной history.db — worldMaxAgeH (окно графика) сюда не относится.
+    return (CFG.get("directWindowH", 24) + CFG.get("formerWindowH", 1)) * 3600
 
 
 def writer_loop():

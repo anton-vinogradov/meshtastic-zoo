@@ -122,14 +122,15 @@
       failedSend: "Failed to send:", failedSave: "Failed to save:",
       mapAria: "Mesh network map", language: "Language",
       fSubnets: "Site subnets & colors", fFloor: "0% quality at SNR, dB",
-      fIdeal: "100% quality at SNR, dB", fKeep: "Cache/history keeps a node, hours",
+      fIdeal: "100% quality at SNR, dB", fKeep: "History chart span, hours",
       fDirect: "Direct neighbor stays, hours", fFormer: "Former (grey) stays, hours",
       fMap: "Poll nodes, seconds",
       fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
       fFragile: "Slow subnets — polled lightly (prefix per line)",
       setSigScale: "Signal scale", setRetention: "Node retention on the map",
-      setRetentionHint: "Node timeline: black (direct neighbor) → grey (former) → drops off. The first two fields set how long a node stays black then grey after the last direct contact; the third is how long the cache keeps it for the history chart.",
+      setRetentionHint: "Node timeline after the last direct contact: black (direct neighbor) for the first hours, then grey (former) for the next, then it drops off the map. The node stays in the cache for exactly that span (black + grey).",
       setPolling: "Polling", setSpecialSub: "Special subnets",
+      setHistory: "History", setHistoryHint: "Time span of the “nodes on the map” chart below. Chart data lives in its own history log — this doesn’t affect the map or the cache, only the chart window.",
       fSubColor: "Color of subnet {0}", addSubnet: "add subnet", remove: "remove",
       secHist: "History", histReach: "Reachability 24h", histHeard: "Heard 24h",
       histBatt: "Battery 24h", histChUtil: "Channel util 24h", histNone: "not enough history yet",
@@ -192,14 +193,15 @@
       failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
       mapAria: "Карта mesh-сети", language: "Язык",
       fSubnets: "Подсети площадок и цвета", fFloor: "0% качества при SNR, дБ",
-      fIdeal: "100% качества при SNR, дБ", fKeep: "Кэш/история: держать ноду, часов",
+      fIdeal: "100% качества при SNR, дБ", fKeep: "Окно графика истории, часов",
       fDirect: "Прямой сосед держится, часов", fFormer: "Бывший (серый) держится, часов",
       fMap: "Опрос нод, секунд",
       fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
       fFragile: "Медленные подсети — лёгкий опрос (префикс на строке)",
       setSigScale: "Шкала сигнала", setRetention: "Удержание нод на карте",
-      setRetentionHint: "Таймлайн ноды: чёрная (прямой сосед) → серая (бывший) → уходит с карты. Первые два поля задают, сколько нода держится чёрной, затем серой после последнего прямого приёма; третье — сколько кэш хранит её для графика истории.",
+      setRetentionHint: "Таймлайн после последнего прямого приёма: чёрная (прямой сосед) первые часы, затем серая (бывший) следующие, потом уходит с карты. Ровно столько же нода лежит в кэше (чёрная + серая).",
       setPolling: "Опрос", setSpecialSub: "Особые подсети",
+      setHistory: "История", setHistoryHint: "За сколько часов строится график «узлов на карте» ниже. Данные графика лежат в отдельном логе истории — на карту и кэш это не влияет, только окно графика.",
       fSubColor: "Цвет подсети {0}", addSubnet: "добавить подсеть", remove: "удалить",
       secHist: "История", histReach: "Достижимость 24ч", histHeard: "Слышно 24ч",
       histBatt: "Батарея 24ч", histChUtil: "Загрузка эфира 24ч", histNone: "истории пока мало",
@@ -1676,14 +1678,15 @@
       ["snrScale.ideal", "fIdeal", "num"]] },
     { title: "setRetention", hint: "setRetentionHint", fields: [
       ["directWindowH", "fDirect", "num"],
-      ["formerWindowH", "fFormer", "num"],
-      ["worldMaxAgeH", "fKeep", "num"]] },
+      ["formerWindowH", "fFormer", "num"]] },
     { title: "setPolling", fields: [
       ["topoEveryS", "fMap", "num"],
       ["rescanS", "fDisc", "num"]] },
     { title: "setSpecialSub", fields: [
       ["mobile", "fRoam", "area"],
       ["fragile", "fFragile", "area"]] },
+    { title: "setHistory", hint: "setHistoryHint", fields: [
+      ["worldMaxAgeH", "fKeep", "num"]] },
   ];
   const setEl = document.getElementById("settings");
   const sfId = (k) => "sf-" + k.replace(".", "-");
