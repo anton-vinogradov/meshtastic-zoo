@@ -517,6 +517,7 @@
       [/WIRELESS_PAPER|_PAPER/, "heltec-wireless-paper.svg"],
       [/HELTEC_V3/, "heltec-v3.svg"], [/HELTEC/, "heltec_v4.svg"],
       [/STATION_G2/, "station-g2.svg"], [/T1000/, "tracker-t1000-e.svg"],
+      [/WIO_TRACKER/, "seeed-wio-tracker-l1.svg"],
       [/NANO_G2/, "nano-g2-ultra.svg"], [/XIAO/, "seeed-xiao-s3.svg"],
       [/T3_S3|TLORA_T3/, "tlora-t3s3-v1.svg"], [/TLORA_C6/, "tlora-c6.svg"],
       [/TLORA/, "tlora-v2-1-1_6.svg"],
