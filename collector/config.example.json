@@ -7,16 +7,11 @@
   "queryTimeoutS": 45,
   "fragile": [],
   "worldMaxAgeH": 24,
-  "cacheMaxAgeH": 6,
-  "hopSettleMin": 3,
-  "hopStaleMin": 60,
-  "hopMaxShow": 7,
   "autoKeyRequest": true,
   "keyMaxTries": 12,
   "keyWaitMin": 120,
   "topoEveryS": 30,
   "rescanS": 60,
-  "worldTopN": 0,
   "snrScale": {
     "floor": -20,
     "ideal": 10

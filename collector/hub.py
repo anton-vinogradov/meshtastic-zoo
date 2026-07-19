@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """meshtastic-zoo hub — живой центр зоопарка.
 
-Держит постоянные TCP-соединения со своими нодами и:
-- слушает эфир: личные сообщения нодам копятся в data/messages.json;
-- по /api/send отправляет ответ отправителю С НУЖНОЙ ноды;
-- раз в topoEveryS пересобирает data/live.json из живых nodeDB
-  (без переподключений — хрупким нодам так даже легче);
-- отдаёт сайт и API на одном порту.
+Держит постоянные TCP-соединения со своими нодами. Три разделённых воркера:
+- ПИСАТЕЛЬ (writer_loop): опрос своих нод + on_receive → персистентный кеш
+  nodestore (одна строка на узел + таймстемпы);
+- ЧИТАТЕЛЬ (reader_loop): nodestore → scan.build_from_store → data/live.json
+  (статус чёрная/серая по таймерам last_direct, раскладка из кеша);
+- ПРУНЕР (pruner_loop): удаляет узлы за пределами окна удержания.
+Плюс: личные сообщения/канал (data/*.json), Telegram-мост, /api, отдача сайта.
 
 Запуск: python3 collector/hub.py       # сайт и API на :8814
-Заменяет связку «http.server + scan.py --loop»; разовый scan.py остаётся.
 """
 import asyncio
 import ipaddress
@@ -43,8 +43,8 @@ OUT_CHAN = ROOT.parent / "data" / "channel.json"
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
-EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "cacheMaxAgeH",
-            "topoEveryS", "rescanS", "mobile", "fragile"]
+EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
+            "topoEveryS", "renderEveryS", "rescanS", "mobile", "fragile"]
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
@@ -622,10 +622,21 @@ def snapshot(ent):
     except Exception:
         pass
     user = my.get("user") or {}
+    db = dict(iface.nodes or {})
+    # авто-фикс часов: если ВСЕ lastHeard в nodeDB = 0, у ноды сбиты часы (ребут,
+    # GPS в помещении фикс не берёт) — выставляем текущее (по локальному TCP, в
+    # эфир не идёт). Самоограничивается: как переслышит соседа — метки не нулевые.
+    try:
+        hs = [e.get("lastHeard") or 0 for e in db.values() if isinstance(e, dict)]
+        if hs and max(hs) == 0:
+            iface.localNode.setTime(int(time.time()))
+            log(f"    {ent.get('id')}: часы были сбиты (lastHeard=0) — выставил время")
+    except Exception:
+        pass
     return dict(num=ent.get("num"), id=ent.get("id"), short=user.get("shortName"),
                 long=user.get("longName"), role=user.get("role"),
                 hw=user.get("hwModel"), dm=my.get("deviceMetrics") or {},
-                db=dict(iface.nodes or {}), cfg=node_cfg(iface))
+                db=db, cfg=node_cfg(iface))
 
 
 # ---------- Telegram-алерты (Фаза 2) ----------
@@ -1381,34 +1392,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._json({"ok": False, "error": "нет такого API"}, 404)
 
 
-def seed_direct_live():
-    """При старте засеять direct_live прямыми плечами из прошлого live.json,
-    чтобы рестарт НЕ осыпал карту в «бывшие соседи» до набора живого потока:
-    первый же build увидит недавно-прямые ноды чёрными. Ноды, реально ушедшие,
-    сами протухнут (плечо старше settle → обычный путь в серые/прочь)."""
-    try:
-        d = json.loads(OUT_LIVE.read_text())
-    except Exception:
-        return
-    own = {n["id"] for n in d.get("nodes", []) if n.get("own")}
-    n = 0
-    with rx_lock:
-        for l in d.get("links", []):
-            if (l.get("type") == "rf" and not l.get("hops") and l.get("snr") is not None
-                    and l.get("to") in own and l.get("heard")):
-                fid, ts = l["from"], l["heard"]
-                cur = direct_live.get(fid)
-                if not cur or cur[0] < ts:
-                    direct_live[fid] = (ts, float(l["snr"]), l["to"])
-                    n += 1
-    if n:
-        log(f"↺ засеяно direct_live из прошлого live.json: {n} прямых плеч")
-
-
 def main():
     load_messages()
     load_tgmap()
-    seed_direct_live()          # бесшовный рестарт: прямые ноды не осыпаются
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     threading.Thread(target=keeper, daemon=True).start()
