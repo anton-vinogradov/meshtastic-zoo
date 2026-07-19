@@ -444,10 +444,12 @@ def flag_position_lies(nodes, links, geo):
                                n=len(hs), level=level)
 
 
-def build(found, prev=None, xlinks=None):
+def build(found, prev=None, xlinks=None, direct_live=None):
     """found: {ip: результат query или None} → структура для фронтенда.
-    xlinks — чужие звенья из history (traceroute/NeighborInfo) для разрешения
-    зеркальной неоднозначности в estimate_positions (Фаза 6-Б)."""
+    xlinks — чужие звенья из history для разрешения зеркала (Фаза 6-Б).
+    direct_live — {id: ts} прямых приёмов из ЖИВОГО потока пакетов hub'а: полнее
+    периодического снимка nodeDB (тот сэмплит раз в скан и затирается многохопом),
+    поэтому directSeen точнее и ноды не мигают в «бывшие соседи» при флапе."""
     now = time.time()
     max_age = CFG["worldMaxAgeH"] * 3600
     known, names = CFG.get("known", {}), CFG.get("names", {})
@@ -529,6 +531,19 @@ def build(found, prev=None, xlinks=None):
                     if val and not c.get(key):
                         c[key] = val
 
+    # Живой поток: ноду, услышанную напрямую < settle назад, держим ПРЯМОЙ
+    # (чёрной) с живым плечом, даже если снимок nodeDB показывает её сейчас
+    # многохопом — это флап РЧ, не деградация. Иначе такая нода пропадала бы
+    # (ни в world, ни серой). doid — своя нода-приёмник, должна быть на связи.
+    settle_s = CFG.get("hopSettleMin", 3) * 60
+    for did, dv in (direct_live or {}).items():
+        dts, dsnr, doid = dv
+        if (dsnr is None or now - dts > settle_s or did in stat
+                or did in world_cand or doid not in stat):
+            continue
+        world_cand[did] = dict(id=did, best=dsnr, heard=int(dts), short=did[-4:],
+                               hears=[(did, doid, dsnr, int(dts))])
+
     # Внешний мир: кого слышит больше стационарных нод и громче; topN 0 = все
     topn = CFG["worldTopN"] or len(world_cand)
     world = sorted(world_cand.values(),
@@ -556,6 +571,13 @@ def build(found, prev=None, xlinks=None):
         direct_seen[nid] = int(now)
     for c in world:  # world = слышно напрямую → обновляем время прямого приёма
         direct_seen[c["id"]] = max(direct_seen.get(c["id"], 0), c["heard"] or int(now))
+    # + прямые приёмы из живого потока пакетов (полнее снимка nodeDB): нода,
+    # услышанная напрямую хоть раз за окно, остаётся прямой, не мигая в «бывшие».
+    # Только с snr — чтобы «недавно прямую» можно было и показать чёрной (плечо);
+    # редкий прямой пакет без rxSnr не трогаем, иначе нода зависла бы невидимой.
+    for did, dv in (direct_live or {}).items():
+        if dv[1] is not None and now - dv[0] <= stale:
+            direct_seen[did] = max(direct_seen.get(did, 0), int(dv[0]))
     hops_nodes = []
     for c in hop_cand.values():
         if c["id"] in direct_ids or not c["via"] or c["hops"] > hop_max:

@@ -174,6 +174,7 @@ def ent_by_iface(interface):
 
 
 rx_acc = {}          # (своя нода, передатчик) -> [(snr, rssi), ...] прямых приёмов
+direct_live = {}     # id -> ts последнего ПРЯМОГО приёма (из живого потока пакетов)
 rx_lock = threading.Lock()
 
 
@@ -194,12 +195,19 @@ def on_receive(packet=None, interface=None):
         try:
             hs, hl = packet.get("hopStart"), packet.get("hopLimit")
             snr = packet.get("rxSnr")
-            if (isinstance(fn, int) and fn != ent.get("num") and snr is not None
-                    and hs is not None and hs == hl):
-                rssi = packet.get("rxRssi")
+            # ПРЯМОЙ приём (hopStart==hopLimit, пакет не ретранслировался).
+            if isinstance(fn, int) and fn != ent.get("num") and hs is not None and hs == hl:
+                # directSeen из живого потока: точный момент прямого приёма (полнее
+                # снимка nodeDB, который сэмплит раз в скан и затирается многохопом).
+                # Храним (ts, snr, своя-нода-приёмник) — чтобы «недавно прямую» ноду
+                # можно было показать ЧЁРНОЙ с живым плечом, а не потерять.
                 with rx_lock:
-                    rx_acc.setdefault((ent.get("id"), f"!{fn:08x}"), []).append(
-                        (float(snr), float(rssi) if rssi is not None else None))
+                    direct_live[f"!{fn:08x}"] = (
+                        time.time(), float(snr) if snr is not None else None, ent.get("id"))
+                    if snr is not None:                # + сигнальная жатва
+                        rx_acc.setdefault((ent.get("id"), f"!{fn:08x}"), []).append(
+                            (float(snr), float(packet.get("rxRssi"))
+                             if packet.get("rxRssi") is not None else None))
         except Exception:
             pass
         dec = (packet or {}).get("decoded") or {}
@@ -827,6 +835,9 @@ def rx_flush():
     with rx_lock:
         acc = dict(rx_acc)
         rx_acc.clear()
+        cut = time.time() - 2 * 3600            # прунинг direct_live (>2ч не нужен)
+        for k in [k for k, v in direct_live.items() if v[0] < cut]:
+            direct_live.pop(k, None)
     ts, rows = int(time.time()), []
     for (node, src), vals in acc.items():
         if not node:
@@ -979,7 +990,9 @@ def topo_loop():
                     xlinks = history.xlink_pairs(hours=CFG.get("xlinkHours", 336))
                 except Exception:
                     pass
-                data = scan.build(found, prev, xlinks=xlinks)
+                with rx_lock:
+                    dlive = dict(direct_live)         # прямые приёмы из живого потока
+                data = scan.build(found, prev, xlinks=xlinks, direct_live=dlive)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 rx_flush()
