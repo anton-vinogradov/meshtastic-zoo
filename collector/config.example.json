@@ -37,5 +37,7 @@
   "geo": {},
   "surveyEnabled": true,
   "surveyEveryS": 900,
-  "surveyMaxChUtil": 25
+  "surveyMaxChUtil": 25,
+  "geocodeEnabled": true,
+  "geocodeEveryS": 86400
 }

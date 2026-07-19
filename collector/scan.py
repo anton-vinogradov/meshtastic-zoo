@@ -668,6 +668,17 @@ def build(found, prev=None):
         flag_position_lies(nodes, out_links, CFG.get("geo") or {})
     except Exception as e:
         log(f"posflag: {e!r}")
+    # Фаза 6-В: подцепить геокод адресного имени GPS-less нодам (пул якорей;
+    # заполняется hub.geocode_loop в data/geo_addr.json)
+    try:
+        addr = json.loads((OUT.parent / "geo_addr.json").read_text())
+        for n in nodes:
+            r = addr.get(n["id"])
+            if r and (n.get("info") or {}).get("lat") is None:
+                n["addr"] = dict(lat=r["lat"], lon=r["lon"], q=r.get("q"),
+                                 verified=bool(r.get("verified")))
+    except Exception:
+        pass
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],

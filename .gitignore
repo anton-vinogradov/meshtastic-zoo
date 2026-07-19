@@ -4,6 +4,8 @@ data/messages.json
 data/channel.json
 data/history.db*
 data/tgmap.json
+data/geo_addr.json
+data/geo_cache.json
 
 # рантайм-конфиг (копируется из config.example.json при установке)
 collector/config.json

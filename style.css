@@ -348,6 +348,7 @@ body:not(.geo-on) #geoctl { display: none; }
 .leaflet-tooltip.geo-lbl.own { color: #cfe0ff; }
 .leaflet-tooltip.geo-lbl.est { color: #d8c4ff; font-weight: 500; }
 .leaflet-tooltip.geo-lbl.sus { color: #ffb3a6; }
+.leaflet-tooltip.geo-lbl.addr { color: #b7ede6; }
 .leaflet-tooltip.geo-lbl .gl-sub { color: #9a9aa0; font-weight: 400; }
 /* Фаза 6-А: предупреждение о сомнительной позиции в панели */
 #panel .pwarn {

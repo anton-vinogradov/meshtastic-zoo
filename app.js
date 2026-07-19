@@ -99,6 +99,7 @@
       geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
       antOmni: "omni", antDir: "directional", antAzim: "az",
       geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
+      geoAddr: "geocoded from name", geoAddrTip: "nodes whose name is a street address, placed via OSM geocoding (solid = GPS-verified, dashed = unverified)",
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
       mapSettings: "Weighted map", mapCliHint: "display options — this browser only",
@@ -160,6 +161,7 @@
       geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
       antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
       geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
+      geoAddr: "геокод по имени", geoAddrTip: "ноды, чьё имя — адрес улицы; ставятся геокодингом OSM (сплошной = сверено по GPS, пунктир — не сверено)",
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
       mapSettings: "Карта весов", mapCliHint: "настройки отображения — только этот браузер",
@@ -1713,6 +1715,7 @@
   // ---- Гео-карта (Фаза 3): реальные GPS-позиции на OSM (Leaflet вендорён локально) ----
   let geoView = localStorage.getItem("mzGeoView") === "1";
   let geoEst = localStorage.getItem("mzGeoEst") !== "0";  // показывать оценённые позиции
+  let geoAddr = localStorage.getItem("mzGeoAddr") !== "0";  // геокод адресных имён (Фаза 6-В)
   let lmap = null, geoLayer = null, geoCfg = {}, placing = null, geoFitted = false;
   const GEO_R = 2500;  // радиус визуализации покрытия антенны, м
   async function loadGeoCfg() {
@@ -1825,6 +1828,19 @@
           { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl est", offset: [0, 2] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
+    // Фаза 6-В: GPS-less ноды с АДРЕСОМ в имени, геокоженные (пул мягких якорей)
+    // — бирюзовым ромбом; проверенные по GPS ярче, мягкие пунктиром
+    if (geoAddr) gnodes.forEach(n => {
+      const a = n.addr;
+      if (!a || n.own || (n.info || {}).lat != null) return;
+      pts.push([a.lat, a.lon]);
+      L.circleMarker([a.lat, a.lon], {
+        radius: 6, color: "#0b0b0d", weight: 1.5, fillColor: "#3fb6a8",
+        fillOpacity: a.verified ? 0.95 : 0.5, dashArray: a.verified ? null : "2 2",
+      }).bindTooltip(`${esc(String(n.label || n.id))} <span class="gl-sub">🏠${esc(a.q || "")}</span>`,
+        { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl addr", offset: [0, 2] })
+        .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
+    });
     // маркеры: соседи (оранжевые) и свои размещённые (синие) — поверх линий, с подписью
     gnodes.forEach(n => {
       const i = n.info || {};
@@ -1871,7 +1887,9 @@
     if (!ctl) return;
     const own = (lastLive && lastLive.nodes || []).filter(n => n.own);
     ctl.innerHTML = `<label class="geo-est-tog" title="${esc(t("geoEstTip"))}">
-        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>`
+        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>
+      <label class="geo-est-tog" title="${esc(t("geoAddrTip"))}">
+        <input type="checkbox" id="geo-addr-cb"${geoAddr ? " checked" : ""}> ${esc(t("geoAddr"))}</label>`
       + `<div class="geoctl-h">${esc(t("geoPlaceHint"))}</div>` + own.map(n => {
       const g = geoCfg[n.id] || {}, placed = g.lat != null;
       return `<div class="geo-node" data-id="${esc(n.id)}">
@@ -1889,6 +1907,11 @@
     ctl.querySelector("#geo-est-cb")?.addEventListener("change", (e) => {
       geoEst = e.target.checked;
       localStorage.setItem("mzGeoEst", geoEst ? "1" : "0");
+      renderGeo();
+    });
+    ctl.querySelector("#geo-addr-cb")?.addEventListener("change", (e) => {
+      geoAddr = e.target.checked;
+      localStorage.setItem("mzGeoAddr", geoAddr ? "1" : "0");
       renderGeo();
     });
     ctl.querySelectorAll(".geo-node").forEach(row => {

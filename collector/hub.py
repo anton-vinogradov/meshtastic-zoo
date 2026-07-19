@@ -28,12 +28,15 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import scan  # noqa: E402 — соседний модуль: CFG, build(), log()
 import history  # noqa: E402 — лог истории в SQLite (графики/uptime/алерты)
+import geocode  # noqa: E402 — геокодинг адресных имён нод (Фаза 6-В)
 
 from pubsub import pub  # noqa: E402
 import meshtastic.tcp_interface  # noqa: E402
 
 CFG = scan.CFG
 OUT_LIVE = ROOT.parent / "data" / "live.json"
+GEO_ADDR = ROOT.parent / "data" / "geo_addr.json"   # {id: {lat,lon,q,verified,name}}
+GEO_CACHE = ROOT.parent / "data" / "geo_cache.json"  # сырой кэш Nominatim
 OUT_MSGS = ROOT.parent / "data" / "messages.json"
 OUT_CHAN = ROOT.parent / "data" / "channel.json"
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
@@ -892,6 +895,57 @@ def survey_loop():
             log(f"survey: {e!r}")
 
 
+def geocode_loop():
+    """Геокодинг адресных имён нод (Фаза 6-В, пул мягких якорей): раз в сутки
+    превращаем «Pulkovskoe 65» → координаты через Nominatim. Кэш персистентный,
+    новые имена дёргаем по 1/сек. Верификация по GPS, если нода его вещает."""
+    time.sleep(20)  # дать первому скану наполнить live.json/имена
+    while True:
+        try:
+            if CFG.get("geocodeEnabled", True):
+                _do_geocode()
+        except Exception as e:
+            log(f"geocode: {e!r}")
+        time.sleep(CFG.get("geocodeEveryS", 86400))
+
+
+def _do_geocode():
+    try:
+        data = json.loads(OUT_LIVE.read_text())
+    except Exception:
+        return
+    try:
+        addr = json.loads(GEO_ADDR.read_text())
+    except Exception:
+        addr = {}
+    names = (data.get("meta") or {}).get("names") or {}
+    byid = {n["id"]: n for n in data.get("nodes", []) or []}
+    new = 0
+    for nid, nm in names.items():
+        if nid in addr:                       # уже пробовали — не дёргаем повторно
+            continue
+        if not geocode.normalize(nm):         # на адрес не похоже — без сети
+            continue
+        g = geocode.geocode(nm, str(GEO_CACHE))
+        if not g:
+            addr[nid] = None                  # запомнить «пусто», чтобы не повторять
+            new += 1
+            continue
+        rec = dict(lat=g["lat"], lon=g["lon"], q=g["q"], name=nm,
+                   place=g.get("place", False), ts=int(time.time()), verified=False)
+        info = (byid.get(nid) or {}).get("info") or {}
+        if info.get("lat") is not None:       # есть GPS — сверяем геокод с ним
+            d = geocode._hav_km((info["lat"], info["lon"]), (g["lat"], g["lon"]))
+            rec["gpsKm"] = round(d, 2)
+            rec["verified"] = d < 0.6
+        addr[nid] = rec
+        new += 1
+    if new:
+        atomic_write(GEO_ADDR, json.dumps(addr, ensure_ascii=False, indent=1))
+        got = sum(1 for v in addr.values() if v)
+        log(f"🏠 геокодинг: +{new} имён, всего с координатами {got}")
+
+
 def topo_loop():
     while True:
         try:
@@ -1221,6 +1275,7 @@ def main():
     threading.Thread(target=topo_loop, daemon=True).start()
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
     threading.Thread(target=survey_loop, daemon=True).start()   # жатва чужих звеньев
+    threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
 
