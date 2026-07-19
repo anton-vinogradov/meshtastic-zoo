@@ -22,6 +22,16 @@
     .nm { font-weight:600; min-width:82px; }
     .note { color:var(--muted); flex:1; font-size:13px; }
     .age { color:var(--muted); font-size:12px; white-space:nowrap; }
+    /* карточка воркера с профильным графиком: точка | имя+заметка | график */
+    .wcard { align-items:stretch; flex-wrap:wrap; }
+    .wcard .dot { margin-top:5px; }
+    .wmain { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .wtop { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+    .wgraph { width:158px; flex:none; align-self:center; }
+    .wg-lbl { font-size:11.5px; color:var(--muted); margin-bottom:1px; text-align:right; }
+    .wg-lbl b { color:var(--text); font-weight:600; }
+    .wg-lbl .rate { color:var(--green); }
+    @media(max-width:520px){ .wgraph { width:100%; margin-left:19px; } .wg-lbl { text-align:left; } }
     .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
     .tile { background:var(--panel); border:1px solid var(--stroke); border-radius:10px; padding:10px 12px; }
     .tile .v { font-size:20px; font-weight:600; }
@@ -41,9 +51,9 @@
   <div id="upd"></div>
   <h1>meshtastic-zoo · статус</h1>
   <div class="sub" id="head">загрузка…</div>
-  <h2>Загруженность и тренды <span class="meta" style="text-transform:none;letter-spacing:0">· 6ч</span></h2>
+  <h2>Загрузка канала <span class="meta" style="text-transform:none;letter-spacing:0">· 6ч · чем тише, тем чаще воркеры выходят в эфир</span></h2>
   <div id="graphs"></div>
-  <h2>Воркеры</h2><div id="workers"></div>
+  <h2>Воркеры <span class="meta" style="text-transform:none;letter-spacing:0">· профиль за 6ч</span></h2><div id="workers"></div>
   <h2>Свои ноды</h2><div id="nodes"></div>
   <h2>Данные</h2><div class="grid" id="data"></div>
   <div class="sub" style="margin-top:20px"><a href="index.html">← на карту</a></div>
@@ -54,6 +64,28 @@
     const LABEL = { keeper:"keeper · соединения", writer:"writer · опрос→кеш", reader:"reader · кеш→карта",
       pruner:"pruner · чистка", trace:"trace · трассировка", keyfetch:"keyfetch · ключи",
       geocode:"geocode · адреса", tg:"tg · telegram" };
+    // профильная метрика воркера: столбец истории + подпись + цвет. down=«полезно вниз»
+    // (keyfetch добывает ключи → keyless падает), cum=накопительный счётчик.
+    const METRIC = {
+      writer:   { k:"cache",       lbl:"узлов",     unit:"/ч",        color:"#35c98e" },
+      reader:   { k:"live",        lbl:"на карте",  unit:"/ч",        color:"#6ea8ff" },
+      trace:    { k:"traces_done", lbl:"трасс",     unit:"/ч", cum:1, color:"#b98bff" },
+      keyfetch: { k:"keyless",     lbl:"без ключа", unit:"/ч добыто", color:"#e0a03c", down:1 },
+    };
+    let hist = [];  // последний ряд метрик (обновляет tickHist, рисует tick)
+    const spanH = () => hist.length < 2 ? 0.05 : Math.max(0.05, (hist[hist.length-1].ts - hist[0].ts) / 3600);
+    const fmt = (v) => v == null ? "—" : Number.isInteger(v) ? v : (+v).toFixed(1);
+    // спарклайн + подпись профильной метрики воркера (или "" если данных нет)
+    const workerGraph = (n) => {
+      const m = METRIC[n]; if (!m || hist.length < 2) return "";
+      const vals = hist.map(p => p[m.k]), clean = vals.filter(v => v != null);
+      if (clean.length < 2) return "";
+      const cur = clean[clean.length-1], r = (clean[clean.length-1] - clean[0]) / spanH();
+      const shown = m.down ? Math.max(0, -r) : r;      // темп в «полезную» сторону
+      const rlbl = `${shown >= 0 ? "+" : ""}${shown.toFixed(1)}${m.unit}`;
+      return `<div class="wgraph"><div class="wg-lbl">${m.lbl} <b>${fmt(cur)}</b> · <span class="rate">${rlbl}</span></div>
+        ${spark(vals, { h:30, color:m.color })}</div>`;
+    };
     const age = (s) => s == null ? "—" : s < 60 ? Math.round(s)+"с" : s < 3600 ? Math.round(s/60)+"м" :
       s < 86400 ? (s/3600).toFixed(1)+"ч" : (s/86400).toFixed(1)+"д";
     const cls = (a, w) => a == null ? "o" : a < w ? "g" : a < w*3 ? "a" : "r";
@@ -73,10 +105,11 @@
       const rows = ORDER.filter(n => s.workers[n]).map(n => { seen.add(n); return [n, s.workers[n]]; })
         .concat(Object.entries(s.workers).filter(([n]) => !seen.has(n)));
       el("workers").innerHTML = rows.map(([n, w]) =>
-        `<div class="card"><span class="dot ${cls(w.age, WARN[n] || 600)}"></span>
-          <span class="nm">${LABEL[n] || n}</span>
-          <span class="note">${w.note || ""}</span>
-          <span class="age">${age(w.age)} назад</span></div>`).join("") || '<div class="meta">нет данных</div>';
+        `<div class="card wcard"><span class="dot ${cls(w.age, WARN[n] || 600)}"></span>
+          <div class="wmain"><div class="wtop"><span class="nm">${LABEL[n] || n}</span>
+            <span class="age">${age(w.age)} назад</span></div>
+            <div class="note">${w.note || ""}</div></div>
+          ${workerGraph(n)}</div>`).join("") || '<div class="meta">нет данных</div>';
 
       // свои ноды
       el("nodes").innerHTML = (s.nodes || []).map(n => {
@@ -122,29 +155,15 @@
       let hh;
       try { hh = (await (await fetch("/api/status/history?hours=6", { cache: "no-store" })).json()).series || []; }
       catch { return; }
-      if (hh.length < 2) { el("graphs").innerHTML = '<div class="meta">графики появятся через несколько минут накопления</div>'; return; }
-      const col = k => hh.map(p => p[k]);
-      const spanH = Math.max(0.05, (hh[hh.length - 1].ts - hh[0].ts) / 3600);
-      const fmt = v => v == null ? "—" : Number.isInteger(v) ? v : (+v).toFixed(1);
-      const last = k => { const c = col(k).filter(v => v != null); return c.length ? c[c.length - 1] : null; };
-      const rate = k => { const c = col(k).filter(v => v != null); return c.length < 2 ? 0 : (c[c.length - 1] - c[0]) / spanH; };
-      const big = (title, k, unit, color) =>
-        `<div class="tile grf"><div class="k">${title}</div>${spark(col(k), { h: 56, color })}
-          <div class="v">${fmt(last(k))}${unit || ""}</div></div>`;
-      const trend = (title, k, color) => { const r = rate(k);
-        return `<div class="tile"><div class="v">${fmt(last(k))}</div><div class="k">${title}</div>
-          ${spark(col(k), { h: 26, color, fill: false })}
-          <div class="rate">${r >= 0 ? "+" : ""}${r.toFixed(1)}/ч</div></div>`; };
+      const wasEmpty = hist.length < 2;
+      hist = hh;  // кэш для профильных графиков в карточках воркеров (их рисует tick)
+      if (hh.length < 2) { el("graphs").innerHTML = '<div class="meta">график появится через несколько минут накопления</div>'; return; }
+      const cur = hh.map(p => p.chutil).filter(v => v != null).slice(-1)[0];
       el("graphs").innerHTML =
-        `<div class="grid2">${big("канал (chUtil %)", "chutil", "%", "#e0a03c")}${big("узлов на карте", "live", "", "#6ea8ff")}</div>
-         <div class="grid">
-           ${trend("в кеше", "cache", "#35c98e")}
-           ${trend("подтв. соседей", "tracenbr", "#35c98e")}
-           ${trend("без ключа", "keyless", "#e0533c")}
-           ${trend("трассировок", "traces_done", "#b98bff")}
-           ${trend("оценок est", "est", "#b98bff")}
-           ${trend("подозр. позиций", "possus", "#e0533c")}
-         </div>`;
+        `<div class="tile grf"><div class="k">канал (chUtil %) · вход дросселя воркеров</div>
+          ${spark(hh.map(p => p.chutil), { h: 60, color: "#e0a03c" })}
+          <div class="v">${cur == null ? "—" : (+cur).toFixed(1)}%</div></div>`;
+      if (wasEmpty) tick();  // первый приход истории — сразу дорисовать графики воркеров
     }
 
     tick(); tickHist();

@@ -1160,10 +1160,11 @@
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${sections}
-        <div class="ptrace"><div class="trow"><button class="do-trace">${t("traceBtn")}</button>
+        <div class="ptrace"><div class="trow"><button class="do-trace"${traceRunning[id] ? " disabled" : ""}>${t("traceBtn")}</button>
           ${owners.length ? `<select class="tfrom" title="${t("traceFromWhich")}">${owners.map(o =>
             `<option value="${esc(o.id)}"${lastTrace[id] && lastTrace[id][0] && lastTrace[id][0].id === o.id ? " selected" : ""}>${esc(o.short || o.label)}</option>`).join("")}</select>` : ""}</div>
-          <div class="trace-out">${lastTrace[id] ? traceHtml(lastTrace[id]) : ""}</div></div>
+          <div class="trace-out">${traceRunning[id] ? `<span class="trace-run">${esc(t("traceRunning"))}</span>`
+            : (lastTrace[id] ? traceHtml(lastTrace[id]) : "")}</div></div>
         ${msgHtml}
         ${composeHtml}
         ${legs ? `<div class="plegs"><b>${t("legs")}</b>${legs}</div>` : ""}`;
@@ -1180,45 +1181,37 @@
       }
       // Трассировка (Фаза 4, ч.3): активная проба — шлём запрос, поллим ответ с путём
       const traceBtn = panel.querySelector(".do-trace");
+      // .trace-out/.do-trace перезапрашиваем каждый раз: если панель успела
+      // пере-собраться (смена статусов сообщений), пишем уже в новые узлы DOM
+      const setTraceOut = (html) => { const o = panel.querySelector(".trace-out"); if (o) o.innerHTML = html; };
+      const enableTrace = () => { const b = panel.querySelector(".do-trace"); if (b) b.disabled = false; };
       if (traceBtn) traceBtn.onclick = async () => {
-        const out = panel.querySelector(".trace-out");
         const sel = panel.querySelector(".tfrom");   // от какой своей ноды (по умолч. ближайшая)
         const ownerId = sel ? sel.value
           : ((lastLive && lastLive.nodes || []).find(o => o.own && o.online) || {}).id;
-        if (!ownerId) { out.textContent = t("traceNoNode"); return; }
+        if (!ownerId) { setTraceOut(`<span>${esc(t("traceNoNode"))}</span>`); return; }
         traceBtn.disabled = true;
-        out.innerHTML = `<span class="trace-run">${esc(t("traceRunning"))}</span>`;
+        traceRunning[id] = true;                 // индикатор переживёт пере-сборку панели
+        setTraceOut(`<span class="trace-run">${esc(t("traceRunning"))}</span>`);
         try { await fetch("/api/trace", { method: "POST", body: JSON.stringify({ node: ownerId, to: id }) }); } catch { }
         for (let k = 0; k < 9; k++) {
           await new Promise(r => setTimeout(r, 1800));
-          if (openId !== id) return;
+          if (openId !== id) { delete traceRunning[id]; return; }
           let d = null;
           try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
           if (d && d.trace) {
             lastTrace[id] = d.trace.path;         // пережить пере-рендер панели
-            out.innerHTML = traceHtml(d.trace.path);
-            traceBtn.disabled = false;
+            delete traceRunning[id];
+            setTraceOut(traceHtml(d.trace.path));
+            enableTrace();
             return;
           }
           if (d && !d.pending) break;
         }
-        out.textContent = t("traceFail");
-        traceBtn.disabled = false;
+        delete traceRunning[id];
+        setTraceOut(`<span>${esc(t("traceFail"))}</span>`);
+        enableTrace();
       };
-      // после F5 клиентский кеш пуст, но бэкенд хранит последний маршрут в
-      // traces[id] — подтянем и покажем, чтобы трассировка не пропадала
-      if (traceBtn && !lastTrace[id]) (async () => {
-        let d = null;
-        try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
-        if (d && d.trace && openId === id && !lastTrace[id]) {
-          lastTrace[id] = d.trace.path;
-          const out = panel.querySelector(".trace-out");
-          if (out) out.innerHTML = traceHtml(d.trace.path);
-          // селектор «от кого» → реальный источник этого маршрута (path[0])
-          const sel = panel.querySelector(".tfrom"), src = (d.trace.path[0] || {}).id;
-          if (sel && src && [...sel.options].some(o => o.value === src)) sel.value = src;
-        }
-      })();
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
       (async () => {
         const body = panel.querySelector("#hist-body");
@@ -1417,7 +1410,10 @@
       mailEl.hidden = true;
     }
 
-    if (openId) showPanel(openId, forcePanel); // обновить открытую панель свежими данными
+    // Панель узла НЕ пересобираем на каждом тике карты — иначе затирается показанная
+    // или идущая трассировка (и любой ввод в панели). Обновляем её только по явному
+    // действию пользователя (forcePanel: отправка/реакция/смена языка/клик по почте).
+    if (openId && forcePanel) showPanel(openId, true);
     forcePanel = false;
   }
 
@@ -1431,7 +1427,8 @@
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
   let lastMapSig = "";   // сигнатура визуала карты — не пересобираем DOM зря (антимигание)
-  const lastTrace = {};  // id → путь последней трассировки (переживает пере-рендер панели)
+  const lastTrace = {};    // id → путь последней трассировки (переживает пере-рендер панели)
+  const traceRunning = {}; // id → true, пока идёт активная проба (чтобы не терять индикатор)
   let applySel = () => {}, hlPeer = () => {}, openPanel = () => {}; // ставятся в render
   let chan = [], chanSig = "", chanDraft = "";  // черновик канала переживает ре-рендеры
   async function refreshMsgs() {
@@ -2231,7 +2228,9 @@
   async function msgTick() {
     await refreshMsgs();
     const sig = msgs.map(m => m.id + (m.read ? "1" : "0") + (m.status || "")).join(",");
-    if (sig !== msgSig && lastLive) { msgSig = sig; render(lastLive); }
+    // статусы личных сообщений изменились — обновляем и карту (маркеры почты), и
+    // открытую панель (галочки доставки); трасса переживёт это через lastTrace/traceRunning
+    if (sig !== msgSig && lastLive) { msgSig = sig; forcePanel = true; render(lastLive); }
     await refreshChan();
   }
 

@@ -55,6 +55,7 @@ channel = []   # публичный канал: [{id, pid, frm, frmName, text, t
 # (ответ-цитата в Telegram на зеркалированный DM → отправка в меш от той ноды)
 tgmap = {"offset": 0, "map": {}}
 pending_traces = set()  # id адресатов, чей traceroute-ответ ждём (Фаза 4, ч.3)
+manual_pending = set()  # из них — запрошенные из интерфейса (их результат НЕ персистим)
 traces = {}             # id → {path:[{id,snr}], ts} — результат последней трассировки
 START_TS = time.time()  # старт hub — для uptime на странице статуса
 worker_beats = {}       # имя воркера → {ts, note}: пульс для /api/status
@@ -120,10 +121,13 @@ def load_traces():
 
 def save_traces():
     with lock:
-        if len(traces) > 500:            # держим последние ~500 по времени
+        if len(traces) > 500:            # держим последние ~500 по времени (в памяти)
             for k in sorted(traces, key=lambda k: traces[k].get("ts", 0))[:-500]:
                 del traces[k]
-        atomic_write(OUT_TRACES, json.dumps(traces, ensure_ascii=False))
+        # на диск — только авто-survey (для traceNbr через рестарт); ручные, запрошенные
+        # из интерфейса, живут лишь в памяти этой сессии и не персистятся
+        persist = {k: v for k, v in traces.items() if not v.get("manual")}
+        atomic_write(OUT_TRACES, json.dumps(persist, ensure_ascii=False))
 
 
 def load_tgmap():
@@ -322,8 +326,12 @@ def on_receive(packet=None, interface=None):
             _traces_done += 1
             with lock:
                 pending_traces.discard(frm)
-                traces[frm] = {"path": path, "ts": int(time.time())}
-            save_traces()   # персист: переживёт рестарт hub и обновление сайта
+                is_manual = frm in manual_pending   # запрошена из интерфейса?
+                manual_pending.discard(frm)
+                traces[frm] = {"path": path, "ts": int(time.time()),
+                               **({"manual": True} if is_manual else {})}
+            if not is_manual:
+                save_traces()   # персист только авто-survey (переживёт рестарт hub)
             log(f"🧭 traceroute {frm}: {' → '.join(p['id'] for p in path)}")
             return
         if dec.get("portnum") == "NEIGHBORINFO_APP":
@@ -1565,6 +1573,7 @@ class Handler(SimpleHTTPRequestHandler):
             def _trace():
                 with lock:
                     pending_traces.add(to)
+                    manual_pending.add(to)   # результат этой пробы не персистим
                     traces.pop(to, None)
                 try:
                     ent["iface"].sendTraceRoute(to, 7)  # блокируется до ответа/таймаута
