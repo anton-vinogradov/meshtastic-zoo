@@ -397,6 +397,12 @@ body:not(.geo-on) #geoctl { display: none; }
   display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
   color: var(--muted); margin-bottom: 7px;
 }
+/* смысловая секция настроек — карточка как у «Карты весов» */
+#settings .sgroup {
+  border: 1px solid var(--zone-stroke); border-radius: 8px;
+  padding: 9px 11px 3px; margin-bottom: 13px; background: rgba(255, 255, 255, .03);
+}
+#settings .sgroup > .shint { margin-top: 0; margin-bottom: 9px; }
 #settings .srow.stog {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px; margin-bottom: 6px; cursor: pointer; user-select: none;
@@ -538,10 +544,14 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .ptrace { margin-top: 10px; }
 #panel .do-trace { background: rgba(255, 255, 255, .08); border: 0; border-radius: 7px; color: var(--text); cursor: pointer; padding: 4px 10px; font-size: 12.5px; }
 #panel .do-trace:disabled { opacity: .6; cursor: default; }
-#panel .trace-out { margin-top: 6px; font-size: 12px; line-height: 1.9; }
-#panel .trace-out .thop { background: rgba(255, 255, 255, .06); border-radius: 5px; padding: 1px 5px; white-space: nowrap; }
-#panel .trace-out .tarrow { color: var(--muted); margin: 0 3px; }
-#panel .trace-out .tsnr { color: #7bb0ff; }
+#panel .trace-out { margin-top: 6px; font-size: 12px; }
+#panel .trace-out .tpath { display: flex; flex-direction: column; gap: 3px; }
+#panel .trace-out .thop { display: flex; align-items: baseline; gap: 6px;
+  background: rgba(255, 255, 255, .06); border-radius: 5px; padding: 3px 8px; }
+#panel .trace-out .thop:not(:first-child) { margin-left: 12px; }
+#panel .trace-out .tname { font-weight: 500; }
+#panel .trace-out .tarrow { color: var(--muted); }
+#panel .trace-out .tsnr { color: #7bb0ff; margin-left: auto; white-space: nowrap; }
 #panel .trace-out .trace-run { color: var(--muted); }
 /* график «узлов на карте» во времени (в настройках) */
 #settings .nn-body { margin-top: 4px; }

@@ -122,11 +122,14 @@
       failedSend: "Failed to send:", failedSave: "Failed to save:",
       mapAria: "Mesh network map", language: "Language",
       fSubnets: "Site subnets & colors", fFloor: "0% quality at SNR, dB",
-      fIdeal: "100% quality at SNR, dB", fKeep: "Keep a silent neighbor, hours",
+      fIdeal: "100% quality at SNR, dB", fKeep: "Cache/history keeps a node, hours",
       fDirect: "Direct neighbor stays, hours", fFormer: "Former (grey) stays, hours",
       fMap: "Poll nodes, seconds",
       fDisc: "New-node discovery, seconds", fRoam: "Roaming nodes (id, one per line)",
       fFragile: "Slow subnets — polled lightly (prefix per line)",
+      setSigScale: "Signal scale", setRetention: "Node retention on the map",
+      setRetentionHint: "Node timeline: black (direct neighbor) → grey (former) → drops off. The first two fields set how long a node stays black then grey after the last direct contact; the third is how long the cache keeps it for the history chart.",
+      setPolling: "Polling", setSpecialSub: "Special subnets",
       fSubColor: "Color of subnet {0}", addSubnet: "add subnet", remove: "remove",
       secHist: "History", histReach: "Reachability 24h", histHeard: "Heard 24h",
       histBatt: "Battery 24h", histChUtil: "Channel util 24h", histNone: "not enough history yet",
@@ -189,11 +192,14 @@
       failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
       mapAria: "Карта mesh-сети", language: "Язык",
       fSubnets: "Подсети площадок и цвета", fFloor: "0% качества при SNR, дБ",
-      fIdeal: "100% качества при SNR, дБ", fKeep: "Держать молчащего соседа, часов",
+      fIdeal: "100% качества при SNR, дБ", fKeep: "Кэш/история: держать ноду, часов",
       fDirect: "Прямой сосед держится, часов", fFormer: "Бывший (серый) держится, часов",
       fMap: "Опрос нод, секунд",
       fDisc: "Поиск новых нод, секунд", fRoam: "Кочующие ноды (id, по одному)",
       fFragile: "Медленные подсети — лёгкий опрос (префикс на строке)",
+      setSigScale: "Шкала сигнала", setRetention: "Удержание нод на карте",
+      setRetentionHint: "Таймлайн ноды: чёрная (прямой сосед) → серая (бывший) → уходит с карты. Первые два поля задают, сколько нода держится чёрной, затем серой после последнего прямого приёма; третье — сколько кэш хранит её для графика истории.",
+      setPolling: "Опрос", setSpecialSub: "Особые подсети",
       fSubColor: "Цвет подсети {0}", addSubnet: "добавить подсеть", remove: "удалить",
       secHist: "История", histReach: "Достижимость 24ч", histHeard: "Слышно 24ч",
       histBatt: "Батарея 24ч", histChUtil: "Загрузка эфира 24ч", histNone: "истории пока мало",
@@ -1093,9 +1099,11 @@
           let d = null;
           try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
           if (d && d.trace) {
-            out.innerHTML = d.trace.path.map(p =>
-              `<span class="thop">${esc(lbl(p.id))}${p.snr != null ? ` <span class="tsnr">${fmtSnr(p.snr)}dB</span>` : ""}</span>`)
-              .join('<span class="tarrow">→</span>');
+            out.innerHTML = `<div class="tpath">` + d.trace.path.map((p, i) =>
+              `<div class="thop">${i ? `<span class="tarrow">↳</span>` : ""}`
+              + `<span class="tname">${esc(lbl(p.id))}</span>`
+              + `${p.snr != null ? `<span class="tsnr">${fmtSnr(p.snr)} dB</span>` : ""}</div>`)
+              .join("") + `</div>`;
             traceBtn.disabled = false;
             return;
           }
@@ -1661,16 +1669,21 @@
   });
 
   // ---- Настройки (⚙): читаются и сохраняются через hub ----
-  const SET_FIELDS = [
-    ["snrScale.floor", "fFloor", "num"],
-    ["snrScale.ideal", "fIdeal", "num"],
-    ["directWindowH", "fDirect", "num"],
-    ["formerWindowH", "fFormer", "num"],
-    ["worldMaxAgeH", "fKeep", "num"],
-    ["topoEveryS", "fMap", "num"],
-    ["rescanS", "fDisc", "num"],
-    ["mobile", "fRoam", "area"],
-    ["fragile", "fFragile", "area"],
+  // Настройки сгруппированы по смыслу: заголовок секции + (опц.) подсказка + поля.
+  const SET_SECTIONS = [
+    { title: "setSigScale", fields: [
+      ["snrScale.floor", "fFloor", "num"],
+      ["snrScale.ideal", "fIdeal", "num"]] },
+    { title: "setRetention", hint: "setRetentionHint", fields: [
+      ["directWindowH", "fDirect", "num"],
+      ["formerWindowH", "fFormer", "num"],
+      ["worldMaxAgeH", "fKeep", "num"]] },
+    { title: "setPolling", fields: [
+      ["topoEveryS", "fMap", "num"],
+      ["rescanS", "fDisc", "num"]] },
+    { title: "setSpecialSub", fields: [
+      ["mobile", "fRoam", "area"],
+      ["fragile", "fFragile", "area"]] },
   ];
   const setEl = document.getElementById("settings");
   const sfId = (k) => "sf-" + k.replace(".", "-");
@@ -1728,11 +1741,16 @@
       + `<label class="srow"><span>${t("language")}</span>
         <select id="sf-lang">${langOpt("en", "English")}${langOpt("ru", "Русский")}</select></label>`
       + subnetEditor +
-      SET_FIELDS.map(([k, label, kind]) => kind === "area"
-        ? `<label class="srow"><span>${t(label)}</span>
-            <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
-        : `<label class="srow"><span>${t(label)}</span>
-            <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
+      SET_SECTIONS.map(sec =>
+        `<div class="sgroup"><b class="ssub">${t(sec.title)}</b>`
+        + (sec.hint ? `<div class="shint">${t(sec.hint)}</div>` : "")
+        + sec.fields.map(([k, label, kind]) => kind === "area"
+          ? `<label class="srow"><span>${t(label)}</span>
+              <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
+          : `<label class="srow"><span>${t(label)}</span>
+              <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
+        ).join("")
+        + `</div>`
       ).join("") +
       `<div class="srow scol"><span>${t("nodeChartTitle", Math.round(cfg.worldMaxAgeH || 24))}</span>
         <div id="nn-body" class="nn-body">…</div></div>
