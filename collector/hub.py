@@ -170,6 +170,10 @@ def ent_by_iface(interface):
     return None, None
 
 
+rx_acc = {}          # (своя нода, передатчик) -> [(snr, rssi), ...] прямых приёмов
+rx_lock = threading.Lock()
+
+
 def on_receive(packet=None, interface=None):
     try:
         ip, ent = ent_by_iface(interface)
@@ -181,6 +185,20 @@ def on_receive(packet=None, interface=None):
         fn = packet.get("from")
         if isinstance(fn, int):
             try_deliver_waiting(f"!{fn:08x}", ent)
+        # Сигнальная жатва (фундамент геолокации): копим ПРЯМЫЕ приёмы
+        # (hopStart==hopLimit — пакет не ретранслировался, rxSnr/rxRssi
+        # относятся к самому передатчику) — сбрасываются в history в topo_loop
+        try:
+            hs, hl = packet.get("hopStart"), packet.get("hopLimit")
+            snr = packet.get("rxSnr")
+            if (isinstance(fn, int) and fn != ent.get("num") and snr is not None
+                    and hs is not None and hs == hl):
+                rssi = packet.get("rxRssi")
+                with rx_lock:
+                    rx_acc.setdefault((ent.get("id"), f"!{fn:08x}"), []).append(
+                        (float(snr), float(rssi) if rssi is not None else None))
+        except Exception:
+            pass
         dec = (packet or {}).get("decoded") or {}
         if dec.get("portnum") == "ROUTING_APP":
             # квитанция: матчим requestId с id отправленных пакетов
@@ -218,10 +236,6 @@ def on_receive(packet=None, interface=None):
             # ответ на нашу трассировку: путь + SNR по хопам (Фаза 4, ч.3)
             fn, tn = packet.get("from"), packet.get("to")
             frm = f"!{fn:08x}" if isinstance(fn, int) else str(fn)
-            with lock:
-                waited = frm in pending_traces
-            if not waited:
-                return
             try:
                 from meshtastic import mesh_pb2
                 import google.protobuf.json_format as jf
@@ -233,6 +247,29 @@ def on_receive(packet=None, interface=None):
                 ad = {}
             nums = [tn] + [int(x) for x in ad.get("route", [])] + [fn]  # мы → хопы → цель
             snrs = ad.get("snrTowards", [])
+            # Жатва ЧУЖИХ звеньев (Фаза 6, фундамент): в маршруте видны связи
+            # соседей МЕЖДУ СОБОЙ (nums[i]→nums[i+1] услышан на snrs[i]), которых
+            # нет в nodeDB. Пишем ЛЮБУЮ подслушанную RouteDiscovery (и не нашу),
+            # обе стороны (routeBack/snrBack) — каждое звено от узла с известной
+            # позицией расширяет геометрию геолокации.
+            try:
+                hx, hts = [], int(time.time())
+                for seq, sl in ((nums, snrs),
+                                ([fn] + [int(x) for x in ad.get("routeBack", [])] + [tn],
+                                 ad.get("snrBack", []))):
+                    for i in range(len(seq) - 1):
+                        if (i < len(sl) and sl[i] != -128 and isinstance(seq[i], int)
+                                and isinstance(seq[i + 1], int)):
+                            hx.append((hts, f"!{seq[i]:08x}", f"!{seq[i + 1]:08x}",
+                                       round(sl[i] / 4, 2), "tr"))
+                if hx:
+                    history.record_xlinks(hx)
+            except Exception:
+                pass
+            with lock:
+                waited = frm in pending_traces
+            if not waited:
+                return
             path = []
             for i, num in enumerate(nums):
                 e = {"id": f"!{num:08x}" if isinstance(num, int) else str(num)}
@@ -243,6 +280,29 @@ def on_receive(packet=None, interface=None):
                 pending_traces.discard(frm)
                 traces[frm] = {"path": path, "ts": int(time.time())}
             log(f"🧭 traceroute {frm}: {' → '.join(p['id'] for p in path)}")
+            return
+        if dec.get("portnum") == "NEIGHBORINFO_APP":
+            # пассивная жатва: часть нод сама вещает список соседей с SNR —
+            # бесплатные (0 эфира с нашей стороны) чужие звенья для геолокации
+            try:
+                ni = dec.get("neighborinfo")
+                if not ni:
+                    from meshtastic import mesh_pb2
+                    import google.protobuf.json_format as jf
+                    m = mesh_pb2.NeighborInfo()
+                    m.ParseFromString(dec.get("payload") or b"")
+                    ni = jf.MessageToDict(m)
+                rep = ni.get("nodeId")
+                hts, hx = int(time.time()), []
+                for nb in ni.get("neighbors", []) or []:
+                    nid, s = nb.get("nodeId"), nb.get("snr")
+                    if isinstance(rep, int) and isinstance(nid, int) and s is not None:
+                        hx.append((hts, f"!{nid:08x}", f"!{rep:08x}", float(s), "ni"))
+                if hx:
+                    history.record_xlinks(hx)
+                    log(f"🌐 neighborinfo !{rep:08x}: {len(hx)} звеньев")
+            except Exception:
+                pass
             return
         if dec.get("portnum") != "TEXT_MESSAGE_APP":
             return
@@ -758,6 +818,80 @@ def hist_tick(data):
             log(f"hist-prune: {e!r}")
 
 
+def rx_flush():
+    """Сброс сигнального аккумулятора в history: агрегат (n, avg, sd, rssi) на
+    пару приёмник×передатчик за прошедший интервал. sd — маркер LOS/NLOS."""
+    with rx_lock:
+        acc = dict(rx_acc)
+        rx_acc.clear()
+    ts, rows = int(time.time()), []
+    for (node, src), vals in acc.items():
+        if not node:
+            continue
+        sn = [v[0] for v in vals]
+        rs = [v[1] for v in vals if v[1] is not None]
+        n = len(sn)
+        avg = sum(sn) / n
+        sd = (sum((x - avg) ** 2 for x in sn) / n) ** 0.5 if n > 1 else 0.0
+        rows.append((ts, node, src, n, round(avg, 2), round(sd, 2),
+                     round(sum(rs) / len(rs), 1) if rs else None))
+    try:
+        history.record_rx(rows)
+    except Exception as e:
+        log(f"rx_flush: {e!r}")
+
+
+_survey_last = {}  # id -> ts последней фоновой трассировки
+
+
+def survey_loop():
+    """Фоновая жатва чужих звеньев (Фаза 6, фундамент): редкий traceroute по
+    кругу. Активная проба эфира — бережно: раз в surveyEveryS (дефолт 15 мин),
+    пропуск при загруженном канале, один узел за такт, очередь по давности."""
+    while True:
+        time.sleep(max(120, CFG.get("surveyEveryS", 900)))
+        try:
+            if not CFG.get("surveyEnabled", True):
+                continue
+            try:
+                data = json.loads(OUT_LIVE.read_text())
+            except Exception:
+                continue
+            # эфир занят — пропускаем такт (не добавляем трафика в час пик)
+            ch = [(n.get("info") or {}).get("chUtil")
+                  for n in data.get("nodes", []) if n.get("own")]
+            ch = [c for c in ch if c is not None]
+            if ch and max(ch) > CFG.get("surveyMaxChUtil", 25):
+                continue
+            cand = [n["id"] for n in data.get("nodes", [])
+                    if not n.get("own") and n.get("id")]
+            if not cand:
+                continue
+            now = time.time()
+            target = min(cand, key=lambda i: _survey_last.get(i, 0))
+            if now - _survey_last.get(target, 0) < 6 * 3600:
+                continue  # весь круг опрошен недавно — не душним
+            _survey_last[target] = now
+            sender = best_sender_for(target)
+            ent = ent_by_id(sender) if sender else None
+            if not ent:
+                with lock:
+                    ent = next((c for c in conns.values() if c.get("iface")), None)
+            if not ent:
+                continue
+            with lock:
+                pending_traces.add(target)
+            log(f"🧭 survey: трассирую {target} с {ent.get('id')}")
+            try:
+                ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
+            except Exception as e:
+                log(f"🧭 survey {target}: {e!r}")
+            with lock:
+                pending_traces.discard(target)
+        except Exception as e:
+            log(f"survey: {e!r}")
+
+
 def topo_loop():
     while True:
         try:
@@ -773,6 +907,7 @@ def topo_loop():
                 data = scan.build(found, prev)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
+                rx_flush()
                 check_batt(data)
         except Exception as e:
             log(f"topo: {e!r}")
@@ -882,6 +1017,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"nc": history.node_counts(hours=hours, bins=int(float(g("bins", 48) or 48)))})
             elif u.path.endswith("/stats"):
                 self._json({"stats": history.stats()})
+            elif u.path.endswith("/rx"):
+                # сигнальный ряд приёмник×передатчик (Фаза 6: RSSI + дисперсия SNR)
+                self._json({"series": history.rx_series(g("node"), g("src"), hours=hours)})
+            elif u.path.endswith("/xlinks"):
+                # чужие звенья из traceroute/NeighborInfo (Фаза 6: геометрия)
+                self._json({"pairs": history.xlink_pairs(hours=hours)})
             else:
                 self._json({"ok": False, "error": "нет такого эндпоинта"}, 404)
         except Exception as e:
@@ -1079,6 +1220,7 @@ def main():
     threading.Thread(target=keeper, daemon=True).start()
     threading.Thread(target=topo_loop, daemon=True).start()
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
+    threading.Thread(target=survey_loop, daemon=True).start()   # жатва чужих звеньев
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
 

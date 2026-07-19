@@ -34,5 +34,8 @@
     "lowBattPct": 20,
     "tgReply": true
   },
-  "geo": {}
+  "geo": {},
+  "surveyEnabled": true,
+  "surveyEveryS": 900,
+  "surveyMaxChUtil": 25
 }

@@ -25,6 +25,15 @@ CREATE TABLE IF NOT EXISTS link_hist(
   ts INTEGER, src TEXT, dst TEXT, snr REAL, hops INTEGER,
   PRIMARY KEY(ts, src, dst));
 CREATE INDEX IF NOT EXISTS ix_link_pair_ts ON link_hist(src, dst, ts);
+CREATE TABLE IF NOT EXISTS rx_hist(
+  ts INTEGER, node TEXT, src TEXT, n INTEGER,
+  snr REAL, snr_sd REAL, rssi REAL,
+  PRIMARY KEY(ts, node, src));
+CREATE INDEX IF NOT EXISTS ix_rx_src_ts ON rx_hist(src, ts);
+CREATE TABLE IF NOT EXISTS xlink_hist(
+  ts INTEGER, a TEXT, b TEXT, snr REAL, via TEXT,
+  PRIMARY KEY(ts, a, b, via));
+CREATE INDEX IF NOT EXISTS ix_xlink_pair ON xlink_hist(a, b, ts);
 """
 
 _lock = threading.Lock()
@@ -73,6 +82,51 @@ def record(data, ts=None, fresh=180):
     return len(nrows), len(lrows)
 
 
+def record_rx(rows):
+    """Пер-пакетная сигнальная жатва (фундамент геолокации): агрегаты ПРЯМЫХ
+    приёмов за интервал сброса. rows = [(ts, node, src, n, snr, snr_sd, rssi)].
+    node — своя нода-приёмник, src — передатчик; snr_sd (дисперсия во времени)
+    различает LOS/NLOS, rssi не сатурируется на сильном сигнале, как SNR."""
+    if not rows:
+        return
+    with _lock:
+        c = _db()
+        c.executemany("INSERT OR REPLACE INTO rx_hist VALUES(?,?,?,?,?,?,?)", rows)
+        c.commit()
+
+
+def record_xlinks(rows):
+    """Чужие звенья a→b (b услышал a на snr) — жатва traceroute (via='tr') и
+    пассивных NeighborInfo (via='ni'). Расширяют геометрию: звено от узла с
+    известной позицией — кольцо расстояния для его соседа."""
+    if not rows:
+        return
+    with _lock:
+        c = _db()
+        c.executemany("INSERT OR REPLACE INTO xlink_hist VALUES(?,?,?,?,?)", rows)
+        c.commit()
+
+
+def rx_series(node, src, hours=24):
+    since = int(time.time()) - int(hours) * 3600
+    with _lock:
+        rows = _db().execute(
+            "SELECT ts, n, snr, snr_sd, rssi FROM rx_hist "
+            "WHERE node=? AND src=? AND ts>=? ORDER BY ts", (node, src, since)).fetchall()
+    return [dict(ts=r[0], n=r[1], snr=r[2], sd=r[3], rssi=r[4]) for r in rows]
+
+
+def xlink_pairs(hours=168):
+    """Сводка чужих звеньев за окно: пара, число замеров, средний/лучший SNR."""
+    since = int(time.time()) - int(hours) * 3600
+    with _lock:
+        rows = _db().execute(
+            "SELECT a, b, via, COUNT(*), AVG(snr), MAX(snr), MAX(ts) FROM xlink_hist "
+            "WHERE ts>=? GROUP BY a, b, via ORDER BY COUNT(*) DESC", (since,)).fetchall()
+    return [dict(a=r[0], b=r[1], via=r[2], n=r[3], snr=round(r[4], 2),
+                 best=r[5], last=r[6]) for r in rows]
+
+
 def prune(days=30):
     """Удалить срезы старше days суток."""
     cutoff = int(time.time()) - int(days) * 86400
@@ -80,6 +134,8 @@ def prune(days=30):
         c = _db()
         c.execute("DELETE FROM node_hist WHERE ts < ?", (cutoff,))
         c.execute("DELETE FROM link_hist WHERE ts < ?", (cutoff,))
+        c.execute("DELETE FROM rx_hist WHERE ts < ?", (cutoff,))
+        c.execute("DELETE FROM xlink_hist WHERE ts < ?", (cutoff,))
         c.commit()
 
 
