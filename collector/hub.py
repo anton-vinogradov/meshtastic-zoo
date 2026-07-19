@@ -1159,20 +1159,27 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/history/"):
             self._history()
         elif self.path.startswith("/api/dbentry"):
-            # диагностика: как каждая своя нода ВИДИТ узел прямо сейчас (сырой nodeDB)
+            # диагностика: как каждая своя нода ВИДИТ узел прямо сейчас (сырой nodeDB):
+            # есть ли в базе, есть ли publicKey (pk=длина, 0=нет ключа), хопы, роль,
+            # + размер базы ноды (близко к 250 = вытеснение по LRU).
             tid = (parse_qs(urlparse(self.path).query).get("id") or [""])[0]
             out = {}
             with lock:
                 live = [c for c in conns.values() if c.get("iface")]
             for c in live:
                 try:
-                    e = dict(c["iface"].nodes or {}).get(tid)
+                    db = dict(c["iface"].nodes or {})
                 except Exception:
-                    e = None
+                    db = {}
+                e = db.get(tid)
+                info = {"dbSize": len(db), "inDb": isinstance(e, dict)}
                 if isinstance(e, dict):
                     lh = e.get("lastHeard") or 0
-                    out[c["id"]] = {"hopsAway": e.get("hopsAway"), "snr": e.get("snr"),
-                                    "lastHeard": lh, "ageMin": round((time.time() - lh) / 60, 1)}
+                    u = e.get("user") or {}
+                    info.update(hopsAway=e.get("hopsAway"), snr=e.get("snr"), lastHeard=lh,
+                                ageMin=round((time.time() - lh) / 60, 1),
+                                pk=len(u.get("publicKey") or ""), role=u.get("role"), hw=u.get("hwModel"))
+                out[c["id"]] = info
             self._json({"id": tid, "seenBy": out})
         else:
             super().do_GET()
