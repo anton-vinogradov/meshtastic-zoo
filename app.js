@@ -14,6 +14,8 @@
   let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
+  let nodeCap = parseInt(localStorage.getItem("mzNodeCap"), 10);  // лимит соседей (0/NaN = все)
+  if (!(nodeCap >= 0)) nodeCap = 60;                           // дефолт: топ-60 по силе
 
   // Лимит текста Meshtastic (payload ~200 байт), Enter-отправка, авто-обрезка.
   const MAX_MSG_BYTES = 200;
@@ -103,6 +105,8 @@
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
       mapSettings: "Weighted map", mapCliHint: "display options — this browser only",
+      capLbl: "max neighbors on map", capTip: "keep the N strongest neighbors (by SNR); 0 = show all",
+      capOf: "{0} heard", capHint: "0 = all",
       critLine: "single point of failure: −{0} node(s) if it drops",
       traceBtn: "🧭 trace route", traceRunning: "tracing… (sends a probe over the air)",
       traceFail: "no response (node silent or too far)", traceNoNode: "no online node to trace from",
@@ -165,6 +169,8 @@
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
       mapSettings: "Карта весов", mapCliHint: "настройки отображения — только этот браузер",
+      capLbl: "макс. соседей на карте", capTip: "оставить N самых сильных соседей (по SNR); 0 = показать всех",
+      capOf: "слышно {0}", capHint: "0 = все",
       critLine: "единая точка отказа: −{0} нод при её отказе",
       traceBtn: "🧭 трассировка", traceRunning: "трассирую… (шлёт пробу в эфир)",
       traceFail: "нет ответа (нода молчит или далеко)", traceNoNode: "нет онлайн-ноды для запроса",
@@ -312,6 +318,26 @@
         nodes: D.nodes.filter(n => n.hop == null),
         links: D.links.filter(l => !drop.has(l.from) && !drop.has(l.to)),
       };
+    }
+    // Лимит соседей на карте (клиентский): в плотном дневном меше 1Вт-ноды слышат
+    // 150+ сильных соседей — «миллиард узлов». Держим топ-N по лучшему прямому SNR
+    // (свои и многохопы не режем), остальных прячем; nodeCap=0 = показывать всех.
+    D.meta = D.meta || {};
+    D.meta.neighTotal = D.nodes.filter(n => !n.own && n.hop == null).length;
+    if (nodeCap > 0 && D.meta.neighTotal > nodeCap) {
+      const ownIds = new Set(D.nodes.filter(n => n.own).map(n => n.id));
+      const bestSnr = {};
+      for (const l of D.links) {
+        if (l.type !== "rf" || l.hops || l.snr == null) continue;
+        const t = ownIds.has(l.to) ? l.from : ownIds.has(l.from) ? l.to : null;
+        if (t) bestSnr[t] = Math.max(bestSnr[t] ?? -1e3, l.snr);
+      }
+      const keep = new Set(D.nodes.filter(n => n.own || n.hop != null).map(n => n.id));
+      D.nodes.filter(n => !n.own && n.hop == null)
+        .sort((a, b) => (bestSnr[b.id] ?? -1e3) - (bestSnr[a.id] ?? -1e3))
+        .slice(0, nodeCap).forEach(n => keep.add(n.id));
+      D = { ...D, nodes: D.nodes.filter(n => keep.has(n.id)),
+        links: D.links.filter(l => keep.has(l.from) && keep.has(l.to)) };
     }
     const crit = computeCriticality(D.nodes, D.links);  // единые точки отказа (Фаза 4)
     // Холст подстраивается под пропорции окна — свободного места не остаётся
@@ -1236,7 +1262,9 @@
       ${showHops ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
       ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,
-        D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}</span>
+        D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}${
+        nodeCap > 0 && D.meta.neighTotal > D.nodes.filter(n => !n.own).length
+          ? ` <b style="color:#e0a03c" title="${esc(t("capTip"))}">· ${t("capOf", D.meta.neighTotal)}</b>` : ""}</span>
       <span class="item">${t("scan")} · ${esc(scanLocal)}
         ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
 
@@ -1502,6 +1530,9 @@
     } else if (e.target.id === "critToggle") {
       showCrit = e.target.checked;
       localStorage.setItem("mzShowCrit", showCrit ? "1" : "0");
+    } else if (e.target.id === "nodeCapIn") {
+      nodeCap = Math.max(0, Math.min(999, parseInt(e.target.value, 10) || 0));
+      localStorage.setItem("mzNodeCap", String(nodeCap));
     } else return;
     if (lastLive) render(lastLive);
   });
@@ -1572,6 +1603,10 @@
       <label class="srow stog" title="${esc(t("critTip"))}">
         <span>⚠ ${t("critLbl")}</span>
         <input type="checkbox" id="critToggle" ${showCrit ? "checked" : ""}></label>
+      <label class="srow stog" title="${esc(t("capTip"))}">
+        <span>${t("capLbl")}</span>
+        <input type="number" id="nodeCapIn" min="0" max="999" step="10" value="${nodeCap}"
+          style="width:64px" title="${esc(t("capHint"))}"></label>
       <div class="shint">${t("mapCliHint")}</div>
     </div>`;
 
