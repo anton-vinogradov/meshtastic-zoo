@@ -40,6 +40,7 @@ GEO_ADDR = ROOT.parent / "data" / "geo_addr.json"   # {id: {lat,lon,q,verified,n
 GEO_CACHE = ROOT.parent / "data" / "geo_cache.json"  # сырой кэш Nominatim
 OUT_MSGS = ROOT.parent / "data" / "messages.json"
 OUT_CHAN = ROOT.parent / "data" / "channel.json"
+OUT_TRACES = ROOT.parent / "data" / "traces.json"   # последняя трассировка на узел (персист)
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
@@ -94,6 +95,27 @@ def load_messages():
     global messages, channel
     messages = load_list(OUT_MSGS)
     channel = load_list(OUT_CHAN)
+
+
+def load_traces():
+    """Поднять сохранённые трассировки (переживают рестарт hub и F5 сайта)."""
+    global traces
+    try:
+        d = json.loads(OUT_TRACES.read_text())
+        if isinstance(d, dict):
+            traces = d
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"⚠ traces: {e!r}")
+
+
+def save_traces():
+    with lock:
+        if len(traces) > 500:            # держим последние ~500 по времени
+            for k in sorted(traces, key=lambda k: traces[k].get("ts", 0))[:-500]:
+                del traces[k]
+        atomic_write(OUT_TRACES, json.dumps(traces, ensure_ascii=False))
 
 
 def load_tgmap():
@@ -291,6 +313,7 @@ def on_receive(packet=None, interface=None):
             with lock:
                 pending_traces.discard(frm)
                 traces[frm] = {"path": path, "ts": int(time.time())}
+            save_traces()   # персист: переживёт рестарт hub и обновление сайта
             log(f"🧭 traceroute {frm}: {' → '.join(p['id'] for p in path)}")
             return
         if dec.get("portnum") == "NEIGHBORINFO_APP":
@@ -1448,6 +1471,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main():
     load_messages()
+    load_traces()
     load_tgmap()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
