@@ -413,8 +413,7 @@ def flag_position_lies(nodes, links, geo):
             continue
         if l.get("to") in anchors:
             direct.setdefault(l.get("from"), []).append((l["to"], l["snr"]))
-    HARD, SOFT = 60.0, 40.0     # км: >HARD почти наверняка ложь; >SOFT — сомнительно
-    STRONG_KM, STRONG_SNR = 15.0, 0.0   # близкая громкая, а заявлена далеко
+    HARD = 60.0                 # км: >HARD прямой приём почти наверняка ложь при любом SNR
     for nid, hs in direct.items():
         n = byid.get(nid)
         if not n or n.get("own"):
@@ -426,14 +425,21 @@ def flag_position_lies(nodes, links, geo):
         # берём якорь, что слышит ГРОМЧЕ всего — сильнейшее свидетельство близости
         by, snr = max(hs, key=lambda x: x[1])
         dkm = _hav_km(anchors[by], pos)
+        # Плаузибельная макс. дальность ПРЯМОГО линка убывает с силой сигнала (без
+        # калибровки — эвристика): сильный сигнал = близко, слабый может быть дальним.
+        # Заявлено СИЛЬНО дальше плаузибельного = позиция врёт/устарела. Раньше порог
+        # был фиксированный (>40км или >15км&snr>0) и пропускал средне-громкие на
+        # 20–40км (Kuusamo: −3.5дБ на 28.6км — 55% качества, для ручного узла нереально).
+        # монотонно по SNR (сильнее → ближе): −20→46км, 0→14, +10→8(пол). Заявлено
+        # дальше plausible → сомнительно (med); сильно дальше (×3) или >60км → ложь (high).
+        plausible = max(8.0, 14.0 - snr * 1.6)
         level = None
-        if dkm > HARD:
+        if dkm > HARD or dkm > plausible * 3.0:
             level = "high"
-        elif dkm > SOFT or (dkm > STRONG_KM and snr > STRONG_SNR):
+        elif dkm > plausible:
             level = "med"
         if level:
-            n["posSus"] = dict(km=round(dkm, 1), snr=snr, by=by,
-                               n=len(hs), level=level)
+            n["posSus"] = dict(km=round(dkm, 1), snr=snr, by=by, n=len(hs), level=level)
 
 def build_from_store(store, found=None, xlinks=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
