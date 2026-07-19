@@ -131,6 +131,7 @@
       noDataTip: "{0} → {1}: no data — {2} has not heard {3} directly (neither in a scan nor in cache)",
       settings: "Settings", save: "Save", saved: "✓ saved", hubUnavail: "hub unavailable",
       storedHint: "stored in collector/config.json; the map picks it up on the next refresh (within a minute)",
+      statusPage: "service status",
       failedSend: "Failed to send:", failedSave: "Failed to save:",
       mapAria: "Mesh network map", language: "Language",
       fSubnets: "Site subnets & colors", fFloor: "0% quality at SNR, dB",
@@ -208,6 +209,7 @@
       noDataTip: "{0} → {1}: нет данных — {2} не слышала {3} напрямую (ни в скане, ни в кэше)",
       settings: "Настройки", save: "Сохранить", saved: "✓ сохранено", hubUnavail: "hub недоступен",
       storedHint: "хранится в collector/config.json; карта подхватит при следующем обновлении (до минуты)",
+      statusPage: "статус сервиса",
       failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
       mapAria: "Карта mesh-сети", language: "Язык",
       fSubnets: "Подсети площадок и цвета", fFloor: "0% качества при SNR, дБ",
@@ -1838,7 +1840,8 @@
       `<div class="srow scol"><span>${t("nodeChartTitle", Math.round(cfg.worldMaxAgeH || 24))}</span>
         <div id="nn-body" class="nn-body">…</div></div>
        <button id="ssave">${t("save")}</button>
-       <div class="shint">${t("storedHint")}</div>`;
+       <div class="shint">${t("storedHint")}</div>
+       <a class="statuslink" href="status.html">📟 ${t("statusPage")}</a>`;
     setEl.classList.add("open");
     // График «сколько узлов на карте» за окно удержания (worldMaxAgeH) — асинхронно
     (async () => {

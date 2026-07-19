@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>meshtastic-zoo · статус</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📟</text></svg>">
+  <style>
+    :root { --bg:#1b1b1d; --panel:#242428; --stroke:#39393d; --text:#e8e8ea; --muted:#9a9aa0;
+            --green:#35c98e; --amber:#e0a03c; --red:#e0533c; --blue:#6ea8ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,system-ui,sans-serif; padding:20px; }
+    a { color:var(--blue); text-decoration:none; }
+    h1 { font-size:20px; font-weight:600; margin:0 0 2px; }
+    .sub { color:var(--muted); font-size:12.5px; margin-bottom:18px; }
+    .sub b { color:var(--text); }
+    h2 { font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:22px 0 8px; }
+    .card { background:var(--panel); border:1px solid var(--stroke); border-radius:10px; padding:10px 14px; margin-bottom:8px;
+            display:flex; align-items:center; gap:10px; }
+    .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+    .g{background:var(--green)} .a{background:var(--amber)} .r{background:var(--red)} .o{background:#55555c}
+    .nm { font-weight:600; min-width:82px; }
+    .note { color:var(--muted); flex:1; font-size:13px; }
+    .age { color:var(--muted); font-size:12px; white-space:nowrap; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
+    .tile { background:var(--panel); border:1px solid var(--stroke); border-radius:10px; padding:10px 12px; }
+    .tile .v { font-size:20px; font-weight:600; }
+    .tile .k { color:var(--muted); font-size:11.5px; margin-top:1px; }
+    .nrow { display:grid; grid-template-columns:14px 1fr auto; gap:10px; align-items:center; }
+    .meta { color:var(--muted); font-size:12px; }
+    .meta b { color:var(--text); font-weight:500; }
+    .err { color:var(--red); }
+    #upd { position:fixed; top:14px; right:18px; color:var(--muted); font-size:11.5px; }
+  </style>
+</head>
+<body>
+  <div id="upd"></div>
+  <h1>meshtastic-zoo · статус</h1>
+  <div class="sub" id="head">загрузка…</div>
+  <h2>Воркеры</h2><div id="workers"></div>
+  <h2>Свои ноды</h2><div id="nodes"></div>
+  <h2>Данные</h2><div class="grid" id="data"></div>
+  <div class="sub" style="margin-top:20px"><a href="index.html">← на карту</a></div>
+
+  <script>
+    const WARN = { keeper:700, writer:180, reader:180, pruner:900, trace:3600, keyfetch:1800, geocode:90000, tg:120 };
+    const ORDER = ["keeper","writer","reader","pruner","trace","keyfetch","geocode","tg"];
+    const LABEL = { keeper:"keeper · соединения", writer:"writer · опрос→кеш", reader:"reader · кеш→карта",
+      pruner:"pruner · чистка", trace:"trace · трассировка", keyfetch:"keyfetch · ключи",
+      geocode:"geocode · адреса", tg:"tg · telegram" };
+    const age = (s) => s == null ? "—" : s < 60 ? Math.round(s)+"с" : s < 3600 ? Math.round(s/60)+"м" :
+      s < 86400 ? (s/3600).toFixed(1)+"ч" : (s/86400).toFixed(1)+"д";
+    const cls = (a, w) => a == null ? "o" : a < w ? "g" : a < w*3 ? "a" : "r";
+    const up = (s) => { const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+      return (d?d+"д ":"")+(h?h+"ч ":"")+m+"м"; };
+    const el = (id) => document.getElementById(id);
+
+    async function tick() {
+      let s;
+      try { s = await (await fetch("/api/status", { cache:"no-store" })).json(); }
+      catch { el("head").innerHTML = '<span class="err">хаб недоступен</span>'; return; }
+      el("upd").textContent = "обновлено " + new Date().toLocaleTimeString();
+      el("head").innerHTML = `uptime <b>${up(s.uptime)}</b> · канал <b>${s.chUtil == null ? "—" : s.chUtil.toFixed(1)+"%"}</b> · в кеше <b>${s.data.cacheNodes}</b> узлов`;
+
+      // воркеры (в фиксированном порядке; неизвестные — в конце)
+      const seen = new Set();
+      const rows = ORDER.filter(n => s.workers[n]).map(n => { seen.add(n); return [n, s.workers[n]]; })
+        .concat(Object.entries(s.workers).filter(([n]) => !seen.has(n)));
+      el("workers").innerHTML = rows.map(([n, w]) =>
+        `<div class="card"><span class="dot ${cls(w.age, WARN[n] || 600)}"></span>
+          <span class="nm">${LABEL[n] || n}</span>
+          <span class="note">${w.note || ""}</span>
+          <span class="age">${age(w.age)} назад</span></div>`).join("") || '<div class="meta">нет данных</div>';
+
+      // свои ноды
+      el("nodes").innerHTML = (s.nodes || []).map(n => {
+        const parts = [];
+        if (n.chUtil != null) parts.push(`канал <b>${n.chUtil.toFixed(0)}%</b>`);
+        if (n.dbSize != null) parts.push(`база <b>${n.dbSize}</b>`);
+        if (n.batt != null) parts.push(`🔋 <b>${n.batt}%</b>`);
+        if (n.uptime != null) parts.push(`up <b>${up(n.uptime)}</b>`);
+        if (n.silent != null) parts.push(`тишина ${age(n.silent)}`);
+        return `<div class="card nrow"><span class="dot ${n.connected ? "g" : "r"}"></span>
+          <span><span class="nm">${esc(n.name)}</span> <span class="meta">${esc(n.ip)}</span><br>
+          <span class="meta">${parts.join(" · ") || (n.connected ? "на связи" : "нет связи")}</span></span>
+          <span class="age">${n.connected ? "" : "off"}</span></div>`;
+      }).join("") || '<div class="meta">нет подключений</div>';
+
+      // данные
+      const d = s.data, liveCls = d.liveAge == null ? "" : d.liveAge > 180 ? ' class="err"' : '';
+      const tiles = [
+        ["узлов на карте", d.liveNodes], ["live.json", `<span${liveCls}>${age(d.liveAge)}</span>`],
+        ["в кеше", d.cacheNodes], ["прямых 3мин", d.cacheDirect3m],
+        ["оценок est", d.est], ["подозр. позиций", d.posSus],
+        ["подтв. трассой", d.traceNbr], ["без ключа", d.keyless],
+        ["личных", d.messages], ["канал", d.channel], ["трассировок", d.traces],
+      ];
+      el("data").innerHTML = tiles.map(([k, v]) =>
+        `<div class="tile"><div class="v">${v ?? "—"}</div><div class="k">${k}</div></div>`).join("");
+    }
+    function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    tick(); setInterval(tick, 5000);
+  </script>
+</body>
+</html>

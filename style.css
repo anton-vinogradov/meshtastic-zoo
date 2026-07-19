@@ -477,6 +477,7 @@ body:not(.geo-on) #geoctl { display: none; }
 }
 #settings #ssave:disabled { opacity: .5; cursor: default; }
 #settings .shint { color: var(--muted); font-size: 11.5px; margin-top: 8px; }
+#settings .statuslink { display: inline-block; margin-top: 10px; font-size: 12.5px; color: #7fb0ff; text-decoration: none; }
 
 /* Панель подробностей ноды (ниже шестерёнки, взаимоисключается с настройками) */
 #panel {

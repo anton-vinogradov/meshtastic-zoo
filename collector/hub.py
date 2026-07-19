@@ -56,6 +56,13 @@ channel = []   # публичный канал: [{id, pid, frm, frmName, text, t
 tgmap = {"offset": 0, "map": {}}
 pending_traces = set()  # id адресатов, чей traceroute-ответ ждём (Фаза 4, ч.3)
 traces = {}             # id → {path:[{id,snr}], ts} — результат последней трассировки
+START_TS = time.time()  # старт hub — для uptime на странице статуса
+worker_beats = {}       # имя воркера → {ts, note}: пульс для /api/status
+
+
+def beat(name, note=""):
+    """Пульс фонового воркера (для страницы статуса): жив + что делал последним."""
+    worker_beats[name] = {"ts": time.time(), "note": note}
 
 
 def log(msg):
@@ -603,6 +610,8 @@ def keeper():
                 if c.get("iface") and now - c.get("last", 0) > 900:
                     log(f"⛓? {ip}: тишина >15 мин, переподключаю")
                     drop_node(ip)
+            with lock:
+                beat("keeper", f"{sum(1 for c in conns.values() if c.get('iface'))} нод на связи")
         except Exception as e:
             log(f"keeper: {e!r}")
         time.sleep(CFG.get("rescanS", 300))
@@ -801,9 +810,11 @@ def tg_poll_loop():
         a = CFG.get("alerts") or {}
         tok = a.get("tgToken")
         if not (a.get("enabled", True) and a.get("tgReply", True) and tok):
+            beat("tg", "выключен")
             time.sleep(30)
             continue
         proxy = a.get("tgProxy") or ""
+        beat("tg", "поллинг")
         try:
             off = tgmap.get("offset", 0)
             url = (f"https://api.telegram.org/bot{tok}/getUpdates?timeout=25"
@@ -980,6 +991,7 @@ def trace_loop():
     time.sleep(15)
     while True:
         cu = paced_sleep(CFG.get("traceEveryS", 900))
+        beat("trace", f"тик · chUtil {round(cu, 1) if cu is not None else '?'}%")
         try:
             if not CFG.get("traceEnabled", True):
                 continue
@@ -1014,6 +1026,7 @@ def trace_loop():
                 continue
             with lock:
                 pending_traces.add(target)
+            beat("trace", f"трассирую {target}")
             log(f"🧭 trace: трассирую {target} с {ent.get('id')} (chUtil {cu})")
             try:
                 ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
@@ -1036,6 +1049,7 @@ def keyfetch_loop():
     time.sleep(35)   # дать первому скану наполнить live.json
     while True:
         cu = paced_sleep(CFG.get("keyFetchEveryS", 300))
+        beat("keyfetch", f"тик · chUtil {round(cu, 1) if cu is not None else '?'}%")
         try:
             if not CFG.get("keyFetchEnabled", True):
                 continue
@@ -1060,6 +1074,7 @@ def keyfetch_loop():
             elig.sort(key=lambda n: (0 if n.get("posSus") else 1, _keyfetch_last.get(n["id"], 0)))
             target = elig[0]["id"]
             _keyfetch_last[target] = now
+            beat("keyfetch", f"добор ключа {target} ({len(elig)} в очереди)")
             log(f"🔑 добор ключа у {target} ({len(elig)} в очереди)")
             solicit_key(target)
         except Exception as e:
@@ -1075,6 +1090,7 @@ def geocode_loop():
         try:
             if CFG.get("geocodeEnabled", True):
                 _do_geocode()
+            beat("geocode", "проход")
         except Exception as e:
             log(f"geocode: {e!r}")
         time.sleep(CFG.get("geocodeEveryS", 86400))
@@ -1160,6 +1176,7 @@ def writer_loop():
                 for did, dv in dlive.items():       # точные прямые из потока (батч)
                     nodestore.note_leg(did, dv[2] or "?", dv[1], 0, ts=int(dv[0]))
                 rx_flush()
+                beat("writer", f"опрос {len(found)} нод")
         except Exception as e:
             log(f"writer: {e!r}")
         try:                                        # статусы исходящих (из topo)
@@ -1197,6 +1214,7 @@ def reader_loop():
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
                                           for n in data.get("nodes", []) if n.get("x") is not None})
                 check_batt(data)
+                beat("reader", f"{len(data.get('nodes', []))} нод на карте")
         except Exception as e:
             log(f"reader: {e!r}")
         time.sleep(CFG.get("renderEveryS", 60))
@@ -1208,6 +1226,7 @@ def pruner_loop():
         time.sleep(CFG.get("pruneEveryS", 300))
         try:
             nodestore.prune(_store_keep_s())
+            beat("pruner", "чистка кеша")
         except Exception as e:
             log(f"pruner: {e!r}")
 
@@ -1247,6 +1266,8 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/config"):
             with lock:
                 self._json({k: CFG.get(k) for k in EDITABLE})
+        elif self.path.startswith("/api/status"):
+            self._json(self._status())
         elif self.path.startswith("/api/geo"):
             with lock:
                 self._json({"geo": CFG.get("geo", {})})
@@ -1281,6 +1302,45 @@ class Handler(SimpleHTTPRequestHandler):
             self._json({"id": tid, "seenBy": out})
         else:
             super().do_GET()
+
+    def _status(self):
+        """Сводка для страницы статуса: uptime, пульс воркеров, свои ноды, данные."""
+        now = time.time()
+        with lock:
+            conns_snap = [(ip, c) for ip, c in conns.items()]
+        try:
+            live = json.loads(OUT_LIVE.read_text())
+        except Exception:
+            live = {"nodes": [], "meta": {}}
+        lnodes = live.get("nodes", [])
+        own_live = {n["id"]: n for n in lnodes if n.get("own")}
+        workers = {name: {"age": round(now - b["ts"], 1), "note": b.get("note", "")}
+                   for name, b in worker_beats.items()}
+        nodes = []
+        for ip, c in conns_snap:
+            cid = c.get("id")
+            info = (own_live.get(cid) or {}).get("info") or {}
+            try:
+                db = len(dict(c["iface"].nodes or {})) if c.get("iface") else None
+            except Exception:
+                db = None
+            nodes.append({"id": cid, "ip": ip, "connected": bool(c.get("iface")),
+                          "name": (own_live.get(cid) or {}).get("label") or cid,
+                          "silent": round(now - c.get("last", 0), 0) if c.get("last") else None,
+                          "dbSize": db, "chUtil": info.get("chUtil"),
+                          "batt": info.get("battery"), "uptime": info.get("uptime")})
+        ns = nodestore.stats()
+        meta = live.get("meta", {})
+        liveAge = round(now - int((meta.get("updatedTs") or 0) / 1000), 0) if meta.get("updatedTs") else None
+        data = {"cacheNodes": ns.get("nodes"), "cacheDirect3m": ns.get("direct_3min"),
+                "liveNodes": len(lnodes), "liveAge": liveAge,
+                "messages": len(messages), "channel": len(channel), "traces": len(traces),
+                "est": sum(1 for n in lnodes if n.get("est")),
+                "posSus": sum(1 for n in lnodes if n.get("posSus")),
+                "traceNbr": sum(1 for n in lnodes if n.get("traceNbr")),
+                "keyless": sum(1 for n in lnodes if not n.get("own") and not n.get("key"))}
+        return {"uptime": round(now - START_TS, 0), "now": int(now),
+                "chUtil": chan_util(), "workers": workers, "nodes": nodes, "data": data}
 
     def _history(self):
         u = urlparse(self.path)
