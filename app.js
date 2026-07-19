@@ -76,6 +76,7 @@
       cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI keys", cRebroadcast: "Rebroadcast",
       cNodeInfo: "NodeInfo interval",
       secMesh: "Mesh", secPos: "Position", cHopsAway: "Hops away", direct: "direct",
+      posSus: "claims {0} km away, yet heard directly ({1} dB) — position likely wrong or stale",
       cViaMqtt: "Via MQTT", cLicensed: "Licensed (ham)",
       cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude", openMap: "open on OpenStreetMap →",
       publicChannel: "Public channel", gotByLabel: "received by",
@@ -136,6 +137,7 @@
       cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI-ключи", cRebroadcast: "Ретрансляция",
       cNodeInfo: "Интервал NodeInfo",
       secMesh: "Сеть", secPos: "Позиция", cHopsAway: "Прыжков до неё", direct: "напрямую",
+      posSus: "заявлено {0} км, но слышна напрямую ({1} дБ) — позиция, вероятно, неверна или устарела",
       cViaMqtt: "Через MQTT", cLicensed: "Лицензирована (ham)",
       cLat: "Широта", cLon: "Долгота", cAlt: "Высота", openMap: "открыть на OpenStreetMap →",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
@@ -853,8 +855,11 @@
       ]);
       // Позиция — сразу миникартой (OSM-эмбед с маркером; грузится лениво,
       // только когда раздел раскрыт). Координаты broadcast — приблизительные.
+      const susRow = n.posSus
+        ? `<div class="pwarn">⚠ ${esc(t("posSus", n.posSus.km, fmtSnr(n.posSus.snr)))}</div>` : "";
       const secPos = i.lat == null ? "" :
-        `<details class="psec" id="sec-pos"><summary>${esc(t("secPos"))}</summary>
+        `<details class="psec${n.posSus ? " sus" : ""}" id="sec-pos"><summary>${esc(t("secPos"))}${n.posSus ? " ⚠" : ""}</summary>
+          ${susRow}
           <div class="minimap" id="pmini"></div>
           <div class="prow"><span>${esc(t("cLat"))} / ${esc(t("cLon"))}</span><span>${i.lat.toFixed(5)}, ${i.lon.toFixed(5)}</span></div>
           ${i.alt == null ? "" : `<div class="prow"><span>${esc(t("cAlt"))}</span><span>${i.alt} m</span></div>`}
@@ -1825,8 +1830,13 @@
       const i = n.info || {};
       if (n.own || i.lat == null || i.lon == null) return;
       pts.push([i.lat, i.lon]);
-      L.circleMarker([i.lat, i.lon], { radius: 7, color: "#0b0b0d", weight: 1.5, fillColor: "#e0a03c", fillOpacity: 0.95 })
-        .bindTooltip(esc(String(n.label || n.id)), { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl", offset: [0, 3] })
+      // Фаза 6-А: заявленная позиция противоречит прямому приёму → красный + ⚠
+      const sus = n.posSus;
+      const fill = sus ? "#e0533c" : "#e0a03c";
+      const lbl = (sus ? "⚠ " : "") + String(n.label || n.id);
+      if (sus) L.circleMarker([i.lat, i.lon], { radius: 12, color: "#e0533c", weight: 2, fill: false, dashArray: "3 3", interactive: false }).addTo(geoLayer);
+      L.circleMarker([i.lat, i.lon], { radius: 7, color: "#0b0b0d", weight: 1.5, fillColor: fill, fillOpacity: 0.95 })
+        .bindTooltip(esc(lbl), { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl" + (sus ? " sus" : ""), offset: [0, 3] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
     Object.entries(geoCfg).forEach(([id, g]) => {

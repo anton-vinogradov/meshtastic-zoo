@@ -315,6 +315,49 @@ def estimate_positions(nodes, links, geo):
                            unc=round(res, 2), by=len(hs))
 
 
+def flag_position_lies(nodes, links, geo):
+    """Детектор вранья позиций (Фаза 6-А): нода вещает GPS, но мы слышим её
+    ПРЯМУЮ (0 хопов) с сигналом, несовместимым с заявленной дальностью. Классика
+    — «шутник» с координатами в другом городе (за 50-300 км), которого мы при
+    этом принимаем напрямую (значит он рядом). Прямой приём из «другого города»
+    физически невозможен для этих раций → флаг. Тест почти без ложных срабатываний
+    (порог дальности щедрый), проверять оценку позиции НЕ нужно — только опровергнуть
+    заявленную. Ставит node['posSus']={km,snr,by,level}."""
+    anchors = {nid: (g["lat"], g["lon"]) for nid, g in (geo or {}).items()
+               if isinstance(g, dict) and g.get("lat") is not None}
+    if not anchors:
+        return
+    byid = {n["id"]: n for n in nodes}
+    # прямые RF-приёмы: наша якорь-нода `to` услышала `frm` без ретрансляции
+    direct = {}
+    for l in links:
+        if l.get("type") != "rf" or l.get("hops") or l.get("snr") is None:
+            continue
+        if l.get("to") in anchors:
+            direct.setdefault(l.get("from"), []).append((l["to"], l["snr"]))
+    HARD, SOFT = 60.0, 40.0     # км: >HARD почти наверняка ложь; >SOFT — сомнительно
+    STRONG_KM, STRONG_SNR = 15.0, 0.0   # близкая громкая, а заявлена далеко
+    for nid, hs in direct.items():
+        n = byid.get(nid)
+        if not n or n.get("own"):
+            continue
+        info = n.get("info") or {}
+        if info.get("lat") is None or info.get("mqtt"):   # MQTT-позиция не по эфиру
+            continue
+        pos = (info["lat"], info["lon"])
+        # берём якорь, что слышит ГРОМЧЕ всего — сильнейшее свидетельство близости
+        by, snr = max(hs, key=lambda x: x[1])
+        dkm = _hav_km(anchors[by], pos)
+        level = None
+        if dkm > HARD:
+            level = "high"
+        elif dkm > SOFT or (dkm > STRONG_KM and snr > STRONG_SNR):
+            level = "med"
+        if level:
+            n["posSus"] = dict(km=round(dkm, 1), snr=snr, by=by,
+                               n=len(hs), level=level)
+
+
 def build(found, prev=None):
     """found: {ip: результат query или None} → структура для фронтенда."""
     now = time.time()
@@ -620,6 +663,11 @@ def build(found, prev=None):
         estimate_positions(nodes, out_links, CFG.get("geo") or {})
     except Exception as e:
         log(f"estimate: {e!r}")
+    # Фаза 6-А: пометить ноды, чей заявленный GPS противоречит прямому приёму
+    try:
+        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
+    except Exception as e:
+        log(f"posflag: {e!r}")
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],

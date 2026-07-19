@@ -347,7 +347,14 @@ body:not(.geo-on) #geoctl { display: none; }
 .leaflet-tooltip.geo-lbl::before { display: none; }
 .leaflet-tooltip.geo-lbl.own { color: #cfe0ff; }
 .leaflet-tooltip.geo-lbl.est { color: #d8c4ff; font-weight: 500; }
+.leaflet-tooltip.geo-lbl.sus { color: #ffb3a6; }
 .leaflet-tooltip.geo-lbl .gl-sub { color: #9a9aa0; font-weight: 400; }
+/* Фаза 6-А: предупреждение о сомнительной позиции в панели */
+#panel .pwarn {
+  color: #f0b6ab; background: rgba(224, 83, 60, .12); border: 1px solid rgba(224, 83, 60, .4);
+  border-radius: 6px; padding: 5px 8px; font-size: 11.5px; margin: 4px 0 6px; line-height: 1.3;
+}
+#panel .psec.sus > summary { color: #f0b6ab; }
 #geoctl .geo-azin { width: 46px; }
 #geoctl .geo-az { color: var(--muted); display: inline-flex; align-items: center; gap: 3px; }
 #settings {
