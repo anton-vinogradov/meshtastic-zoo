@@ -1823,8 +1823,11 @@
       pts.push(p);
       L.circle(p, { radius: Math.max(150, n.est.unc * 1000), color: "#b98bff", weight: 1, fillColor: "#b98bff", fillOpacity: 0.06, dashArray: "3 4", interactive: false }).addTo(geoLayer);
       const u = n.est.unc < 1 ? `${Math.round(n.est.unc * 1000)} m` : `${n.est.unc.toFixed(1)} km`;
-      L.circleMarker(p, { radius: 6, color: "#b98bff", weight: 2, fillColor: "#0b0b0d", fillOpacity: 0.55, dashArray: "3 3" })
-        .bindTooltip(`${esc(String((byId[n.id] || {}).label || n.id))} <span class="gl-sub">~${u}</span>`,
+      // разрешённая сторона (Фаза 6-Б, xlink) → сплошной маркер + 📐; иначе пунктир
+      const sd = n.est.side;
+      const sName = sd ? ((byId[sd] || {}).label || String(sd)) : "";
+      L.circleMarker(p, { radius: 6, color: "#b98bff", weight: 2, fillColor: sd ? "#b98bff" : "#0b0b0d", fillOpacity: sd ? 0.9 : 0.55, dashArray: sd ? null : "3 3" })
+        .bindTooltip(`${esc(String((byId[n.id] || {}).label || n.id))} <span class="gl-sub">~${u}${sd ? " 📐" : ""}</span>`,
           { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl est", offset: [0, 2] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });

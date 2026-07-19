@@ -237,12 +237,17 @@ def _hav_km(a, b):
     return 2 * 6371 * math.asin(min(1, math.sqrt(h)))
 
 
-def estimate_positions(nodes, links, geo):
-    """Оценка географических позиций GPS-less нод (Фаза 5, «геолокация по
-    сигналу»): якоря = свои размещённые ноды (geo), SNR→расстояние калибруется
-    на GPS-соседях (известное расстояние ↔ измеренный SNR), затем мультилатерация
-    (взвешенный МНК) для нод, слышимых ≥3 якорями. Результат — облако с оценкой
-    неопределённости, добавляется как node['est']={lat,lon,unc(км),by}."""
+def estimate_positions(nodes, links, geo, xlinks=None):
+    """Оценка географических позиций GPS-less нод по сигналу (Фазы 5/6-Б).
+    Якоря = свои размещённые ноды (geo), SNR→расстояние калибруется на
+    GPS-соседях, мультилатерация для нод, слышимых ≥2 якорями.
+
+    Наши якоря — фактически 2 co-located точки, поэтому геометрия ДВУзначна:
+    два зеркальных кандидата по разные стороны базы (билатерация). Знак стороны
+    разрешаем ЧУЖИМИ звеньями (xlink_hist из traceroute/NeighborInfo): звено
+    узла X↔R к позиционированному ретранслятору R (GPS/геокод) → кандидат,
+    согласный с дистанцией/стороной R, побеждает. Без свидетельств — честно
+    раздуваем неопределённость (как раньше). node['est']={lat,lon,unc,by,side}."""
     anchors = {nid: (g["lat"], g["lon"]) for nid, g in (geo or {}).items()
                if isinstance(g, dict) and g.get("lat") is not None}
     if len(anchors) < 3:
@@ -286,33 +291,114 @@ def estimate_positions(nodes, links, geo):
     clon = sum(p[1] for p in aps) / len(aps)
     kmlat = 111.32
     kmlon = 111.32 * math.cos(math.radians(clat))
+    xy = lambda la, lo: ((lo - clon) * kmlon, (la - clat) * kmlat)  # noqa: E731
+
+    # позиционированные узлы (кандидаты в «третий якорь»): якоря / GPS-соседи /
+    # геокоженные адреса, с весом доверия (сверенный адрес=1, GPS=0.7, мягкий=0.4)
+    posref = {a: (*xy(*p), 1.0) for a, p in anchors.items()}
+    for nid, p in gps.items():
+        posref.setdefault(nid, (*xy(*p), 0.7))
+    for node in nodes:
+        a = node.get("addr")
+        if a and node["id"] not in posref:
+            posref[node["id"]] = (*xy(a["lat"], a["lon"]), 1.0 if a.get("verified") else 0.4)
+
+    # индекс чужих звеньев по узлу: {id: [(другой конец, snr), ...]}
+    xl_by = {}
+    for p in (xlinks or []):
+        for k, o in ((p.get("a"), p.get("b")), (p.get("b"), p.get("a"))):
+            if k and o:
+                xl_by.setdefault(k, []).append((o, p.get("snr")))
+
+    def circ_x(c1, r1, c2, r2):
+        """Точки пересечения двух окружностей (2 зеркальных, или 1 компромисс на
+        линии если кольца не сходятся) в координатах (x,y) км."""
+        dx, dy = c2[0] - c1[0], c2[1] - c1[1]
+        D = math.hypot(dx, dy)
+        if D < 1e-6:
+            return []
+        if D > r1 + r2 or D < abs(r1 - r2):   # не пересекаются → точка на линии
+            a = max(-r1, min(D + r2, (D * D + r1 * r1 - r2 * r2) / (2 * D)))
+            return [(c1[0] + a * dx / D, c1[1] + a * dy / D)]
+        a = (D * D + r1 * r1 - r2 * r2) / (2 * D)
+        h = math.sqrt(max(0.0, r1 * r1 - a * a))
+        mxp, myp = c1[0] + a * dx / D, c1[1] + a * dy / D
+        return [(mxp - dy / D * h, myp + dx / D * h),
+                (mxp + dy / D * h, myp - dx / D * h)]
+
+    def resolve_side(nid, cands):
+        """Выбрать кандидата по чужим звеньям к позиционированным узлам."""
+        if len(cands) < 2:
+            return cands[0], None
+        v = [0.0, 0.0]; resolver = None; rw = 0.0
+        for R, snr in xl_by.get(nid, []):
+            pr = posref.get(R)
+            if not pr or R == nid:
+                continue
+            rx, ry, w = pr
+            d = [math.hypot(c[0] - rx, c[1] - ry) for c in cands]
+            if abs(d[0] - d[1]) < 0.4:        # R почти на оси — сторону не различает
+                continue
+            if snr is not None:               # согласие с кольцом дальности от R
+                dt = snr_km(snr)
+                b0 = abs(d[0] - dt) <= abs(d[1] - dt)
+            else:                             # X в радиусе приёма R → ближе лучше
+                b0 = d[0] <= d[1]
+            v[0 if b0 else 1] += w
+            if w > rw:
+                rw, resolver = w, R
+        if v[0] + v[1] >= 0.6 and abs(v[0] - v[1]) >= 0.6:
+            return (cands[0] if v[0] >= v[1] else cands[1]), resolver
+        return cands[0], None                 # не разрешили — произвольная сторона
+
     for node in nodes:
         nid = node["id"]
         if nid in gps or nid in anchors or node.get("own"):
             continue
         hs = heard.get(nid, [])
-        if len(hs) < 2:              # <2 якорей — точку не поставить (только «кольцо»)
+        if len(hs) < 2:
             continue
-        pts = [((anchors[a][1] - clon) * kmlon, (anchors[a][0] - clat) * kmlat,
-                snr_km(s), max(0.1, s + 21.0)) for a, s in hs]
-        W = sum(p[3] for p in pts)
-        x = sum(p[0] * p[3] for p in pts) / W
-        y = sum(p[1] * p[3] for p in pts) / W
-        for _ in range(400):                 # градиентный спуск по Σ w·(|T−P|−r)²
-            gx = gy = 0.0
-            for px, py, r_, w in pts:
-                dx, dy = x - px, y - py
-                dist = math.hypot(dx, dy) or 1e-6
-                k = 2 * w * (dist - r_) / dist
-                gx += k * dx; gy += k * dy
-            x -= 0.08 * gx / W
-            y -= 0.08 * gy / W
-        res = math.sqrt(sum(w * (math.hypot(x - px, y - py) - r_) ** 2
-                            for px, py, r_, w in pts) / W)
-        if len(hs) < 3:              # 2 якоря: геометрия неоднозначна — честно раздуваем
-            res = max(res, 0.6 * sum(p[2] for p in pts) / len(pts))
+        # co-located якоря кластеризуем в ЭФФЕКТИВНЫЕ точки (центр + кольцо-радиус)
+        cl = {}
+        for a, s in hs:
+            ax_, ay_ = xy(*anchors[a])
+            cl.setdefault((round(ax_ / 0.06), round(ay_ / 0.06)), []).append(
+                (ax_, ay_, snr_km(s), max(0.1, s + 21.0)))
+        eff = []
+        for items in cl.values():
+            ws = sum(it[3] for it in items)
+            eff.append((sum(it[0] * it[3] for it in items) / ws,
+                        sum(it[1] * it[3] for it in items) / ws,
+                        sum(it[2] * it[3] for it in items) / ws, ws))
+        if len(eff) < 2:              # 1 эффективная точка — только кольцо, не ставим
+            continue
+        side = None
+        if len(eff) >= 3:            # настоящая трилатерация — градиентный спуск
+            W = sum(e[3] for e in eff)
+            x = sum(e[0] * e[3] for e in eff) / W
+            y = sum(e[1] * e[3] for e in eff) / W
+            for _ in range(400):
+                gx = gy = 0.0
+                for px, py, r_, w in eff:
+                    dd = math.hypot(x - px, y - py) or 1e-6
+                    k = 2 * w * (dd - r_) / dd; gx += k * (x - px); gy += k * (y - py)
+                x -= 0.08 * gx / W; y -= 0.08 * gy / W
+            res = math.sqrt(sum(w * (math.hypot(x - px, y - py) - r_) ** 2
+                                for px, py, r_, w in eff) / W)
+        else:                        # 2 точки: пересечение колец → зеркало → выбор
+            (c1x, c1y, r1, _), (c2x, c2y, r2, _) = eff[0], eff[1]
+            cands = circ_x((c1x, c1y), r1, (c2x, c2y), r2)
+            if not cands:
+                continue
+            (x, y), side = resolve_side(nid, cands)
+            if len(cands) == 2 and not side:      # неразрешённое зеркало — разброс велик
+                res = 0.5 * math.hypot(cands[0][0] - cands[1][0], cands[0][1] - cands[1][1])
+            else:                                 # разрешено / единственная — по SNR-шуму
+                res = max(0.1, 0.25 * (r1 + r2) / 2)
         node["est"] = dict(lat=round(clat + y / kmlat, 6), lon=round(clon + x / kmlon, 6),
                            unc=round(res, 2), by=len(hs))
+        if side:
+            node["est"]["side"] = side
 
 
 def flag_position_lies(nodes, links, geo):
@@ -358,8 +444,10 @@ def flag_position_lies(nodes, links, geo):
                                n=len(hs), level=level)
 
 
-def build(found, prev=None):
-    """found: {ip: результат query или None} → структура для фронтенда."""
+def build(found, prev=None, xlinks=None):
+    """found: {ip: результат query или None} → структура для фронтенда.
+    xlinks — чужие звенья из history (traceroute/NeighborInfo) для разрешения
+    зеркальной неоднозначности в estimate_positions (Фаза 6-Б)."""
     now = time.time()
     max_age = CFG["worldMaxAgeH"] * 3600
     known, names = CFG.get("known", {}), CFG.get("names", {})
@@ -658,18 +746,9 @@ def build(found, prev=None):
     for nid, n in stat.items():
         names.setdefault(nid, n.get("long") or n.get("short") or nid)
 
-    # Фаза 5: оценка позиций GPS-less нод по сигналу (если размещены ≥3 своих)
-    try:
-        estimate_positions(nodes, out_links, CFG.get("geo") or {})
-    except Exception as e:
-        log(f"estimate: {e!r}")
-    # Фаза 6-А: пометить ноды, чей заявленный GPS противоречит прямому приёму
-    try:
-        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
-    except Exception as e:
-        log(f"posflag: {e!r}")
-    # Фаза 6-В: подцепить геокод адресного имени GPS-less нодам (пул якорей;
-    # заполняется hub.geocode_loop в data/geo_addr.json)
+    # Фаза 6-В: геокод адресного имени GPS-less нодам (пул якорей из
+    # data/geo_addr.json от hub.geocode_loop) — ДО оценки позиций, чтобы
+    # адресные узлы служили ретрансляторами-якорями для разрешения стороны
     try:
         addr = json.loads((OUT.parent / "geo_addr.json").read_text())
         for n in nodes:
@@ -679,6 +758,16 @@ def build(found, prev=None):
                                  verified=bool(r.get("verified")))
     except Exception:
         pass
+    # Фаза 5/6-Б: оценка позиций GPS-less нод + разрешение зеркала по xlink
+    try:
+        estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
+    except Exception as e:
+        log(f"estimate: {e!r}")
+    # Фаза 6-А: пометить ноды, чей заявленный GPS противоречит прямому приёму
+    try:
+        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
+    except Exception as e:
+        log(f"posflag: {e!r}")
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],

@@ -866,8 +866,13 @@ def survey_loop():
             ch = [c for c in ch if c is not None]
             if ch and max(ch) > CFG.get("surveyMaxChUtil", 25):
                 continue
-            cand = [n["id"] for n in data.get("nodes", [])
-                    if not n.get("own") and n.get("id")]
+            # приоритет — ноды с НЕРАЗРЕШЁННЫМ зеркалом (есть est, но сторона
+            # не выбрана): одна трассировка через ретранслятор разрешит сторону.
+            # Иначе — круг по всем чужим по давности.
+            amb = [n["id"] for n in data.get("nodes", [])
+                   if n.get("est") and not n["est"].get("side") and not n.get("own")]
+            cand = amb or [n["id"] for n in data.get("nodes", [])
+                           if not n.get("own") and n.get("id")]
             if not cand:
                 continue
             now = time.time()
@@ -969,7 +974,12 @@ def topo_loop():
                     prev = json.loads(OUT_LIVE.read_text())
                 except Exception:
                     pass
-                data = scan.build(found, prev)
+                xlinks = []
+                try:
+                    xlinks = history.xlink_pairs(hours=CFG.get("xlinkHours", 336))
+                except Exception:
+                    pass
+                data = scan.build(found, prev, xlinks=xlinks)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 rx_flush()
