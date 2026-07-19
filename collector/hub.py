@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT))
 import scan  # noqa: E402 — соседний модуль: CFG, build(), log()
 import history  # noqa: E402 — лог истории в SQLite (графики/uptime/алерты)
 import geocode  # noqa: E402 — геокодинг адресных имён нод (Фаза 6-В)
+import nodestore  # noqa: E402 — персистентный кеш состояния узлов (переход)
 
 from pubsub import pub  # noqa: E402
 import meshtastic.tcp_interface  # noqa: E402
@@ -829,6 +830,56 @@ def hist_tick(data):
             log(f"hist-prune: {e!r}")
 
 
+def feed_store(found):
+    """Влить снимок nodeDB в персистентный кеш узлов (переходный этап: кеш
+    НАПОЛНЯЕТСЯ, но build() пока читает по-старому). Своя нода + кого она слышит
+    (per-leg в heard_by), плюс всё, что узел о себе прислал (имя/поза/телеметрия)."""
+    now = int(time.time())
+    for ip, info in (found or {}).items():
+        if not info or not info.get("id"):
+            continue
+        oid = info["id"]
+        nodestore.upsert(oid, ts=now, own=True,
+                         name=info.get("long") or info.get("short"),
+                         hw=info.get("hw"), role=info.get("role"), ip=ip,
+                         cfg=json.dumps(info.get("cfg")) if info.get("cfg") else None)
+        for did, e in (info.get("db") or {}).items():
+            if did == oid or not isinstance(e, dict):
+                continue
+            hops = e.get("hopsAway", 0) or 0
+            heard = int(e.get("lastHeard") or 0) or now
+            nodestore.note_leg(did, oid, e.get("snr"), hops, ts=heard)
+            u = e.get("user") or {}
+            f = {}
+            if u.get("longName") or u.get("shortName"):
+                f["name"] = u.get("longName") or u.get("shortName")
+            if u.get("hwModel"):
+                f["hw"] = u.get("hwModel")
+            if u.get("role"):
+                f["role"] = u.get("role")
+            if u.get("publicKey"):
+                f["has_key"] = 1
+            if e.get("viaMqtt"):
+                f["mqtt"] = 1
+            if u.get("isLicensed"):
+                f["licensed"] = 1
+            p = e.get("position") or {}
+            if p.get("latitudeI"):
+                f.update(lat=p["latitudeI"] / 1e7, lon=(p.get("longitudeI") or 0) / 1e7,
+                         alt=p.get("altitude"), pos_ts=heard)
+            dm = e.get("deviceMetrics") or {}
+            if dm:
+                f.update(batt=dm.get("batteryLevel"), volt=dm.get("voltage"),
+                         chutil=dm.get("channelUtilization"), air=dm.get("airUtilTx"),
+                         uptime=dm.get("uptimeSeconds"), dm_ts=heard)
+            if f:
+                nodestore.upsert(did, ts=heard, **f)
+    try:
+        nodestore.prune(CFG.get("worldMaxAgeH", 24) * 3600 * 2)
+    except Exception:
+        pass
+
+
 def rx_flush():
     """Сброс сигнального аккумулятора в history: агрегат (n, avg, sd, rssi) на
     пару приёмник×передатчик за прошедший интервал. sd — маркер LOS/NLOS."""
@@ -996,6 +1047,14 @@ def topo_loop():
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 rx_flush()
+                try:                       # переход на кеш: наполняем (build не читает)
+                    feed_store(found)
+                    for did, dv in dlive.items():   # точные прямые из потока (батч)
+                        nodestore.note_leg(did, dv[2] or "?", dv[1], 0, ts=int(dv[0]))
+                    nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
+                                              for n in data.get("nodes", []) if n.get("x") is not None})
+                except Exception as e:
+                    log(f"nodestore: {e!r}")
                 check_batt(data)
         except Exception as e:
             log(f"topo: {e!r}")

@@ -3,6 +3,7 @@ data/live.json
 data/messages.json
 data/channel.json
 data/history.db*
+data/nodes.db*
 data/tgmap.json
 data/geo_addr.json
 data/geo_cache.json
