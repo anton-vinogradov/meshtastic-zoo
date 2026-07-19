@@ -1160,7 +1160,7 @@
         ${sections}
         <div class="ptrace"><div class="trow"><button class="do-trace">${t("traceBtn")}</button>
           ${owners.length ? `<select class="tfrom" title="${t("traceFromWhich")}">${owners.map(o =>
-            `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>` : ""}</div>
+            `<option value="${esc(o.id)}"${lastTrace[id] && lastTrace[id][0] && lastTrace[id][0].id === o.id ? " selected" : ""}>${esc(o.short || o.label)}</option>`).join("")}</select>` : ""}</div>
           <div class="trace-out">${lastTrace[id] ? traceHtml(lastTrace[id]) : ""}</div></div>
         ${msgHtml}
         ${composeHtml}
@@ -1212,6 +1212,9 @@
           lastTrace[id] = d.trace.path;
           const out = panel.querySelector(".trace-out");
           if (out) out.innerHTML = traceHtml(d.trace.path);
+          // селектор «от кого» → реальный источник этого маршрута (path[0])
+          const sel = panel.querySelector(".tfrom"), src = (d.trace.path[0] || {}).id;
+          if (sel && src && [...sel.options].some(o => o.value === src)) sel.value = src;
         }
       })();
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
