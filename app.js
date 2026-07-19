@@ -81,6 +81,9 @@
       cNodeInfo: "NodeInfo interval",
       secMesh: "Mesh", secPos: "Position", cHopsAway: "Hops away", direct: "direct",
       posSus: "claims {0} km away, yet heard directly ({1} dB) — position likely wrong or stale",
+      geoSec: "Geolocation", gpsSrc: "reported by the node (GPS)", estSrc: "estimated from signal (radio)", addrSrc: "geocoded from name",
+      geoUnc: "uncertainty", geoByAnchors: "heard by (sites)", geoSide: "side", geoSideOk: "resolved via {0}", geoSideMirror: "mirror — not resolved",
+      geoVerif: "check", geoVerified: "GPS-verified", geoSoft: "unverified", geoQuery: "address", geoOffGps: "off the node's GPS", geoNone: "no location data",
       cViaMqtt: "Via MQTT", cLicensed: "Licensed (ham)",
       cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude", openMap: "open on OpenStreetMap →",
       publicChannel: "Public channel", gotByLabel: "received by",
@@ -152,6 +155,9 @@
       cNodeInfo: "Интервал NodeInfo",
       secMesh: "Сеть", secPos: "Позиция", cHopsAway: "Прыжков до неё", direct: "напрямую",
       posSus: "заявлено {0} км, но слышна напрямую ({1} дБ) — позиция, вероятно, неверна или устарела",
+      geoSec: "Геопозиция", gpsSrc: "передана узлом (GPS)", estSrc: "оценка по сигналу (радио)", addrSrc: "геокод по имени",
+      geoUnc: "неопределённость", geoByAnchors: "слышат площадок", geoSide: "сторона", geoSideOk: "разрешена ({0})", geoSideMirror: "зеркало — не разрешена",
+      geoVerif: "сверка", geoVerified: "сверено по GPS", geoSoft: "не сверено", geoQuery: "адрес", geoOffGps: "отклонение от GPS ноды", geoNone: "данных о положении нет",
       cViaMqtt: "Через MQTT", cLicensed: "Лицензирована (ham)",
       cLat: "Широта", cLon: "Долгота", cAlt: "Высота", openMap: "открыть на OpenStreetMap →",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
@@ -938,15 +944,39 @@
       ]);
       // Позиция — сразу миникартой (OSM-эмбед с маркером; грузится лениво,
       // только когда раздел раскрыт). Координаты broadcast — приблизительные.
+      // Геопозиция — ВСЁ, что знаем: GPS от узла, оценка по сигналу (билатерация),
+      // геокод по имени, детектор вранья. Показываем, если есть хоть один источник.
       const susRow = n.posSus
         ? `<div class="pwarn">⚠ ${esc(t("posSus", n.posSus.km, fmtSnr(n.posSus.snr)))}</div>` : "";
-      const secPos = i.lat == null ? "" :
-        `<details class="psec${n.posSus ? " sus" : ""}" id="sec-pos"><summary>${esc(t("secPos"))}${n.posSus ? " ⚠" : ""}</summary>
+      const gps = i.lat != null ? [i.lat, i.lon] : null;
+      const prim = gps || (n.est ? [n.est.lat, n.est.lon] : n.addr ? [n.addr.lat, n.addr.lon] : null);
+      const llRow = (la, lo) => `<div class="prow"><span>${esc(t("cLat"))} / ${esc(t("cLon"))}</span><span>${la.toFixed(5)}, ${lo.toFixed(5)}</span></div>`;
+      const kmFmt = (km) => km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+      const offGps = (la, lo) => gps ? `<div class="prow"><span>${esc(t("geoOffGps"))}</span><span>${esc(kmFmt(haversine(gps, [la, lo])))}</span></div>` : "";
+      let geoBody = "";
+      if (gps) geoBody += `<div class="geosrc"><b>📡 ${esc(t("gpsSrc"))}</b>${llRow(i.lat, i.lon)}`
+        + `${i.alt == null ? "" : `<div class="prow"><span>${esc(t("cAlt"))}</span><span>${i.alt} m</span></div>`}`
+        + `<a class="osmlink" href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lon}#map=15/${i.lat}/${i.lon}" target="_blank" rel="noopener noreferrer">${esc(t("openMap"))}</a></div>`;
+      if (n.est) {
+        const e = n.est;
+        geoBody += `<div class="geosrc"><b>📐 ${esc(t("estSrc"))}</b>${llRow(e.lat, e.lon)}`
+          + `<div class="prow"><span>${esc(t("geoUnc"))}</span><span>±${esc(kmFmt(e.unc))}</span></div>`
+          + `<div class="prow"><span>${esc(t("geoByAnchors"))}</span><span>${e.by}</span></div>`
+          + `<div class="prow"><span>${esc(t("geoSide"))}</span><span>${esc(e.side ? t("geoSideOk", lbl(e.side)) : t("geoSideMirror"))}</span></div>`
+          + `${offGps(e.lat, e.lon)}</div>`;
+      }
+      if (n.addr) {
+        const a = n.addr;
+        geoBody += `<div class="geosrc"><b>🏠 ${esc(t("addrSrc"))}</b>${llRow(a.lat, a.lon)}`
+          + `${a.q ? `<div class="prow"><span>${esc(t("geoQuery"))}</span><span>${esc(a.q)}</span></div>` : ""}`
+          + `<div class="prow"><span>${esc(t("geoVerif"))}</span><span>${esc(a.verified ? t("geoVerified") : t("geoSoft"))}</span></div>`
+          + `${offGps(a.lat, a.lon)}</div>`;
+      }
+      const secPos = (!geoBody && !susRow) ? "" :
+        `<details class="psec${n.posSus ? " sus" : ""}" id="sec-pos"><summary>${esc(t("geoSec"))}${n.posSus ? " ⚠" : ""}</summary>
           ${susRow}
-          <div class="minimap" id="pmini"></div>
-          <div class="prow"><span>${esc(t("cLat"))} / ${esc(t("cLon"))}</span><span>${i.lat.toFixed(5)}, ${i.lon.toFixed(5)}</span></div>
-          ${i.alt == null ? "" : `<div class="prow"><span>${esc(t("cAlt"))}</span><span>${i.alt} m</span></div>`}
-          <a class="osmlink" href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lon}#map=15/${i.lat}/${i.lon}" target="_blank" rel="noopener noreferrer">${esc(t("openMap"))}</a>
+          ${prim ? `<div class="minimap" id="pmini"></div>` : ""}
+          ${geoBody || `<div class="shint">${esc(t("geoNone"))}</div>`}
         </details>`;
       // История — наполняется асинхронно после отрисовки (fillHistory ниже)
       const secHist = `<details class="psec" id="sec-hist"><summary>${esc(t("secHist"))}</summary>`
@@ -1110,8 +1140,8 @@
       panel.classList.add("open");
       // мини-карта позиции: инициализируем при раскрытии секции (и если уже раскрыта)
       const posSec = panel.querySelector("#sec-pos");
-      if (posSec && i.lat != null) {
-        const drawMini = () => showMini(panel.querySelector("#pmini"), i.lat, i.lon);
+      if (posSec && prim) {
+        const drawMini = () => showMini(panel.querySelector("#pmini"), prim[0], prim[1]);
         posSec.addEventListener("toggle", () => { if (posSec.open) drawMini(); });
         if (posSec.open) setTimeout(drawMini, 30);
       }

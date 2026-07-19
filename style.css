@@ -521,6 +521,10 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .psec .prow { font-size: 13px; }
 #panel .psec .minimap { width: 100%; height: 180px; border: 0; border-radius: 8px; margin: 4px 0 2px; display: block; }
 #panel .psec .osmlink { display: inline-block; margin-top: 4px; font-size: 12px; color: #7fb0ff; text-decoration: none; }
+/* источники геопозиции (GPS / оценка по сигналу / геокод) — отдельными блоками */
+#panel .geosrc { margin-top: 8px; }
+#panel .geosrc > b { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 2px; }
+#panel .geosrc .prow:last-child { border-bottom: 0; }
 #panel .psec .osmlink:hover { text-decoration: underline; }
 #panel .plegs { margin-top: 12px; }
 #panel .plegs > b { display: block; margin-bottom: 2px; }
