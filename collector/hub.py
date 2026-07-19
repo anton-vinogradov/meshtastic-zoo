@@ -1565,6 +1565,8 @@ def main():
     load_tgmap()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
+    for _w in ("keeper", "writer", "reader", "pruner", "tg", "trace", "keyfetch", "geocode"):
+        beat(_w, "запуск…")   # чтобы все воркеры сразу видны на странице статуса
     threading.Thread(target=keeper, daemon=True).start()
     threading.Thread(target=writer_loop, daemon=True).start()   # №1 опрос → кеш
     threading.Thread(target=reader_loop, daemon=True).start()   # №2 кеш → live.json
