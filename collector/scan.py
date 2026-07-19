@@ -24,8 +24,12 @@ CFG = json.loads((ROOT / "config.json").read_text())
 OUT = ROOT.parent / "data" / "live.json"
 
 
-def layout(ids, des, wts=None):
+def layout(ids, des, wts=None, seed=None):
     """Жадная затравка «от самых связных» + weighted SMACOF.
+
+    seed={id:(x,y)} — позиции из прошлого live.json: засеянные ноды стартуют
+    ОТТУДА (стабильны между сканами/рестартами, карта не перетасовывается),
+    новые доразмещаются жадно вокруг них, SMACOF лишь дошлифовывает.
 
     Затравка: ядро — ноды с наибольшей связностью, остальные по убыванию
     (кандидаты на окружностях желаемых дистанций вокруг размещённых
@@ -49,7 +53,14 @@ def layout(ids, des, wts=None):
                    reverse=True)
 
     placed = {}
+    # засеянные (из prev) фиксируем ПЕРВЫМИ — стабильная база, новые лягут вокруг
+    if seed:
+        for nid in ids:
+            if nid in seed and seed[nid][0] is not None:
+                placed[nid] = (float(seed[nid][0]), float(seed[nid][1]))
     for k, nid in enumerate(order):
+        if nid in placed:
+            continue
         if not placed:
             placed[nid] = (0.0, 0.0)
             continue
@@ -96,6 +107,10 @@ def layout(ids, des, wts=None):
             w = wts.get((a, b), 1.0)
             adj[a].append((b, d, w))
             adj[b].append((a, d, w))
+    # мягкий якорь к прошлой позиции (временное сглаживание): засеянные ноды
+    # тянутся к seed, карта не дрожит скан-к-скану и бесшовна на рестарте, но
+    # раскладка всё же адаптируется к изменившимся плечам. Новые нод якоря нет.
+    aw = 0.5 if seed else 0.0
     for _ in range(240):
         # шаг мажоризации (Гаусса–Зейделя, обновление на месте — быстрее сходится):
         # каждый узел → взвешенное среднее «идеальных» точек по всем его плечам
@@ -109,6 +124,8 @@ def layout(ids, des, wts=None):
                 nx += w * (xj + d * dx / dist)
                 ny += w * (yj + d * dy / dist)
                 den += w
+            if aw and i in seed and seed[i][0] is not None:
+                nx += aw * float(seed[i][0]); ny += aw * float(seed[i][1]); den += aw
             if den > 0:
                 pos[i][0] = nx / den
                 pos[i][1] = ny / den
@@ -685,7 +702,11 @@ def build(found, prev=None, xlinks=None, direct_live=None):
                 des[key] = D0 * (2 - 0.5 ** (l["hops"] - 1))
                 wts[key] = 0.4  # непрямая связь — тянет слабо
 
-    pos = layout(sorted(node_ids), des, wts)
+    # Раскладку засеиваем позициями из прошлого live.json — стабильность между
+    # сканами и бесшовный рестарт (ноды не перетасовываются, новые лягут вокруг)
+    seed = {n["id"]: (n.get("x"), n.get("y")) for n in prev_nodes.values()
+            if n.get("x") is not None} if prev_nodes else None
+    pos = layout(sorted(node_ids), des, wts, seed=seed)
 
     # Карточки нод
     nodes = []
