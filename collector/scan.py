@@ -205,31 +205,43 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                 if d > 0.02:
                     cal.append((math.log10(d), l["snr"]))
 
-    def coarse_est(nid):
+    def coarse_est(nid, allow_single=False):
         """ГРУБАЯ оценка БЕЗ калибровки дальности: взвешенный по громкости
         центроид слышащих площадок (тянется к тем, кто слышит громче) +
-        ближайшая площадка. Нужно ≥2 РАЗНЫЕ площадки. Неопределённость большая
-        — это «примерно здесь, у громких площадок», не точка. coarse=True."""
+        ближайшая площадка. ≥2 площадки → центроид; 1 площадка → «рядом с ней»
+        (без триангуляции, unc больше) — но ТОЛЬКО если allow_single (для
+        подозрительных GPS, чтобы опровергнуть далёкий заявленный GPS; обычным
+        одну площадку не показываем, иначе десятки бессмысленных «у площадки»).
+        Неопределённость большая — это «примерно здесь», не точка. coarse=True."""
         hs = heard.get(nid, [])
-        if len({a for a, _ in hs}) < 2:
+        sites = {a for a, _ in hs}
+        if len(sites) < 2 and not (allow_single and sites):
             return None
         wl = [(a, max(0.1, s + 21.0)) for a, s in hs]
         W = sum(w for _, w in wl)
         la = sum(anchors[a][0] * w for a, w in wl) / W
         lo = sum(anchors[a][1] * w for a, w in wl) / W
         near = max(hs, key=lambda x: x[1])[0]
-        spread = max((_hav_km(anchors[near], anchors[a]) for a, _ in hs), default=0.0)
-        return dict(lat=round(la, 6), lon=round(lo, 6),
-                    unc=round(max(1.5, spread * 2.0), 2), by=len(hs),
-                    coarse=True, near=near)
+        if len(sites) < 2:
+            unc = 3.0                     # одна площадка — только «рядом», без триангуляции
+        else:
+            spread = max((_hav_km(anchors[near], anchors[a]) for a, _ in hs), default=0.0)
+            unc = max(1.5, spread * 2.0)
+        return dict(lat=round(la, 6), lon=round(lo, 6), unc=round(unc, 2),
+                    by=len(hs), coarse=True, near=near)
 
     def apply_coarse():
         c = 0
         for node in nodes:
             nid = node["id"]
-            if nid in gps or nid in anchors or node.get("own") or node.get("est"):
+            if nid in anchors or node.get("own") or node.get("est"):
                 continue
-            e = coarse_est(nid)
+            # GPS-нодам грубую даём ТОЛЬКО если их позиция под подозрением (posSus)
+            # — иначе доверяем их GPS и не засоряем карту дублем.
+            sus = bool(node.get("posSus"))
+            if nid in gps and not sus:
+                continue
+            e = coarse_est(nid, allow_single=sus)   # одну площадку — только подозрительным
             if e:
                 node["est"] = e
                 c += 1
@@ -607,7 +619,9 @@ def build_from_store(store, found=None, xlinks=None):
             d["heard"] = l["heard"]
         out_links.append(d)
 
-    # геолокация (как в build): адрес → оценка → флаг вранья
+    # геолокация: адрес → флаг вранья → оценка. Флаг ДО оценки, чтобы грубую
+    # прикидку по сигналу дать и GPS-нодам с ПОДОЗРИТЕЛЬНОЙ позицией (posSus) —
+    # показать, где нода на самом деле, против её заявленного далёкого GPS.
     try:
         addr = json.loads((OUT.parent / "geo_addr.json").read_text())
         for n in nodes:
@@ -617,15 +631,15 @@ def build_from_store(store, found=None, xlinks=None):
                                  verified=bool(r.get("verified")))
     except Exception:
         pass
+    try:
+        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
+    except Exception as e:
+        log(f"posflag: {e!r}")
     geocal = None
     try:
         geocal = estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
     except Exception as e:
         log(f"estimate: {e!r}")
-    try:
-        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
-    except Exception as e:
-        log(f"posflag: {e!r}")
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
