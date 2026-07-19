@@ -936,27 +936,58 @@ def rx_flush():
         log(f"rx_flush: {e!r}")
 
 
+def chan_util():
+    """Макс. загрузка канала (%) по своим нодам из live.json, или None."""
+    try:
+        data = json.loads(OUT_LIVE.read_text())
+    except Exception:
+        return None
+    ch = [(n.get("info") or {}).get("chUtil") for n in data.get("nodes", []) if n.get("own")]
+    ch = [c for c in ch if c is not None]
+    return max(ch) if ch else None
+
+
+def paced_sleep(base_s):
+    """ЕДИНОЕ правило темпа для ВСЕХ фоновых ЭФИРНЫХ процессов: адаптируем паузу
+    к загрузке канала — в ТИШИНЕ «топим газ» (чаще, но не быстрее paceFloorS),
+    спокойно — чуть чаще, средне — базовый темп, занято — реже. Возвращает
+    текущий chUtil (или None), чтобы воркер мог ещё и пропустить такт в перегруз."""
+    cu = chan_util()
+    q = CFG.get("quietChUtil", 8)
+    floor = max(30, CFG.get("paceFloorS", 60))
+    if cu is None:
+        d = base_s
+    elif cu < q:                            # почти тишина → газу
+        d = max(floor, base_s * 0.3)
+    elif cu < q * 2.5:                       # спокойно
+        d = max(floor, base_s * 0.6)
+    elif cu < CFG.get("busyChUtil", 35):     # средне — базовый темп
+        d = base_s
+    else:                                    # занято — тормозим
+        d = base_s * 2.5
+    time.sleep(d)
+    return cu
+
+
 _survey_last = {}  # id -> ts последней фоновой трассировки
 
 
-def survey_loop():
-    """Фоновая жатва чужих звеньев (Фаза 6, фундамент): редкий traceroute по
-    кругу. Активная проба эфира — бережно: раз в surveyEveryS (дефолт 15 мин),
-    пропуск при загруженном канале, один узел за такт, очередь по давности."""
+def trace_loop():
+    """ОТДЕЛЬНЫЙ воркер ТРАССИРОВКИ (Фаза 6): traceroute по кругу — подтверждает
+    прямых соседей (traceNbr), разрешает зеркала est, жнёт чужие звенья. Темп по
+    загрузке канала (paced_sleep): в тишину чаще, в час пик реже/пропуск. Один
+    узел за такт, очередь по давности."""
+    time.sleep(15)
     while True:
-        time.sleep(max(120, CFG.get("surveyEveryS", 900)))
+        cu = paced_sleep(CFG.get("traceEveryS", 900))
         try:
-            if not CFG.get("surveyEnabled", True):
+            if not CFG.get("traceEnabled", True):
                 continue
+            if cu is not None and cu > CFG.get("busyChUtil", 35):
+                continue                     # перегруз — пропускаем такт даже после паузы
             try:
                 data = json.loads(OUT_LIVE.read_text())
             except Exception:
-                continue
-            # эфир занят — пропускаем такт (не добавляем трафика в час пик)
-            ch = [(n.get("info") or {}).get("chUtil")
-                  for n in data.get("nodes", []) if n.get("own")]
-            ch = [c for c in ch if c is not None]
-            if ch and max(ch) > CFG.get("surveyMaxChUtil", 25):
                 continue
             # приоритет: (1) НЕПОДТВЕРЖДЁННЫЕ чёрные (слышим напрямую, но трасса
             # ещё не подтвердила = 1 хоп) — подтвердить соседа; (2) неразрешённое
@@ -983,41 +1014,37 @@ def survey_loop():
                 continue
             with lock:
                 pending_traces.add(target)
-            log(f"🧭 survey: трассирую {target} с {ent.get('id')}")
+            log(f"🧭 trace: трассирую {target} с {ent.get('id')} (chUtil {cu})")
             try:
                 ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
             except Exception as e:
-                log(f"🧭 survey {target}: {e!r}")
+                log(f"🧭 trace {target}: {e!r}")
             with lock:
                 pending_traces.discard(target)
         except Exception as e:
-            log(f"survey: {e!r}")
+            log(f"trace: {e!r}")
 
 
 _keyfetch_last = {}   # id -> ts последнего запроса ключа
 
 
 def keyfetch_loop():
-    """Тихий фоновый ДОБОР ключей у keyless-нод в эфире (как survey_loop): по
-    ОДНОЙ за такт, скип при загруженном канале, приоритет posSus-нарушителям,
-    один заход на ноду не чаще keyFetchPerNodeH часов. Только напрямую слышимые
-    keyless-ноды — solicit_key шлёт наш NodeInfo с wantResponse, они отвечают
-    своим (с publicKey). Не залпом, чтобы не спамить эфир."""
+    """Тихий фоновый ДОБОР ключей у keyless-нод в эфире: по ОДНОЙ за такт, темп по
+    загрузке канала (paced_sleep — в тишину чаще), пропуск в перегруз, приоритет
+    posSus-нарушителям, один заход на ноду не чаще keyFetchPerNodeH часов. Только
+    напрямую слышимые keyless — solicit_key шлёт наш NodeInfo с wantResponse."""
     time.sleep(35)   # дать первому скану наполнить live.json
     while True:
-        time.sleep(max(120, CFG.get("keyFetchEveryS", 300)))
+        cu = paced_sleep(CFG.get("keyFetchEveryS", 300))
         try:
             if not CFG.get("keyFetchEnabled", True):
                 continue
+            if cu is not None and cu > CFG.get("busyChUtil", 35):
+                continue                                # эфир занят — пропускаем такт
             try:
                 data = json.loads(OUT_LIVE.read_text())
             except Exception:
                 continue
-            ch = [(n.get("info") or {}).get("chUtil")
-                  for n in data.get("nodes", []) if n.get("own")]
-            ch = [c for c in ch if c is not None]
-            if ch and max(ch) > CFG.get("surveyMaxChUtil", 25):
-                continue                                # эфир занят — пропускаем такт
             now = time.time()
             fresh = CFG.get("keyFetchFreshMin", 30) * 60
             per = CFG.get("keyFetchPerNodeH", 3) * 3600
@@ -1483,8 +1510,8 @@ def main():
     threading.Thread(target=reader_loop, daemon=True).start()   # №2 кеш → live.json
     threading.Thread(target=pruner_loop, daemon=True).start()   # №3 чистка кеша
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
-    threading.Thread(target=survey_loop, daemon=True).start()   # жатва чужих звеньев
-    threading.Thread(target=keyfetch_loop, daemon=True).start() # тихий добор ключей у keyless
+    threading.Thread(target=trace_loop, daemon=True).start()    # отдельный воркер трассировки (темп по каналу)
+    threading.Thread(target=keyfetch_loop, daemon=True).start() # тихий добор ключей у keyless (темп по каналу)
     threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
