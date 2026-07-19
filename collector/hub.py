@@ -1300,9 +1300,34 @@ class Handler(SimpleHTTPRequestHandler):
             self._json({"ok": False, "error": "нет такого API"}, 404)
 
 
+def seed_direct_live():
+    """При старте засеять direct_live прямыми плечами из прошлого live.json,
+    чтобы рестарт НЕ осыпал карту в «бывшие соседи» до набора живого потока:
+    первый же build увидит недавно-прямые ноды чёрными. Ноды, реально ушедшие,
+    сами протухнут (плечо старше settle → обычный путь в серые/прочь)."""
+    try:
+        d = json.loads(OUT_LIVE.read_text())
+    except Exception:
+        return
+    own = {n["id"] for n in d.get("nodes", []) if n.get("own")}
+    n = 0
+    with rx_lock:
+        for l in d.get("links", []):
+            if (l.get("type") == "rf" and not l.get("hops") and l.get("snr") is not None
+                    and l.get("to") in own and l.get("heard")):
+                fid, ts = l["from"], l["heard"]
+                cur = direct_live.get(fid)
+                if not cur or cur[0] < ts:
+                    direct_live[fid] = (ts, float(l["snr"]), l["to"])
+                    n += 1
+    if n:
+        log(f"↺ засеяно direct_live из прошлого live.json: {n} прямых плеч")
+
+
 def main():
     load_messages()
     load_tgmap()
+    seed_direct_live()          # бесшовный рестарт: прямые ноды не осыпаются
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     threading.Thread(target=keeper, daemon=True).start()
