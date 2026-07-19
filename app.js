@@ -14,6 +14,7 @@
   let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
+  let mapView = null, mapBaseW = 0, mapBaseH = 0;              // зум/пан карты весов (viewBox), null = полный вид
   let nodeCap = parseInt(localStorage.getItem("mzNodeCap"), 10);  // лимит соседей (0/NaN = все)
   if (!(nodeCap >= 0)) nodeCap = 120;                          // дефолт: топ-120 по силе
 
@@ -794,6 +795,19 @@
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
 
+    // Зум/пан карты весов: сохранённый вид переживает пере-рендер (тик данных).
+    // При смене размера холста (ресайз/релейаут → другой W/H) сбрасываем к полному.
+    {
+      const _svg = document.querySelector("#map svg");
+      if (_svg) {
+        if (mapView && mapBaseW === W && mapBaseH === H)
+          _svg.setAttribute("viewBox", `${mapView.x} ${mapView.y} ${mapView.w} ${mapView.h}`);
+        else mapView = null;
+        mapBaseW = W; mapBaseH = H;
+        document.getElementById("map").style.cursor = mapView ? "grab" : "";
+      }
+    }
+
     // Панель подробностей ноды (по клику)
     const panel = document.getElementById("panel");
     const fmtUp = (s) => {
@@ -1525,6 +1539,71 @@
   };
   window.addEventListener("resize", refit);
   new ResizeObserver(refit).observe(document.getElementById("map"));
+  // Зум/пан «карты весов» (SVG связности): колесо — зум к курсору, перетаскивание
+  // при увеличении — пан, двойной клик по фону — сброс. Хранится в viewBox, поэтому
+  // масштабируется всё как картинка. Гео-вид (Leaflet, #geomap) не трогаем.
+  {
+    const mapEl = document.getElementById("map");
+    const svgNow = () => mapEl.querySelector("svg");
+    const active = () => svgNow() && !document.body.classList.contains("geo-on");
+    const clampXY = (x, y, w, h) => [
+      Math.max(0, Math.min(mapBaseW - w, x)),
+      Math.max(0, Math.min(mapBaseH - h, y))];
+    const applyVB = (svg, x, y, w, h) => {
+      mapView = { x, y, w, h };
+      svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+      mapEl.style.cursor = "grab";
+    };
+    const resetVB = (svg) => {
+      mapView = null;
+      svg.setAttribute("viewBox", `0 0 ${mapBaseW} ${mapBaseH}`);
+      mapEl.style.cursor = "";
+    };
+    mapEl.addEventListener("wheel", (e) => {
+      if (!active()) return;
+      e.preventDefault();
+      const svg = svgNow(), vb = svg.viewBox.baseVal, r = svg.getBoundingClientRect();
+      const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+      const cx = vb.x + fx * vb.width, cy = vb.y + fy * vb.height;   // точка под курсором (user coords)
+      let w = vb.width * (e.deltaY < 0 ? 0.85 : 1 / 0.85), h = vb.height * (e.deltaY < 0 ? 0.85 : 1 / 0.85);
+      if (w >= mapBaseW || h >= mapBaseH) return resetVB(svg);       // зум-аут до полного = сброс
+      w = Math.max(mapBaseW / 12, w); h = Math.max(mapBaseH / 12, h);  // потолок ~12×
+      const [x, y] = clampXY(cx - fx * w, cy - fy * h, w, h);         // курсор остаётся на месте
+      applyVB(svg, x, y, w, h);
+    }, { passive: false });
+    let pan = null, panned = false;
+    mapEl.addEventListener("pointerdown", (e) => {
+      if (!active() || !mapView) return;                             // пан только когда увеличено
+      const svg = svgNow();
+      pan = { cx: e.clientX, cy: e.clientY, v: { ...mapView }, r: svg.getBoundingClientRect() };
+      panned = false;
+    });
+    window.addEventListener("pointermove", (e) => {
+      if (!pan) return;
+      const dx = e.clientX - pan.cx, dy = e.clientY - pan.cy;
+      if (!panned && Math.hypot(dx, dy) < 4) return;                 // порог, чтобы клик не считался паном
+      panned = true;
+      mapEl.style.cursor = "grabbing";
+      const [x, y] = clampXY(pan.v.x - dx / pan.r.width * pan.v.w,
+        pan.v.y - dy / pan.r.height * pan.v.h, pan.v.w, pan.v.h);
+      const svg = svgNow();
+      if (svg) applyVB(svg, x, y, pan.v.w, pan.v.h);
+    });
+    window.addEventListener("pointerup", () => {
+      if (!pan) return;
+      pan = null;
+      mapEl.style.cursor = mapView ? "grab" : "";
+      if (panned) setTimeout(() => { panned = false; }, 0);          // дать capture-клику погаситься
+    });
+    // перетаскивание не должно кликом менять выбор ноды / закрывать панель
+    mapEl.addEventListener("click", (e) => {
+      if (panned) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
+    mapEl.addEventListener("dblclick", (e) => {
+      if (!active() || e.target.closest(".node")) return;
+      resetVB(svgNow());
+    });
+  }
   // Тумблеры отображения карты: делегируем на #settings (панель пересобирается)
   document.getElementById("settings").addEventListener("change", (e) => {
     if (e.target.id === "hopToggle") {
