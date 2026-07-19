@@ -80,7 +80,12 @@
       const m = METRIC[n]; if (!m || hist.length < 2) return "";
       const vals = hist.map(p => p[m.k]), clean = vals.filter(v => v != null);
       if (clean.length < 2) return "";
-      const cur = clean[clean.length-1], r = (clean[clean.length-1] - clean[0]) / spanH();
+      const cur = clean[clean.length-1];
+      let r;
+      if (m.cum) {  // накопительный счётчик (обнуляется при рестарте) — сумма приростов
+        r = 0; for (let i = 1; i < clean.length; i++) if (clean[i] > clean[i-1]) r += clean[i] - clean[i-1];
+        r /= spanH();
+      } else r = (clean[clean.length-1] - clean[0]) / spanH();
       const shown = m.down ? Math.max(0, -r) : r;      // темп в «полезную» сторону
       const rlbl = `${shown >= 0 ? "+" : ""}${shown.toFixed(1)}${m.unit}`;
       return `<div class="wgraph"><div class="wg-lbl">${m.lbl} <b>${fmt(cur)}</b> · <span class="rate">${rlbl}</span></div>
