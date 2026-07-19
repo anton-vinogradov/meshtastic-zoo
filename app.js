@@ -15,7 +15,7 @@
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
   let nodeCap = parseInt(localStorage.getItem("mzNodeCap"), 10);  // лимит соседей (0/NaN = все)
-  if (!(nodeCap >= 0)) nodeCap = 60;                           // дефолт: топ-60 по силе
+  if (!(nodeCap >= 0)) nodeCap = 120;                          // дефолт: топ-120 по силе
 
   // Лимит текста Meshtastic (payload ~200 байт), Enter-отправка, авто-обрезка.
   const MAX_MSG_BYTES = 200;
