@@ -1163,7 +1163,7 @@
       // мини-карта позиции: инициализируем при раскрытии секции (и если уже раскрыта)
       const posSec = panel.querySelector("#sec-pos");
       if (posSec && prim) {
-        const drawMini = () => showMini(panel.querySelector("#pmini"), prim[0], prim[1]);
+        const drawMini = () => showMini(panel.querySelector("#pmini"), n);
         posSec.addEventListener("toggle", () => { if (posSec.open) drawMini(); });
         if (posSec.open) setTimeout(drawMini, 30);
       }
@@ -2141,12 +2141,38 @@
   // мини-карта позиции в панели ноды (Leaflet — зум работает, в отличие от
   // OSM-embed iframe, у которого «минус» упирался в bbox)
   let miniMap = null;
-  function showMini(el, lat, lon) {
+  function showMini(el, n) {
     if (!el || typeof L === "undefined") return;
     if (miniMap) { try { miniMap.remove(); } catch { } miniMap = null; }
-    miniMap = L.map(el, { attributionControl: false }).setView([lat, lon], 13);
+    miniMap = L.map(el, { attributionControl: false });
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(miniMap);
-    L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 2, fillColor: "#e0a03c", fillOpacity: 1 }).addTo(miniMap);
+    const i = n.info || {}, pts = [];
+    // заявленный GPS (красный, если позиция под подозрением)
+    if (i.lat != null) {
+      L.circleMarker([i.lat, i.lon], { radius: 8, color: "#fff", weight: 2,
+        fillColor: n.posSus ? "#e0533c" : "#e0a03c", fillOpacity: 1 })
+        .bindTooltip(t("gpsSrc"), { direction: "top" }).addTo(miniMap);
+      pts.push([i.lat, i.lon]);
+    }
+    // геокод по имени (бирюзовый)
+    if (n.addr) {
+      L.circleMarker([n.addr.lat, n.addr.lon], { radius: 7, color: "#0f9b8e", weight: 2,
+        fillColor: "#0f9b8e", fillOpacity: 0.9 }).bindTooltip(t("addrSrc"), { direction: "top" }).addTo(miniMap);
+      pts.push([n.addr.lat, n.addr.lon]);
+    }
+    // ОБЛАСТЬ прикидки по сигналу: круг ±unc + точка (фиолетовый)
+    if (n.est) {
+      const R = Math.max(150, n.est.unc * 1000);
+      L.circle([n.est.lat, n.est.lon], { radius: R, color: "#b98bff", weight: 1.5,
+        fillColor: "#b98bff", fillOpacity: 0.12, dashArray: "4 4" }).addTo(miniMap);
+      L.circleMarker([n.est.lat, n.est.lon], { radius: 5, color: "#fff", weight: 1.5,
+        fillColor: "#b98bff", fillOpacity: 1 }).bindTooltip(t(n.est.coarse ? "estCoarse" : "estSrc"),
+        { direction: "top" }).addTo(miniMap);
+      const km = R / 1000, dla = km / 111, dlo = km / (111 * Math.cos(n.est.lat * Math.PI / 180));
+      pts.push([n.est.lat + dla, n.est.lon + dlo], [n.est.lat - dla, n.est.lon - dlo]);
+    }
+    if (pts.length > 1) miniMap.fitBounds(pts, { padding: [16, 16], maxZoom: 15 });
+    else if (pts.length === 1) miniMap.setView(pts[0], 13);
     setTimeout(() => miniMap && miniMap.invalidateSize(), 30);
   }
 
