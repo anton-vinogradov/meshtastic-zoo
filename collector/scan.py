@@ -441,7 +441,7 @@ def flag_position_lies(nodes, links, geo):
         if level:
             n["posSus"] = dict(km=round(dkm, 1), snr=snr, by=by, n=len(hs), level=level)
 
-def build_from_store(store, found=None, xlinks=None):
+def build_from_store(store, found=None, xlinks=None, traces=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -473,6 +473,16 @@ def build_from_store(store, found=None, xlinks=None):
             if isinstance(e, dict) and (e.get("user") or {}).get("publicKey"):
                 keys_by.setdefault(oid, set()).add(nid)
     own = set(stat)
+    # ПОДТВЕРЖДЁННЫЕ ТРАССИРОВКОЙ прямые соседи: узел, стоящий В МАРШРУТЕ РЯДОМ
+    # со своей нодой (1 хоп) — наземная правда топологии, в отличие от «слышим»
+    # по nodeDB (переизлучённые копии её сбивают).
+    trace_nbrs = set()
+    for tr in (traces or {}).values():
+        path = [p.get("id") for p in (tr.get("path") or [])]
+        for j, nid in enumerate(path):
+            if (j > 0 and path[j - 1] in own) or (j + 1 < len(path) and path[j + 1] in own):
+                trace_nbrs.add(nid)
+    trace_nbrs -= own
 
     def src_of(n):  # поля, которые читает node_info()
         s = dict(long=n.get("name"), role=n.get("role"), mqtt=n.get("mqtt"),
@@ -600,6 +610,8 @@ def build_from_store(store, found=None, xlinks=None):
             node["hop"] = c["hops"]
         if c.get("silent"):
             node["silent"] = True
+        if c["id"] in trace_nbrs:            # подтверждён трассировкой как прямой сосед
+            node["traceNbr"] = True
         if c.get("hw"):
             node["hw"] = c["hw"]
         if node_info(c):

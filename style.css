@@ -430,6 +430,12 @@ body:not(.geo-on) #geoctl { display: none; }
   accent-color: #8fce6a; cursor: pointer;
 }
 #settings .smap .shint { margin-top: 5px; }
+/* ползунок уровня карты (свои → +трасса → +слышим → +бывшие) */
+#settings .slvl { margin-bottom: 8px; }
+#settings .slvl > span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+#settings .slvl > span b { color: var(--text); }
+#settings .slvl input[type=range] { width: 100%; margin: 3px 0 1px; accent-color: #6ea8ff; cursor: pointer; }
+#settings .lvl-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
 /* редактор подсетей: строка CIDR + цвет + удалить, кнопка «+» */
 #settings #sub-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 #settings .subrow { display: flex; gap: 6px; align-items: center; }

@@ -11,7 +11,12 @@
 
   // Язык интерфейса выбирается в настройках, хранится локально
   let lang = localStorage.getItem("mzLang") || "en";
-  let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
+  const _lvl0 = localStorage.getItem("mzMapLevel");           // уровень карты (ползунок)
+  let mapLevel = _lvl0 == null ? 3 : Math.max(0, Math.min(3, +_lvl0));
+  // показывать узел на текущем уровне: 0 свои · 1 +подтв.трассировкой · 2 +слышим
+  // напрямую (чёрные) · 3 +слышали напрямую (серые = всё). Каждый включает предыдущий.
+  const showAt = (n) => n.own || (n.traceNbr && mapLevel >= 1)
+    || (n.hop == null && mapLevel >= 2) || (n.hop != null && mapLevel >= 3);
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
   let mapZoom = Math.min(5, Math.max(1, +localStorage.getItem("mzMapZoom") || 1)); // масштаб карты весов (кнопки +/−), 1 = влезает в экран
@@ -91,6 +96,8 @@
       chNoMsg: "no messages yet",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
       showHops: "former neighbor", showHopsTip: "show former direct neighbors now reached via relays",
+      lvlLbl: "Show", lvlTip: "how many nodes to show: own only → traceroute-confirmed neighbors → heard directly now → heard directly before (each adds the previous)",
+      lvl0: "own", lvl1: "+trace ✓", lvl2: "+heard", lvl3: "+former",
       resizeTip: "drag to resize",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
@@ -166,6 +173,8 @@
       chNoMsg: "пока пусто",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
       showHops: "бывший сосед", showHopsTip: "показывать бывших прямых соседей, теперь достижимых через ретрансляторы",
+      lvlLbl: "Показ", lvlTip: "сколько узлов показывать: только свои → подтверждённые трассировкой соседи → слышим напрямую сейчас → слышали напрямую раньше (каждый включает предыдущий)",
+      lvl0: "свои", lvl1: "+трасса ✓", lvl2: "+слышим", lvl3: "+бывшие",
       resizeTip: "потяните, чтобы изменить ширину",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
@@ -333,14 +342,14 @@
   }
 
   function render(D) {
-    // Галочка «многохопы» снята → убираем серые hop-ноды и их плечи из данных
-    // до раскладки (карта тогда вписывается только по реальным нодам)
-    if (!showHops) {
-      const drop = new Set(D.nodes.filter(n => n.hop != null).map(n => n.id));
-      if (drop.size) D = {
+    // Уровень карты (ползунок): оставляем узлы вплоть до выбранного тира (и их
+    // плечи), остальное убираем ДО раскладки — карта вписывается по видимым.
+    {
+      const keep = new Set(D.nodes.filter(showAt).map(n => n.id));
+      if (keep.size !== D.nodes.length) D = {
         ...D,
-        nodes: D.nodes.filter(n => n.hop == null),
-        links: D.links.filter(l => !drop.has(l.from) && !drop.has(l.to)),
+        nodes: D.nodes.filter(n => keep.has(n.id)),
+        links: D.links.filter(l => keep.has(l.from) && keep.has(l.to)),
       };
     }
     // Лимит соседей на карте (клиентский): в плотном дневном меше 1Вт-ноды слышат
@@ -818,7 +827,7 @@
     // на кадр «бланкует» картинки, пока декодирует новые элементы).
     const _now = Date.now() / 1000;
     const ageBk = (h) => !h ? -1 : (_now - h < 3600 ? Math.floor((_now - h) / 300) : Math.floor((_now - h) / 3600));
-    const mapSig = JSON.stringify([CW, CH, showHops ? 1 : 0, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
+    const mapSig = JSON.stringify([CW, CH, mapLevel, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
@@ -1380,7 +1389,7 @@
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
       <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
-      ${showHops ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
+      ${mapLevel >= 3 ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
       ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,
         D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}${
@@ -1674,12 +1683,18 @@
     zMapEl.scrollTop += e.deltaY * f;
     e.preventDefault();
   }, { passive: false });
+  // Ползунок уровня карты — «input» (живо при перетаскивании)
+  document.getElementById("settings").addEventListener("input", (e) => {
+    if (e.target.id !== "lvlSlider") return;
+    mapLevel = Math.max(0, Math.min(3, +e.target.value || 0));
+    localStorage.setItem("mzMapLevel", String(mapLevel));
+    const nm = document.getElementById("lvl-name");
+    if (nm) nm.textContent = t("lvl" + mapLevel);
+    if (lastLive) { render(lastLive); renderGeo(); }
+  });
   // Тумблеры отображения карты: делегируем на #settings (панель пересобирается)
   document.getElementById("settings").addEventListener("change", (e) => {
-    if (e.target.id === "hopToggle") {
-      showHops = e.target.checked;
-      localStorage.setItem("mzShowHops", showHops ? "1" : "0");
-    } else if (e.target.id === "geoOrientToggle") {
+    if (e.target.id === "geoOrientToggle") {
       geoOrient = e.target.checked;
       localStorage.setItem("mzGeoOrient", geoOrient ? "1" : "0");
     } else if (e.target.id === "critToggle") {
@@ -1756,9 +1771,11 @@
   const mapToggles = () => `
     <div class="smap">
       <b class="ssub">${t("mapSettings")}</b>
-      <label class="srow stog" title="${esc(t("showHopsTip"))}">
-        <span><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>
-        <input type="checkbox" id="hopToggle" ${showHops ? "checked" : ""}></label>
+      <div class="srow scol slvl" title="${esc(t("lvlTip"))}">
+        <span>${t("lvlLbl")}: <b id="lvl-name">${esc(t("lvl" + mapLevel))}</b></span>
+        <input type="range" id="lvlSlider" min="0" max="3" step="1" value="${mapLevel}">
+        <div class="lvl-ticks"><span>${t("lvl0")}</span><span>${t("lvl1")}</span><span>${t("lvl2")}</span><span>${t("lvl3")}</span></div>
+      </div>
       <label class="srow stog" title="${esc(t("geoOrientTip"))}">
         <span>🧭 ${t("geoOrientLbl")}</span>
         <input type="checkbox" id="geoOrientToggle" ${geoOrient ? "checked" : ""}></label>
@@ -1983,13 +2000,10 @@
     if (!geoView || !lastLive || !initGeo()) return;
     lmap.invalidateSize();
     geoLayer.clearLayers();
-    // тумблер «бывшие соседи» действует и здесь: снят → прячем многохопы
-    // (n.hop != null) и их плечи, как на карте связности
-    const gnodes = showHops ? (lastLive.nodes || [])
-      : (lastLive.nodes || []).filter(n => n.hop == null);
-    const gdrop = new Set((lastLive.nodes || []).filter(n => n.hop != null).map(n => n.id));
-    const glinks = showHops ? (lastLive.links || [])
-      : (lastLive.links || []).filter(l => !gdrop.has(l.from) && !gdrop.has(l.to));
+    // уровень карты действует и здесь: показываем узлы вплоть до выбранного тира
+    const gnodes = (lastLive.nodes || []).filter(showAt);
+    const gkeep = new Set(gnodes.map(n => n.id));
+    const glinks = (lastLive.links || []).filter(l => gkeep.has(l.from) && gkeep.has(l.to));
     const pts = [], byId = {};
     gnodes.forEach(n => byId[n.id] = n);
     const posOf = (id) => {                    // позиция ноды: своя размещённая / GPS соседа

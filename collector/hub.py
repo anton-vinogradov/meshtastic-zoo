@@ -958,13 +958,15 @@ def survey_loop():
             ch = [c for c in ch if c is not None]
             if ch and max(ch) > CFG.get("surveyMaxChUtil", 25):
                 continue
-            # приоритет — ноды с НЕРАЗРЕШЁННЫМ зеркалом (есть est, но сторона
-            # не выбрана): одна трассировка через ретранслятор разрешит сторону.
-            # Иначе — круг по всем чужим по давности.
+            # приоритет: (1) НЕПОДТВЕРЖДЁННЫЕ чёрные (слышим напрямую, но трасса
+            # ещё не подтвердила = 1 хоп) — подтвердить соседа; (2) неразрешённое
+            # зеркало est (трасса выберет сторону); (3) круг по всем чужим по давности.
+            unconf = [n["id"] for n in data.get("nodes", [])
+                      if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")]
             amb = [n["id"] for n in data.get("nodes", [])
                    if n.get("est") and not n["est"].get("side") and not n.get("own")]
-            cand = amb or [n["id"] for n in data.get("nodes", [])
-                           if not n.get("own") and n.get("id")]
+            cand = unconf or amb or [n["id"] for n in data.get("nodes", [])
+                                     if not n.get("own") and n.get("id")]
             if not cand:
                 continue
             now = time.time()
@@ -1161,7 +1163,8 @@ def reader_loop():
         try:
             if last_found:
                 store = nodestore.load(_store_keep_s())
-                data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks)
+                data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
+                                             traces=dict(traces))
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
