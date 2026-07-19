@@ -802,19 +802,20 @@
       </g>`);
     }
 
-    document.getElementById("map").innerHTML =
+    // скролл снимаем ДО замены innerHTML — иначе новый контент сбрасывает его в 0
+    const _map = document.getElementById("map");
+    const _sl = _map.scrollLeft, _st = _map.scrollTop;
+    _map.innerHTML =
       `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
 
     // Зум карты весов: увеличиваем РАЗМЕР холста (svg крупнее контейнера → он
     // перестаёт влезать и скроллится, расстояния между нодами растут), а не
-    // кадрируем. Скролл сохраняем между тиками, чтобы карта не прыгала.
+    // кадрируем. Скролл восстанавливаем (снят выше), чтобы карта не прыгала.
     {
-      const _map = document.getElementById("map");
       const _svg = _map.querySelector("svg");
       if (_svg) {
-        const sl = _map.scrollLeft, st = _map.scrollTop;
         if (mapZoom > 1.001) {
           _map.style.overflow = "auto";
           _svg.style.width = Math.round(box.width * mapZoom) + "px";
@@ -823,7 +824,7 @@
           _map.style.overflow = "hidden";
           _svg.style.width = ""; _svg.style.height = "";
         }
-        _map.scrollLeft = sl; _map.scrollTop = st;
+        _map.scrollLeft = _sl; _map.scrollTop = _st;
       }
     }
 
