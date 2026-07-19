@@ -360,6 +360,10 @@
     const H = 1150;
     const W = Math.max(720, Math.min(3200,
       Math.round(H * (box.width && box.height ? box.width / box.height : 0.84))));
+    // Зум РАЗДВИГАЕТ ноды, а карточки остаются прежнего размера: холст растёт в
+    // CW×CH раз, позиции масштабируются ×mapZoom, размеры карточек — в user-units
+    // фиксированы. svg рисуется в box×mapZoom пикселей → user→px постоянно.
+    const CW = Math.round(W * mapZoom), CH = Math.round(H * mapZoom);
 
     // Посадка сырого облака позиций сборщика: PCA-поворот главной осью
     // вдоль длинной стороны окна, ОДИН масштаб по обеим осям (пропорции
@@ -422,11 +426,11 @@
       const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
       const spanX = (Math.max(...xs) - Math.min(...xs)) || 1e-6;
       const spanY = (Math.max(...ys) - Math.min(...ys)) || 1e-6;
-      const scale = Math.min((W - 180) / spanX, (H - 200) / spanY);
+      const scale = Math.min((W - 180) / spanX, (H - 200) / spanY) * mapZoom;
       const cx0 = (Math.max(...xs) + Math.min(...xs)) / 2;
       const cy0 = (Math.max(...ys) + Math.min(...ys)) / 2;
       ids.forEach((id, i) => {
-        px[id] = [W / 2 + (P[i][0] - cx0) * scale, H / 2 + (P[i][1] - cy0) * scale];
+        px[id] = [CW / 2 + (P[i][0] - cx0) * scale, CH / 2 + (P[i][1] - cy0) * scale];
       });
       // Раздвижка перекрывшихся карточек (2D, симметрично). Со-локация своих
       // нод (одно железо → почти совпадающие точки в честной SNR-раскладке) плюс
@@ -434,8 +438,8 @@
       // кластер, по которому не попасть кликом. Разносим по более дешёвой оси и
       // мягко держим в границах — кластер у края расползается внутрь карты.
       const MINX = 114, MINY = 96;
-      const clX = (v) => Math.max(70, Math.min(W - 70, v));
-      const clY = (v) => Math.max(48, Math.min(H - 48, v));
+      const clX = (v) => Math.max(70, Math.min(CW - 70, v));
+      const clY = (v) => Math.max(48, Math.min(CH - 48, v));
       for (let r = 0; r < 600; r++) {
         let moved = false;
         for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
@@ -463,7 +467,7 @@
     for (const n of D.nodes) {
       const world = !n.own;
       const c = world ? WCARD : CARD;
-      const [cx, cy] = px[n.id] ?? [W / 2, H / 2];
+      const [cx, cy] = px[n.id] ?? [CW / 2, CH / 2];
       nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
     }
     // подсети своих нод и их цвета (переопределение из настроек или палитра)
@@ -799,7 +803,7 @@
     }
 
     document.getElementById("map").innerHTML =
-      `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img"
+      `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
 
