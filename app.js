@@ -14,7 +14,7 @@
   let showHops = localStorage.getItem("mzShowHops") !== "0";  // галочка в легенде
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
-  let mapView = null, mapBaseW = 0, mapBaseH = 0;              // зум/пан карты весов (viewBox), null = полный вид
+  let mapZoom = Math.min(5, Math.max(1, +localStorage.getItem("mzMapZoom") || 1)); // масштаб карты весов (кнопки +/−), 1 = влезает в экран
   let nodeCap = parseInt(localStorage.getItem("mzNodeCap"), 10);  // лимит соседей (0/NaN = все)
   if (!(nodeCap >= 0)) nodeCap = 120;                          // дефолт: топ-120 по силе
 
@@ -111,7 +111,7 @@
       capLbl: "max neighbors on map", capTip: "keep the N strongest neighbors (by SNR); 0 = show all",
       capOf: "{0} heard", capHint: "0 = all",
       critLine: "single point of failure: −{0} node(s) if it drops",
-      traceBtn: "🧭 trace route", traceRunning: "tracing… (sends a probe over the air)",
+      traceBtn: "🧭 trace route", traceFromWhich: "trace from which of your nodes", traceRunning: "tracing… (sends a probe over the air)",
       traceFail: "no response (node silent or too far)", traceNoNode: "no online node to trace from",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
@@ -182,7 +182,7 @@
       capLbl: "макс. соседей на карте", capTip: "оставить N самых сильных соседей (по SNR); 0 = показать всех",
       capOf: "слышно {0}", capHint: "0 = все",
       critLine: "единая точка отказа: −{0} нод при её отказе",
-      traceBtn: "🧭 трассировка", traceRunning: "трассирую… (шлёт пробу в эфир)",
+      traceBtn: "🧭 трассировка", traceFromWhich: "от какой своей ноды трассировать", traceRunning: "трассирую… (шлёт пробу в эфир)",
       traceFail: "нет ответа (нода молчит или далеко)", traceNoNode: "нет онлайн-ноды для запроса",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
@@ -803,16 +803,23 @@
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
 
-    // Зум/пан карты весов: сохранённый вид переживает пере-рендер (тик данных).
-    // При смене размера холста (ресайз/релейаут → другой W/H) сбрасываем к полному.
+    // Зум карты весов: увеличиваем РАЗМЕР холста (svg крупнее контейнера → он
+    // перестаёт влезать и скроллится, расстояния между нодами растут), а не
+    // кадрируем. Скролл сохраняем между тиками, чтобы карта не прыгала.
     {
-      const _svg = document.querySelector("#map svg");
+      const _map = document.getElementById("map");
+      const _svg = _map.querySelector("svg");
       if (_svg) {
-        if (mapView && mapBaseW === W && mapBaseH === H)
-          _svg.setAttribute("viewBox", `${mapView.x} ${mapView.y} ${mapView.w} ${mapView.h}`);
-        else mapView = null;
-        mapBaseW = W; mapBaseH = H;
-        document.getElementById("map").style.cursor = mapView ? "grab" : "";
+        const sl = _map.scrollLeft, st = _map.scrollTop;
+        if (mapZoom > 1.001) {
+          _map.style.overflow = "auto";
+          _svg.style.width = Math.round(box.width * mapZoom) + "px";
+          _svg.style.height = Math.round(box.height * mapZoom) + "px";
+        } else {
+          _map.style.overflow = "hidden";
+          _svg.style.width = ""; _svg.style.height = "";
+        }
+        _map.scrollLeft = sl; _map.scrollTop = st;
       }
     }
 
@@ -1076,7 +1083,9 @@
             ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${sections}
-        <div class="ptrace"><button class="do-trace">${t("traceBtn")}</button>
+        <div class="ptrace"><div class="trow"><button class="do-trace">${t("traceBtn")}</button>
+          ${owners.length ? `<select class="tfrom" title="${t("traceFromWhich")}">${owners.map(o =>
+            `<option value="${esc(o.id)}">${esc(o.short || o.label)}</option>`).join("")}</select>` : ""}</div>
           <div class="trace-out">${lastTrace[id] ? traceHtml(lastTrace[id]) : ""}</div></div>
         ${msgHtml}
         ${composeHtml}
@@ -1096,11 +1105,13 @@
       const traceBtn = panel.querySelector(".do-trace");
       if (traceBtn) traceBtn.onclick = async () => {
         const out = panel.querySelector(".trace-out");
-        const owner = (lastLive && lastLive.nodes || []).find(o => o.own && o.online);
-        if (!owner) { out.textContent = t("traceNoNode"); return; }
+        const sel = panel.querySelector(".tfrom");   // от какой своей ноды (по умолч. ближайшая)
+        const ownerId = sel ? sel.value
+          : ((lastLive && lastLive.nodes || []).find(o => o.own && o.online) || {}).id;
+        if (!ownerId) { out.textContent = t("traceNoNode"); return; }
         traceBtn.disabled = true;
         out.innerHTML = `<span class="trace-run">${esc(t("traceRunning"))}</span>`;
-        try { await fetch("/api/trace", { method: "POST", body: JSON.stringify({ node: owner.id, to: id }) }); } catch { }
+        try { await fetch("/api/trace", { method: "POST", body: JSON.stringify({ node: ownerId, to: id }) }); } catch { }
         for (let k = 0; k < 9; k++) {
           await new Promise(r => setTimeout(r, 1800));
           if (openId !== id) return;
@@ -1564,71 +1575,27 @@
   };
   window.addEventListener("resize", refit);
   new ResizeObserver(refit).observe(document.getElementById("map"));
-  // Зум/пан «карты весов» (SVG связности): колесо — зум к курсору, перетаскивание
-  // при увеличении — пан, двойной клик по фону — сброс. Хранится в viewBox, поэтому
-  // масштабируется всё как картинка. Гео-вид (Leaflet, #geomap) не трогаем.
-  {
-    const mapEl = document.getElementById("map");
-    const svgNow = () => mapEl.querySelector("svg");
-    const active = () => svgNow() && !document.body.classList.contains("geo-on");
-    const clampXY = (x, y, w, h) => [
-      Math.max(0, Math.min(mapBaseW - w, x)),
-      Math.max(0, Math.min(mapBaseH - h, y))];
-    const applyVB = (svg, x, y, w, h) => {
-      mapView = { x, y, w, h };
-      svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
-      mapEl.style.cursor = "grab";
-    };
-    const resetVB = (svg) => {
-      mapView = null;
-      svg.setAttribute("viewBox", `0 0 ${mapBaseW} ${mapBaseH}`);
-      mapEl.style.cursor = "";
-    };
-    mapEl.addEventListener("wheel", (e) => {
-      if (!active()) return;
-      e.preventDefault();
-      const svg = svgNow(), vb = svg.viewBox.baseVal, r = svg.getBoundingClientRect();
-      const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
-      const cx = vb.x + fx * vb.width, cy = vb.y + fy * vb.height;   // точка под курсором (user coords)
-      let w = vb.width * (e.deltaY < 0 ? 0.85 : 1 / 0.85), h = vb.height * (e.deltaY < 0 ? 0.85 : 1 / 0.85);
-      if (w >= mapBaseW || h >= mapBaseH) return resetVB(svg);       // зум-аут до полного = сброс
-      w = Math.max(mapBaseW / 12, w); h = Math.max(mapBaseH / 12, h);  // потолок ~12×
-      const [x, y] = clampXY(cx - fx * w, cy - fy * h, w, h);         // курсор остаётся на месте
-      applyVB(svg, x, y, w, h);
-    }, { passive: false });
-    let pan = null, panned = false;
-    mapEl.addEventListener("pointerdown", (e) => {
-      if (!active() || !mapView) return;                             // пан только когда увеличено
-      const svg = svgNow();
-      pan = { cx: e.clientX, cy: e.clientY, v: { ...mapView }, r: svg.getBoundingClientRect() };
-      panned = false;
-    });
-    window.addEventListener("pointermove", (e) => {
-      if (!pan) return;
-      const dx = e.clientX - pan.cx, dy = e.clientY - pan.cy;
-      if (!panned && Math.hypot(dx, dy) < 4) return;                 // порог, чтобы клик не считался паном
-      panned = true;
-      mapEl.style.cursor = "grabbing";
-      const [x, y] = clampXY(pan.v.x - dx / pan.r.width * pan.v.w,
-        pan.v.y - dy / pan.r.height * pan.v.h, pan.v.w, pan.v.h);
-      const svg = svgNow();
-      if (svg) applyVB(svg, x, y, pan.v.w, pan.v.h);
-    });
-    window.addEventListener("pointerup", () => {
-      if (!pan) return;
-      pan = null;
-      mapEl.style.cursor = mapView ? "grab" : "";
-      if (panned) setTimeout(() => { panned = false; }, 0);          // дать capture-клику погаситься
-    });
-    // перетаскивание не должно кликом менять выбор ноды / закрывать панель
-    mapEl.addEventListener("click", (e) => {
-      if (panned) { e.stopPropagation(); e.preventDefault(); }
-    }, true);
-    mapEl.addEventListener("dblclick", (e) => {
-      if (!active() || e.target.closest(".node")) return;
-      resetVB(svgNow());
+  // Зум карты весов кнопками + / − : увеличиваем размер холста (карта перестаёт
+  // влезать и скроллится, ноды разъезжаются). Клик по «%» — сброс к 100%.
+  const zMapEl = document.getElementById("map");
+  const zoomLbl = document.getElementById("mz-lbl");
+  const showZoom = () => { if (zoomLbl) zoomLbl.textContent = Math.round(mapZoom * 100) + "%"; };
+  function setMapZoom(z) {
+    const nz = Math.min(5, Math.max(1, Math.round(z * 100) / 100));
+    if (Math.abs(nz - mapZoom) < 0.001) return;
+    mapZoom = nz;
+    localStorage.setItem("mzMapZoom", String(mapZoom));
+    showZoom();
+    if (lastLive) render(lastLive);
+    requestAnimationFrame(() => {                 // центрируем на новом размере
+      zMapEl.scrollLeft = (zMapEl.scrollWidth - zMapEl.clientWidth) / 2;
+      zMapEl.scrollTop = (zMapEl.scrollHeight - zMapEl.clientHeight) / 2;
     });
   }
+  document.getElementById("mz-in")?.addEventListener("click", () => setMapZoom(mapZoom * 1.3));
+  document.getElementById("mz-out")?.addEventListener("click", () => setMapZoom(mapZoom / 1.3));
+  zoomLbl?.addEventListener("click", () => setMapZoom(1));
+  showZoom();
   // Тумблеры отображения карты: делегируем на #settings (панель пересобирается)
   document.getElementById("settings").addEventListener("change", (e) => {
     if (e.target.id === "hopToggle") {

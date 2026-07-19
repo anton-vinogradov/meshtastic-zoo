@@ -29,10 +29,24 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
-  display: flex;
-  justify-content: center;
+  overflow: hidden;
 }
-#map svg { display: block; height: 100%; width: 100%; }
+/* margin:auto центрирует при масштабе ≤100%; при зуме svg шире контейнера —
+   margin схлопывается в 0, карта слева и скроллится (без flex, иначе не доскроллить) */
+#map svg { display: block; height: 100%; width: 100%; margin: 0 auto; }
+#mapzoom {
+  position: fixed; left: 14px; bottom: 46px; z-index: 7;
+  display: flex; align-items: stretch;
+  border: 1px solid var(--zone-stroke); border-radius: 9px;
+  background: var(--zone-bg); overflow: hidden;
+}
+#mapzoom button {
+  border: 0; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 16px; padding: 5px 11px; line-height: 1;
+}
+#mapzoom #mz-lbl { font-size: 12px; min-width: 46px; border-left: 1px solid var(--zone-stroke); border-right: 1px solid var(--zone-stroke); }
+#mapzoom button:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+body.geo-on #mapzoom { display: none; }
 
 #legend {
   display: flex;
@@ -542,6 +556,8 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .leg .legspark .spark { width: 56px; height: 14px; }
 /* трассировка (traceroute) */
 #panel .ptrace { margin-top: 10px; }
+#panel .ptrace .trow { display: flex; gap: 6px; align-items: center; }
+#panel .ptrace .tfrom { background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 4px 6px; font-size: 12px; max-width: 130px; }
 #panel .do-trace { background: rgba(255, 255, 255, .08); border: 0; border-radius: 7px; color: var(--text); cursor: pointer; padding: 4px 10px; font-size: 12.5px; }
 #panel .do-trace:disabled { opacity: .6; cursor: default; }
 #panel .trace-out { margin-top: 6px; font-size: 12px; }
