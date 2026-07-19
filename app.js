@@ -811,18 +811,29 @@
       </g>`);
     }
 
-    // скролл снимаем ДО замены innerHTML — иначе новый контент сбрасывает его в 0
-    const _map = document.getElementById("map");
-    const _sl = _map.scrollLeft, _st = _map.scrollTop;
-    _map.innerHTML =
-      `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
+    // Сигнатура визуала карты — устойчива к дрожанию позиций (округляем до px) и
+    // ходу времени (возраст бакетим). Пересобираем DOM ТОЛЬКО когда что-то реально
+    // изменилось: иначе пересоздание ~130 <image> каждые 60с даёт мигание (браузер
+    // на кадр «бланкует» картинки, пока декодирует новые элементы).
+    const _now = Date.now() / 1000;
+    const ageBk = (h) => !h ? -1 : (_now - h < 3600 ? Math.floor((_now - h) / 300) : Math.floor((_now - h) / 3600));
+    const mapSig = JSON.stringify([CW, CH, showHops ? 1 : 0, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
+      Object.keys(nodes).sort().map(id => {
+        const nn = nodes[id], p = px[id] || [0, 0];
+        return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
+          nn.hw || "", nn.key ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard)];
+      }),
+      D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1]).sort()]);
+    const svgHTML = `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
-
-    // Зум карты весов: увеличиваем РАЗМЕР холста (svg крупнее контейнера → он
-    // перестаёт влезать и скроллится, расстояния между нодами растут), а не
-    // кадрируем. Скролл восстанавливаем (снят выше), чтобы карта не прыгала.
-    {
+    const _map = document.getElementById("map");
+    if (mapSig !== lastMapSig || !_map.querySelector("svg")) {   // визуал изменился → пересобираем
+      lastMapSig = mapSig;
+      const _sl = _map.scrollLeft, _st = _map.scrollTop;         // скролл снимаем ДО замены
+      _map.innerHTML = svgHTML;
+      // Зум: увеличиваем РАЗМЕР холста (svg крупнее контейнера → скроллится, ноды
+      // разъезжаются), скролл восстанавливаем, чтобы карта не прыгала.
       const _svg = _map.querySelector("svg");
       if (_svg) {
         if (mapZoom > 1.001) {
@@ -1399,6 +1410,7 @@
   }
 
   let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
+  let lastMapSig = "";   // сигнатура визуала карты — не пересобираем DOM зря (антимигание)
   const lastTrace = {};  // id → путь последней трассировки (переживает пере-рендер панели)
   let applySel = () => {}, hlPeer = () => {}, openPanel = () => {}; // ставятся в render
   let chan = [], chanSig = "", chanDraft = "";  // черновик канала переживает ре-рендеры
