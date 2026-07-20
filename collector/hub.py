@@ -366,6 +366,15 @@ def on_receive(packet=None, interface=None):
         frm_name = u.get("longName") or u.get("shortName") or frm
         text = dec.get("text") or ""
         reply_id = dec.get("replyId") or dec.get("reply_id")
+        # «Писатель» канала/лички → ОПЕРАТИВНО в store: узел, вышедший в эфир с
+        # текстом, должен сразу попасть на карту и в очередь воркеров (ключи/трассы),
+        # не дожидаясь, пока его засемплит nodeDB опрашиваемой ноды. Своё эхо — мимо.
+        if isinstance(frm_num, int) and frm not in {c.get("id") for c in list(conns.values())}:
+            hs2, hl2 = packet.get("hopStart"), packet.get("hopLimit")
+            mhops = hs2 - hl2 if isinstance(hs2, int) and isinstance(hl2, int) and hs2 >= hl2 else None
+            now_ts = int(time.time())
+            nodestore.upsert(frm, ts=now_ts, name=(frm_name if frm_name != frm else None))
+            nodestore.note_leg(frm, ent["id"], packet.get("rxSnr"), mhops, ts=now_ts)
 
         # РЕАКЦИЯ (тапбэк): emoji=1 + reply_id → привязать к целевому сообщению
         if dec.get("emoji") and reply_id:
@@ -1291,10 +1300,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({k: CFG.get(k) for k in EDITABLE})
         elif self.path.startswith("/api/status/history"):
             try:
-                hours = float((parse_qs(urlparse(self.path).query).get("hours") or [6])[0])
+                hours = float((parse_qs(urlparse(self.path).query).get("hours") or [24])[0])
             except ValueError:
-                hours = 6
-            self._json({"series": history.metrics_series(hours=hours)})
+                hours = 24
+            # корзина = час (или мельче для коротких окон), но не больше 48 точек
+            bins = max(1, min(48, round(hours)))
+            self._json({"series": history.metrics_series(hours=hours, bins=bins)})
         elif self.path.startswith("/api/status"):
             self._json(self._status())
         elif self.path.startswith("/api/geo"):

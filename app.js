@@ -93,7 +93,7 @@
       cViaMqtt: "Via MQTT", cLicensed: "Licensed (ham)",
       cLat: "Latitude", cLon: "Longitude", cAlt: "Altitude", openMap: "open on OpenStreetMap →",
       publicChannel: "Public channel", gotByLabel: "received by",
-      chNoMsg: "no messages yet",
+      chNoMsg: "no messages yet", openNodeCard: "open sender's node card",
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
       showHops: "former neighbor", showHopsTip: "show former direct neighbors now reached via relays",
       lvlLbl: "Show", lvlTip: "how many nodes to show: own only → traceroute-confirmed neighbors → heard directly now → heard directly before (each adds the previous)",
@@ -171,7 +171,7 @@
       cViaMqtt: "Через MQTT", cLicensed: "Лицензирована (ham)",
       cLat: "Широта", cLon: "Долгота", cAlt: "Высота", openMap: "открыть на OpenStreetMap →",
       publicChannel: "Публичный канал", gotByLabel: "приняли",
-      chNoMsg: "пока пусто",
+      chNoMsg: "пока пусто", openNodeCard: "открыть карточку отправителя",
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
       showHops: "бывший сосед", showHopsTip: "показывать бывших прямых соседей, теперь достижимых через ретрансляторы",
       lvlLbl: "Показ", lvlTip: "сколько узлов показывать: только свои → подтверждённые трассировкой соседи → слышим напрямую сейчас → слышали напрямую раньше (каждый включает предыдущий)",
@@ -1576,7 +1576,7 @@
           return `<span class="chip"><span class="dot" style="background:${col(g.snr)}"></span>${esc(nm)}${g.snr != null ? " " + fmtSnrM(g.snr) : ""}${hp}</span>`;
         }).join("");
       const r2me = isReplyToMe(m);
-      return `<div class="chmsg${r2me ? " reply2me" : ""}">
+      return `<div class="chmsg${r2me ? " reply2me" : ""}" data-frm="${esc(m.frm)}" title="${esc(t("openNodeCard"))}">
         <div class="mh"><span class="mfrom">${esc(m.frmName || m.frm)}${r2me
           ? ` <span class="r2me-tag">${esc(t("replyToYou"))}</span>` : ""}</span><span>${fmtAgoM(m.ts)}</span></div>
         ${quoteHtml(m)}
@@ -1604,7 +1604,16 @@
       if (foc) { inp0.focus(); try { inp0.setSelectionRange(caret[0], caret[1]); } catch { } }
     }
     const feedEl = el.querySelector(".chfeed");
-    if (feedEl) feedEl.scrollTop = feedAtBottom ? feedEl.scrollHeight : feedScroll;
+    if (feedEl) {
+      feedEl.scrollTop = feedAtBottom ? feedEl.scrollHeight : feedScroll;
+      // клик по сообщению → карточка отправителя (мимо ссылок/кнопок/реакций).
+      // openPanel — модульный алиас showPanel (сам showPanel вложен в render)
+      feedEl.addEventListener("click", (e) => {
+        if (e.target.closest("a, button, input, select, textarea, .mact2")) return;
+        const row = e.target.closest(".chmsg[data-frm]");
+        if (row) openPanel(row.dataset.frm, true);
+      });
+    }
     el.querySelector("#chclose").onclick = () => setChan(false);
     el.querySelector(".rcancel")?.addEventListener("click", () => { replyChan = null; renderChannel(); });
     wireMsgActions(el, {
@@ -1737,7 +1746,7 @@
     // подписи (.leaflet-interactive) её как раз открывает: не считать «снаружи»,
     // иначе тот же всплывающий клик мгновенно закрыл бы только что открытую панель
     if (!e.target.closest("#panel") && !e.target.closest(".node")
-        && !e.target.closest(".leaflet-interactive")) {
+        && !e.target.closest(".leaflet-interactive") && !e.target.closest(".chmsg")) {
       document.getElementById("panel").classList.remove("open");
       openId = null;
       applySel();

@@ -51,9 +51,9 @@
   <div id="upd"></div>
   <h1>meshtastic-zoo · статус</h1>
   <div class="sub" id="head">загрузка…</div>
-  <h2>Загрузка канала <span class="meta" style="text-transform:none;letter-spacing:0">· 6ч · чем тише, тем чаще воркеры выходят в эфир</span></h2>
+  <h2>Загрузка канала <span class="meta" style="text-transform:none;letter-spacing:0">· 24ч по часам · чем тише, тем чаще воркеры выходят в эфир</span></h2>
   <div id="graphs"></div>
-  <h2>Воркеры <span class="meta" style="text-transform:none;letter-spacing:0">· профиль за 6ч</span></h2><div id="workers"></div>
+  <h2>Воркеры <span class="meta" style="text-transform:none;letter-spacing:0">· профиль за 24ч (по часам)</span></h2><div id="workers"></div>
   <h2>Свои ноды</h2><div id="nodes"></div>
   <h2>Данные</h2><div class="grid" id="data"></div>
   <div class="sub" style="margin-top:20px"><a href="index.html">← на карту</a></div>
@@ -158,7 +158,7 @@
 
     async function tickHist() {
       let hh;
-      try { hh = (await (await fetch("/api/status/history?hours=6", { cache: "no-store" })).json()).series || []; }
+      try { hh = (await (await fetch("/api/status/history?hours=24", { cache: "no-store" })).json()).series || []; }
       catch { return; }
       const wasEmpty = hist.length < 2;
       hist = hh;  // кэш для профильных графиков в карточках воркеров (их рисует tick)

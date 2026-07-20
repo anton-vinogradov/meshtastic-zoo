@@ -146,14 +146,52 @@ def record_metrics(m, ts=None):
         c.commit()
 
 
-def metrics_series(hours=6):
-    """Ряд метрик за окно (сырой, 1 точка/цикл ридера ~60с)."""
-    since = int(time.time()) - int(hours * 3600)
+_CUM_METRICS = ("traces_done", "msgs")   # накопительные счётчики — не усредняем
+
+
+def metrics_series(hours=24, bins=24):
+    """Ряд метрик за окно, агрегированный по bins корзинам (по умолчанию 24ч / 1ч).
+    Уровневые метрики усредняются внутри корзины, накопительные (traces_done, msgs)
+    — берётся последнее значение корзины (чтобы прирост за час считался честно)."""
+    now = int(time.time())
+    since = now - int(hours * 3600)
+    bins = max(1, int(bins))
+    bw = max(1, int(hours * 3600) // bins)
     with _lock:
         rows = _db().execute(
             "SELECT ts," + ",".join(_METRIC_COLS) + " FROM metrics_hist "
             "WHERE ts>=? ORDER BY ts", (since,)).fetchall()
-    return [dict(ts=r[0], **{k: r[i + 1] for i, k in enumerate(_METRIC_COLS)}) for r in rows]
+    acc = [None] * bins
+    for r in rows:
+        b = int((r[0] - since) / bw)
+        if not (0 <= b < bins):
+            continue
+        a = acc[b]
+        if a is None:
+            a = acc[b] = {"ts": int(since + b * bw + bw // 2),
+                          "avg": {k: [] for k in _METRIC_COLS if k not in _CUM_METRICS},
+                          "last": {}}
+        for i, k in enumerate(_METRIC_COLS):
+            v = r[i + 1]
+            if v is None:
+                continue
+            if k in _CUM_METRICS:
+                a["last"][k] = v          # строки по возр. ts → останется последнее
+            else:
+                a["avg"][k].append(v)
+    out = []
+    for a in acc:
+        if a is None:
+            continue
+        pt = {"ts": a["ts"]}
+        for k in _METRIC_COLS:
+            if k in _CUM_METRICS:
+                pt[k] = a["last"].get(k)
+            else:
+                vals = a["avg"][k]
+                pt[k] = round(sum(vals) / len(vals), 3) if vals else None
+        out.append(pt)
+    return out
 
 
 def prune(days=30):
