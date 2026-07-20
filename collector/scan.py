@@ -190,7 +190,8 @@ def estimate_positions(nodes, links, geo, xlinks=None):
     gps = {}
     for n in nodes:
         i = n.get("info") or {}
-        if i.get("lat") is not None:
+        # лжецов (posSus) в пул и калибровку не берём: их «позиция» отравляет всё
+        if i.get("lat") is not None and not n.get("posSus"):
             gps[n["id"]] = (i["lat"], i["lon"])
     # кто-кого-слышит по якорям + калибровочные пары (якорь↔GPS-сосед)
     heard, cal = {}, []
@@ -205,30 +206,100 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                 if d > 0.02:
                     cal.append((math.log10(d), l["snr"]))
 
-    def coarse_est(nid, allow_single=False):
-        """ГРУБАЯ оценка БЕЗ калибровки дальности: взвешенный по громкости
-        центроид слышащих площадок (тянется к тем, кто слышит громче) +
-        ближайшая площадка. ≥2 площадки → центроид; 1 площадка → «рядом с ней»
-        (без триангуляции, unc больше) — но ТОЛЬКО если allow_single (для
-        подозрительных GPS, чтобы опровергнуть далёкий заявленный GPS; обычным
-        одну площадку не показываем, иначе десятки бессмысленных «у площадки»).
-        Неопределённость большая — это «примерно здесь», не точка. coarse=True."""
-        hs = heard.get(nid, [])
-        sites = {a for a, _ in hs}
-        if len(sites) < 2 and not (allow_single and sites):
+    # ГОРОДСКОЙ ПУЛ позиций (для графового размещения и призраков): свои якоря +
+    # честные GPS + геокоженные адреса. Это лекарство от 360-метровой базы своих
+    # площадок: центроид тянут разнесённые по городу точки, а не только «двор».
+    pool = {a: (p[0], p[1], 1.0) for a, p in anchors.items()}
+    for nid, p in gps.items():
+        pool.setdefault(nid, (p[0], p[1], 0.7))
+    for n in nodes:
+        a = n.get("addr")
+        if a and n["id"] not in pool:
+            pool[n["id"]] = (a["lat"], a["lon"], 1.0 if a.get("verified") else 0.4)
+    # индекс чужих звеньев: {id: [(партнёр, snr)]} — партнёр СЛЫШАЛ/СЛЫШАН, направление
+    # для размещения не важно (нужна смежность)
+    xl_by = {}
+    for p in (xlinks or []):
+        a, b = p.get("a"), p.get("b")
+        if a and b and a != b:
+            xl_by.setdefault(a, []).append((b, p.get("snr")))
+            xl_by.setdefault(b, []).append((a, p.get("snr")))
+    # типичная дальность слышимости меша = медианная длина звена между двумя
+    # позиционированными концами; это честный ПОЛ неопределённости размещения
+    dd = sorted(_hav_km(pool[p["a"]][:2], pool[p["b"]][:2]) for p in (xlinks or [])
+                if p.get("a") in pool and p.get("b") in pool
+                and _hav_km(pool[p["a"]][:2], pool[p["b"]][:2]) > 0.05)
+    med_km = min(5.0, max(0.8, dd[len(dd) // 2])) if len(dd) >= 5 else 2.0
+
+    def _place(pts, single_ok=False):
+        """Взвешенный центроид точек (lat, lon, w) + честная неопределённость:
+        RMS-разлёт якорей от центроида, но не меньше 0.7·медианной длины линка
+        (узел просто «в радиусе слышимости» каждого якоря). None если <2
+        РАЗЛИЧИМЫХ площадок (~220 м) и не single_ok."""
+        if not pts:
             return None
-        wl = [(a, max(0.1, s + 21.0)) for a, s in hs]
-        W = sum(w for _, w in wl)
-        la = sum(anchors[a][0] * w for a, w in wl) / W
-        lo = sum(anchors[a][1] * w for a, w in wl) / W
-        near = max(hs, key=lambda x: x[1])[0]
+        sites = {(round(la * 500), round(lo * 500)) for la, lo, _ in pts}
+        if len(sites) < 2 and not single_ok:
+            return None
+        W = sum(w for _, _, w in pts)
+        la = sum(p[0] * p[2] for p in pts) / W
+        lo = sum(p[1] * p[2] for p in pts) / W
         if len(sites) < 2:
-            unc = 3.0                     # одна площадка — только «рядом», без триангуляции
+            unc = max(3.0, med_km)
         else:
-            spread = max((_hav_km(anchors[near], anchors[a]) for a, _ in hs), default=0.0)
-            unc = max(1.5, spread * 2.0)
-        return dict(lat=round(la, 6), lon=round(lo, 6), unc=round(unc, 2),
-                    by=len(hs), coarse=True, near=near)
+            rms = math.sqrt(sum(w * _hav_km((la, lo), (pla, plo)) ** 2
+                                for pla, plo, w in pts) / W)
+            unc = max(1.0, 0.7 * med_km, rms)
+        return la, lo, min(unc, 15.0)
+
+    def coarse_est(nid, allow_single=False):
+        """ГРУБАЯ оценка БЕЗ метрики дальности (графовое размещение v2):
+        взвешенный по громкости центроид (а) своих слышащих площадок и
+        (б) городских xlink-партнёров с известными позициями. SNR — только
+        монотонный вес (громче = ближе = тяжелее), НЕ дистанция: калибровка
+        в городе мертва (см. docs/truth.ru.md). coarse=True, unc честная."""
+        pts, xa = [], 0
+        for a, s in heard.get(nid, []):
+            la, lo = anchors[a]
+            pts.append((la, lo, max(0.1, s + 21.0)))
+        for pr, s in xl_by.get(nid, []):
+            pp = pool.get(pr)
+            if not pp or pr == nid:
+                continue
+            pts.append((pp[0], pp[1], pp[2] * max(0.1, (s if s is not None else -10.0) + 21.0)))
+            xa += 1
+        got = _place(pts, single_ok=allow_single)
+        if not got:
+            return None
+        la, lo, unc = got
+        hs = heard.get(nid, [])
+        near = max(hs, key=lambda x: x[1])[0] if hs else None
+        e = dict(lat=round(la, 6), lon=round(lo, 6), unc=round(unc, 2),
+                 by=len(pts), coarse=True)
+        if near:
+            e["near"] = near
+        if xa:
+            e["xa"] = xa                  # сколько городских якорей участвовало
+        return e
+
+    def ghost_nodes():
+        """Призраки: узлы ВНЕ карты (мы их не слышим), но в xlink-графе с ≥2
+        различимыми позиционированными партнёрами — размещаем графово."""
+        onmap = {n["id"] for n in nodes}
+        out = []
+        for nid, prts in xl_by.items():
+            if nid in onmap or nid in pool:
+                continue
+            pts = [(pool[pr][0], pool[pr][1],
+                    pool[pr][2] * max(0.1, (s if s is not None else -10.0) + 21.0))
+                   for pr, s in prts if pr in pool and pr != nid]
+            got = _place(pts)
+            if not got:
+                continue
+            la, lo, unc = got
+            out.append(dict(id=nid, lat=round(la, 6), lon=round(lo, 6),
+                            unc=round(unc, 2), by=len(pts)))
+        return out
 
     def apply_coarse():
         c = 0
@@ -267,7 +338,8 @@ def estimate_positions(nodes, links, geo, xlinks=None):
     if not calib_ok:                       # точных колец нет → только грубые оценки
         c = apply_coarse()
         return {"ok": bool(c), "reason": "coarse", "nCal": len(cal),
-                "r": (round(r, 2) if r is not None else None), "nCoarse": c}
+                "r": (round(r, 2) if r is not None else None), "nCoarse": c,
+                "medKm": round(med_km, 2), "ghosts": ghost_nodes()}
 
     def snr_km(snr):
         # показатель клампим в безопасный диапазон: без этого при малом |B| он
@@ -291,12 +363,7 @@ def estimate_positions(nodes, links, geo, xlinks=None):
         if a and node["id"] not in posref:
             posref[node["id"]] = (*xy(a["lat"], a["lon"]), 1.0 if a.get("verified") else 0.4)
 
-    # индекс чужих звеньев по узлу: {id: [(другой конец, snr), ...]}
-    xl_by = {}
-    for p in (xlinks or []):
-        for k, o in ((p.get("a"), p.get("b")), (p.get("b"), p.get("a"))):
-            if k and o:
-                xl_by.setdefault(k, []).append((o, p.get("snr")))
+    # индекс чужих звеньев xl_by построен выше (общий с графовым размещением)
 
     def circ_x(c1, r1, c2, r2):
         """Точки пересечения двух окружностей (2 зеркальных, или 1 компромисс на
@@ -390,7 +457,8 @@ def estimate_positions(nodes, links, geo, xlinks=None):
     n_coarse = apply_coarse()             # ноды без точной оценки → грубая (центроид)
     n_est = sum(1 for nd in nodes if nd.get("est") and not nd["est"].get("coarse"))
     return {"ok": True, "reason": "ok", "nCal": len(cal), "r": round(r, 2),
-            "nEst": n_est, "nCoarse": n_coarse}
+            "nEst": n_est, "nCoarse": n_coarse,
+            "medKm": round(med_km, 2), "ghosts": ghost_nodes()}
 
 
 def flag_position_lies(nodes, links, geo):
@@ -627,6 +695,13 @@ def build_from_store(store, found=None, xlinks=None, traces=None):
         nodes = kept
         rf = [l for l in rf if l["frm"] not in drop and l["to"] not in drop]
 
+    # обратные замеры из трасс: (a,b) = «b услышал a на snr» → для плеча from→to
+    # (to слышит from) обратка = xd[(to, from)] — «как from слышит to», т.е. для
+    # плеча сосед→своя это ВТОРОЕ ПЛЕЧО: как соседи слышат НАС (иначе не узнать)
+    xd = {}
+    for p in (xlinks or []):
+        if p.get("a") and p.get("b"):
+            xd[(p["a"], p["b"])] = (p.get("snr"), p.get("last"))
     out_links = []
     for l in rf:
         d = {"from": l["frm"], "to": l["to"], "type": "rf",
@@ -635,6 +710,11 @@ def build_from_store(store, found=None, xlinks=None, traces=None):
             d["hops"] = l["hops"]
         if l.get("heard"):
             d["heard"] = l["heard"]
+        rev = xd.get((l["to"], l["frm"]))
+        if rev and rev[0] is not None:
+            d["snrOut"] = round(rev[0], 2)
+            if rev[1]:
+                d["outTs"] = int(rev[1])
         out_links.append(d)
 
     # геолокация: адрес → флаг вранья → оценка. Флаг ДО оценки, чтобы грубую
@@ -658,12 +738,42 @@ def build_from_store(store, found=None, xlinks=None, traces=None):
         geocal = estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
     except Exception as e:
         log(f"estimate: {e!r}")
+    # призраки — узлы вне карты, размещённые по xlink-партнёрам; имена из кеша
+    ghosts = (geocal or {}).pop("ghosts", []) if isinstance(geocal, dict) else []
+    if ghosts:
+        byrow = {r.get("id"): r for r in store}
+        for g in ghosts:
+            r0 = byrow.get(g["id"]) or {}
+            if r0.get("name"):
+                g["name"] = r0["name"]
+            if r0.get("hw"):
+                g["hw"] = r0["hw"]
+    # класс доверия позиции (см. docs/truth.ru.md): A размещено/подтверждено,
+    # B заявленный GPS не опровергнут, C опровергнут физикой (posSus),
+    # D адрес из имени, E оценка по графу/сигналу, F позиции нет
+    own_geo = {k for k, g in (CFG.get("geo") or {}).items()
+               if isinstance(g, dict) and g.get("lat") is not None}
+    for n in nodes:
+        i = n.get("info") or {}
+        if n["id"] in own_geo:
+            c = "A"
+        elif n.get("posSus"):
+            c = "C"
+        elif i.get("lat") is not None:
+            c = "B"
+        elif n.get("addr"):
+            c = "A" if n["addr"].get("verified") else "D"
+        elif n.get("est"):
+            c = "E"
+        else:
+            c = "F"
+        n["posCls"] = c
 
     return dict(
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                   updatedTs=int(now * 1000), directSeen=direct_seen, names=names,
                   geoCal=geocal),
-        nodes=nodes, links=out_links)
+        nodes=nodes, links=out_links, ghosts=ghosts)
 
 
