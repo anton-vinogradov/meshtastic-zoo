@@ -162,7 +162,7 @@
       catch { return; }
       const wasEmpty = hist.length < 2;
       hist = hh;  // кэш для профильных графиков в карточках воркеров (их рисует tick)
-      if (hh.length < 2) { el("graphs").innerHTML = '<div class="meta">график появится через несколько минут накопления</div>'; return; }
+      if (hh.length < 2) { el("graphs").innerHTML = '<div class="meta">графики наполняются по мере накопления (точка в час; линия появится за пару часов)</div>'; return; }
       const cur = hh.map(p => p.chutil).filter(v => v != null).slice(-1)[0];
       el("graphs").innerHTML =
         `<div class="tile grf"><div class="k">канал (chUtil %) · вход дросселя воркеров</div>
