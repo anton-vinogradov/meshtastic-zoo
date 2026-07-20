@@ -695,14 +695,16 @@ def build_from_store(store, found=None, xlinks=None, traces=None):
         nodes = kept
         rf = [l for l in rf if l["frm"] not in drop and l["to"] not in drop]
 
-    # обратные замеры из трасс: (a,b) = «b услышал a на snr» → для плеча from→to
-    # (to слышит from) обратка = xd[(to, from)] — «как from слышит to», т.е. для
-    # плеча сосед→своя это ВТОРОЕ ПЛЕЧО: как соседи слышат НАС (иначе не узнать)
+    # обратные замеры из трасс: xd[(a,b)] = «b услышал a на snr». Для плеча
+    # сосед→своя (своя слышит соседа) встречка xd[(своя, сосед)] = «как сосед
+    # слышит НАС» — ВТОРОЕ ПЛЕЧО. Эмитируем его отдельной встречной линией
+    # своя→сосед (`outLeg`), её рисует та же логика «мостов», что и own↔own.
     xd = {}
     for p in (xlinks or []):
         if p.get("a") and p.get("b"):
             xd[(p["a"], p["b"])] = (p.get("snr"), p.get("last"))
-    out_links = []
+    own_set = {n["id"] for n in nodes if n.get("own")}
+    out_links, extra, seen_rev = [], [], set()
     for l in rf:
         d = {"from": l["frm"], "to": l["to"], "type": "rf",
              "snr": None if l["snr"] is None else round(l["snr"], 2)}
@@ -710,12 +712,20 @@ def build_from_store(store, found=None, xlinks=None, traces=None):
             d["hops"] = l["hops"]
         if l.get("heard"):
             d["heard"] = l["heard"]
-        rev = xd.get((l["to"], l["frm"]))
-        if rev and rev[0] is not None:
-            d["snrOut"] = round(rev[0], 2)
-            if rev[1]:
-                d["outTs"] = int(rev[1])
         out_links.append(d)
+        # прямое плечо сосед→своя + есть замер «как своя долетела до соседа» →
+        # встречное плечо своя→сосед («нас слышат»)
+        if l["to"] in own_set and l["frm"] not in own_set and not l.get("hops"):
+            key = (l["to"], l["frm"])
+            rev = xd.get(key)
+            if rev and rev[0] is not None and key not in seen_rev:
+                seen_rev.add(key)
+                e = {"from": l["to"], "to": l["frm"], "type": "rf",
+                     "snr": round(rev[0], 2), "outLeg": True}
+                if rev[1]:
+                    e["heard"] = int(rev[1])
+                extra.append(e)
+    out_links += extra
 
     # геолокация: адрес → флаг вранья → оценка. Флаг ДО оценки, чтобы грубую
     # прикидку по сигналу дать и GPS-нодам с ПОДОЗРИТЕЛЬНОЙ позицией (posSus) —

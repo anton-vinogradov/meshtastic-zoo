@@ -113,7 +113,8 @@
       lblTotal: "total", lblOwn: "own",
       geoPlace: "place", geoPlaceHint: "place your nodes: hit “place”, then click the map",
       antOmni: "omni", antDir: "directional", antAzim: "az",
-      legOutTip: "reverse direction — how the far side hears (traceroute measurement)",
+      weHear: "we hear", theyHear: "they hear",
+      outLegTip: "reverse leg (from traceroute): {0} hears {1} at {2} dB",
       asymTip: "asymmetric link: we hear {0} dB, they hear {1} dB",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
@@ -200,7 +201,8 @@
       lblTotal: "всего", lblOwn: "свои",
       geoPlace: "поставить", geoPlaceHint: "размести свои ноды: «поставить» → клик по карте",
       antOmni: "круговая", antDir: "направленная", antAzim: "азимут",
-      legOutTip: "обратное направление — как та сторона слышит (замер трассировкой)",
+      weHear: "мы слышим", theyHear: "нас слышат",
+      outLegTip: "встречное плечо (из трассы): {0} слышит {1} на {2} dB",
       asymTip: "асимметрия: мы слышим {0} дБ, нас слышат {1} дБ",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
@@ -710,17 +712,15 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      // «a⇄b»: первое — как to слышит from (обычное плечо), второе — обратка из
-      // трассировки (как from слышит to). Для плеча сосед→своя это «нас слышат».
-      const outLbl = l.snrOut != null && !l.hops && l.snr != null ? `⇄${fmtSnr(l.snrOut)}` : "";
       const label = l.hops ? t("hop", l.hops)
-        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr) + outLbl;
-      const tip = (l.hops
-        ? t("hopTip", l.from, l.to, l.hops)
-        : l.snr == null
-          ? t("noDataTip", l.from, l.to, lbl2(l.to), lbl2(l.from))
-          : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% ${t("ofIdeal")}`)
-        + (l.snrOut != null ? ` · ${l.to} → ${l.from}: ${fmtSnr(l.snrOut)} dB` : "")
+        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
+      const tip = (l.outLeg
+        ? t("outLegTip", l.to, l.from, fmtSnr(l.snr))   // встречное плечо: как сосед слышит нас
+        : l.hops
+          ? t("hopTip", l.from, l.to, l.hops)
+          : l.snr == null
+            ? t("noDataTip", l.from, l.to, lbl2(l.to), lbl2(l.from))
+            : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% ${t("ofIdeal")}`)
         + (l.heard ? ` · ${t("heard", fmtAgo(l.heard))}` : "");
 
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
@@ -770,12 +770,14 @@
       const [sdx, sdy] = along(qcx - x1, qcy - y1, 3);
       const [edx, edy] = along(x2 - qcx, y2 - qcy, 6);
       x1 += sdx; y1 += sdy; x2 -= edx; y2 -= edy;
+      // встречное плечо «нас слышат» — мелкий пунктир, чтобы отличать от «мы слышим»
+      const dash = l.outLeg ? "2 4" : "6 6";
       const geom = bend
         ? `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${qcx.toFixed(1)} ${qcy.toFixed(1)}
             ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${col}" stroke-width="2"
-            stroke-dasharray="6 6" marker-end="url(#${mid})"/>`
+            stroke-dasharray="${dash}" marker-end="url(#${mid})"/>`
         : `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-            stroke="${col}" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#${mid})"/>`;
+            stroke="${col}" stroke-width="2" stroke-dasharray="${dash}" marker-end="url(#${mid})"/>`;
 
       // Подпись — «пилюля» прямо на линии (на дуге — по кривой),
       // повёрнутая вдоль неё: принадлежность очевидна, фон читается
@@ -859,7 +861,7 @@
           unread[id] || 0];   // маркер «✉ N» — в сигнатуру, иначе прочтение не перерисует карту
       }),
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
-        l.snrOut == null ? "" : Math.round(l.snrOut * 2) / 2]).sort()]);   // snrOut — в сигнатуру (иначе пилюля не обновится)
+        l.outLeg ? 1 : 0]).sort()]);   // outLeg (встречное плечо) — тоже в сигнатуру
     const svgHTML = `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
@@ -1063,25 +1065,27 @@
       const legLine = (l, who, ttl) => {
         const col = colorOf(l);
         const val = l.hops ? t("hop", l.hops) : l.snr == null ? t("noData") : `${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}%`;
-        // второе плечо (из трассировки): как та сторона слышит; Δ-бейдж при сильной асимметрии
-        let outPart = "";
-        if (l.snrOut != null) {
-          const dAs = l.snr != null ? Math.abs(l.snr - l.snrOut) : null;
-          outPart = `<span class="legout" title="${esc(t("legOutTip"))}">⇄ ${fmtSnr(l.snrOut)}${
-            l.outTs ? ` <span class="age">${fmtAge(l.outTs)}</span>` : ""}</span>`
-            + (dAs != null && dAs >= 6
-              ? `<span class="dasym" title="${esc(t("asymTip", fmtSnr(l.snr), fmtSnr(l.snrOut)))}">Δ${dAs.toFixed(0)}</span>` : "");
-        }
-        return `<div class="leg"><span class="dot" style="background:${col}"></span>
+        return `<div class="leg${l.outLeg ? " outleg" : ""}"><span class="dot" style="background:${col}"></span>
           <span class="who"${ttl ? ` title="${esc(ttl)}"` : ""}>${who}</span>
-          <span style="color:${col}">${val}</span>${outPart}
+          <span style="color:${col}">${val}</span>
           ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}
-          ${l.snr != null ? `<span class="legspark" data-src="${esc(l.from)}" data-dst="${esc(l.to)}" data-col="${col}"></span>` : ""}</div>`;
+          ${l.snr != null && !l.outLeg ? `<span class="legspark" data-src="${esc(l.from)}" data-dst="${esc(l.to)}" data-col="${col}"></span>` : ""}</div>`;
+      };
+      // встречное плечо (из трассы) = r.in.outLeg → ясные подписи «мы слышим» (r.out)
+      // и «нас слышат» (r.in) + Δ-бейдж асимметрии; own↔own оставляем стрелки →/←
+      const pairRow = (r) => {
+        const isOut = r.in && r.in.outLeg;
+        const dAs = isOut && r.in.snr != null && r.out.snr != null ? Math.abs(r.out.snr - r.in.snr) : null;
+        const dBadge = dAs != null && dAs >= 6
+          ? `<span class="dasym" title="${esc(t("asymTip", fmtSnr(r.out.snr), fmtSnr(r.in.snr)))}">Δ${dAs.toFixed(0)}</span>` : "";
+        const rows = isOut
+          ? legLine(r.out, t("weHear")) + legLine(r.in, t("theyHear"))
+          : legLine(r.out, "→") + legLine(r.in, "←");
+        return `<div class="pair" data-peer="${esc(r.other)}"><div class="pwho" title="${esc(lbl(r.other))}">⇄ ${esc(shortOf(r.other))}${dBadge}</div>${rows}</div>`;
       };
       const legs =
         (pairsL.length ? `<div class="psub">${t("twoWay")}</div>` : "") +
-        pairsL.map(r => `<div class="pair" data-peer="${esc(r.other)}"><div class="pwho" title="${esc(lbl(r.other))}">⇄ ${esc(shortOf(r.other))}</div>
-          ${legLine(r.out, "→")}${legLine(r.in, "←")}</div>`).join("") +
+        pairsL.map(pairRow).join("") +
         (singles.length ? `<div class="psub">${t("oneWay")}</div>` : "") +
         `<div class="singles">${singles.map(r =>
           `<div data-peer="${esc(r.other)}">${legLine(r.in || r.out, (r.out ? "→ " : "← ") + esc(shortOf(r.other)), lbl(r.other))}</div>`).join("")}</div>`;
