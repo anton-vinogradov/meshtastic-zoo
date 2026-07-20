@@ -146,12 +146,18 @@ def load(max_age_s):
     return out
 
 
-def prune(max_age_s):
-    """Удаляет протухшие (кроме своих). Возвращает число удалённых узлов."""
+def prune(max_age_s, keep_ids=None):
+    """Удаляет протухшие (кроме своих и избранных keep_ids). Возвращает число удалённых."""
     cut = int(time.time()) - int(max_age_s)
+    keep = [k for k in (keep_ids or ()) if k]
+    q = "DELETE FROM node_state WHERE last_heard<? AND own=0"
+    args = [cut]
+    if keep:
+        q += " AND id NOT IN (%s)" % ",".join("?" * len(keep))
+        args += keep
     with _lock:
         c = _db()
-        cur = c.execute("DELETE FROM node_state WHERE last_heard<? AND own=0", (cut,))
+        cur = c.execute(q, args)
         c.commit()
         return cur.rowcount or 0
 

@@ -524,6 +524,11 @@ body:not(.geo-on) #geoctl { display: none; }
   background: rgba(255,255,255,.06); border-radius: 12px; padding: 4px; }
 #panel .phead b { font-size: 17px; }
 #panel .plong { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+/* звезда «избранное» в шапке панели */
+#panel .phead .pfav { margin-left: auto; background: none; border: 0; cursor: pointer;
+  font-size: 21px; line-height: 1; color: #55555c; padding: 2px 4px; align-self: flex-start; }
+#panel .phead .pfav.on { color: #e0c341; }
+#panel .phead .pfav:hover { color: #e0c341; }
 #panel .prow { display: flex; justify-content: space-between; gap: 12px;
   padding: 3.5px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
 #panel .prow span:first-child { color: var(--muted); }
@@ -602,6 +607,11 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .trace-out .tarrow { color: var(--muted); }
 #panel .trace-out .tsnr { color: #7bb0ff; margin-left: auto; white-space: nowrap; }
 #panel .trace-out .trace-run { color: var(--muted); }
+/* «Все»: блок результата на каждый источник */
+#panel .trace-out .tsrc { margin-top: 6px; padding-left: 6px; border-left: 2px solid var(--zone-stroke); }
+#panel .trace-out .tsrc:first-child { margin-top: 0; }
+#panel .trace-out .tsrc-h { font-weight: 600; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
+#panel .trace-out .tfail { color: #e0803c; font-size: 11.5px; }
 /* график «узлов на карте» во времени (в настройках) */
 #settings .nn-body { margin-top: 4px; }
 #settings .nn-now { font-size: 12.5px; color: var(--text); margin-bottom: 3px; }

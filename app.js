@@ -134,6 +134,8 @@
       capOf: "{0} heard", capHint: "0 = all",
       critLine: "single point of failure: −{0} node(s) if it drops",
       traceBtn: "🧭 trace route", traceFromWhich: "trace from which of your nodes", traceRunning: "tracing… (sends a probe over the air)",
+      traceAll: "All (sequential)",
+      favOn: "favorite — kept in cache (click to remove)", favOff: "add to favorites — never pruned from cache",
       traceFail: "no response (node silent or too far)", traceNoNode: "no online node to trace from",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
@@ -222,6 +224,8 @@
       capOf: "слышно {0}", capHint: "0 = все",
       critLine: "единая точка отказа: −{0} нод при её отказе",
       traceBtn: "🧭 трассировка", traceFromWhich: "от какой своей ноды трассировать", traceRunning: "трассирую… (шлёт пробу в эфир)",
+      traceAll: "Все (по очереди)",
+      favOn: "избранное — держим в кеше (клик — убрать)", favOff: "в избранное — не прунится из кеша",
       traceFail: "нет ответа (нода молчит или далеко)", traceNoNode: "нет онлайн-ноды для запроса",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
@@ -830,6 +834,9 @@
       // замок в углу, если публичный ключ ноды ещё не получен (нельзя слать DM)
       const keyBadge = n.key === false
         ? `<text x="${x + 6}" y="${y + n.h - 6}" font-size="11">🔒</text>` : "";
+      // звезда — избранный узел (не прунится из кеша)
+      const favBadge = n.fav
+        ? `<text x="${x + n.w - 6}" y="${y + n.h - 6}" text-anchor="end" font-size="12" fill="#e0c341">★</text>` : "";
       // единая точка отказа: жёлтая рамка + ⚠N (сколько теряем при отказе)
       const critN = showCrit ? crit[n.id] : 0;
       const critBadge = critN ? `<rect x="${x - 2}" y="${y - 2}" width="${n.w + 4}" height="${n.h + 4}" rx="${n.r + 2}"
@@ -839,7 +846,7 @@
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
           fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
-        ${critBadge}${photo}${badge}${mailBadge}${keyBadge}
+        ${critBadge}${photo}${badge}${mailBadge}${keyBadge}${favBadge}
         <text x="${n.cx}" y="${y + 55}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 10 ? 10 : 11.5}" font-weight="700">${esc(nm)}</text>
         <text x="${n.cx}" y="${y + 71}" text-anchor="middle" fill="${subFill}"
@@ -858,7 +865,7 @@
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
           nn.hw || "", nn.key ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
-          unread[id] || 0];   // маркер «✉ N» — в сигнатуру, иначе прочтение не перерисует карту
+          unread[id] || 0, nn.fav ? 1 : 0];   // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
       }),
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
         l.outLeg ? 1 : 0]).sort()]);   // outLeg (встречное плечо) — тоже в сигнатуру
@@ -1199,12 +1206,14 @@
         <button id="pclose" aria-label="${t("close")}">×</button>
         <div class="phead"><img src="${hwImg(n.hw)}" alt="">
           <div><b>${esc(n.label)}</b>${i.long && i.long !== n.label
-            ? `<div class="plong">${esc(i.long)}</div>` : ""}</div></div>
+            ? `<div class="plong">${esc(i.long)}</div>` : ""}</div>
+          ${n.own ? "" : `<button class="pfav${n.fav ? " on" : ""}" title="${esc(t(n.fav ? "favOn" : "favOff"))}">${n.fav ? "★" : "☆"}</button>`}</div>
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${sections}
         <div class="ptrace"><div class="trow"><button class="do-trace"${traceRunning[id] ? " disabled" : ""}>${t("traceBtn")}</button>
           ${owners.length ? `<select class="tfrom" title="${t("traceFromWhich")}">${owners.map(o =>
-            `<option value="${esc(o.id)}"${lastTrace[id] && lastTrace[id][0] && lastTrace[id][0].id === o.id ? " selected" : ""}>${esc(o.short || o.label)}</option>`).join("")}</select>` : ""}</div>
+            `<option value="${esc(o.id)}"${lastTrace[id] && lastTrace[id][0] && lastTrace[id][0].id === o.id ? " selected" : ""}>${esc(o.short || o.label)}</option>`).join("")
+            }${owners.length > 1 ? `<option value="__all__">${esc(t("traceAll"))}</option>` : ""}</select>` : ""}</div>
           <div class="trace-out">${traceRunning[id] ? `<span class="trace-run">${esc(t("traceRunning"))}</span>`
             : (lastTrace[id] ? traceHtml(lastTrace[id]) : "")}</div></div>
         ${msgHtml}
@@ -1227,31 +1236,55 @@
       // пере-собраться (смена статусов сообщений), пишем уже в новые узлы DOM
       const setTraceOut = (html) => { const o = panel.querySelector(".trace-out"); if (o) o.innerHTML = html; };
       const enableTrace = () => { const b = panel.querySelector(".do-trace"); if (b) b.disabled = false; };
-      if (traceBtn) traceBtn.onclick = async () => {
-        const sel = panel.querySelector(".tfrom");   // от какой своей ноды (по умолч. ближайшая)
-        const ownerId = sel ? sel.value
-          : ((lastLive && lastLive.nodes || []).find(o => o.own && o.online) || {}).id;
-        if (!ownerId) { setTraceOut(`<span>${esc(t("traceNoNode"))}</span>`); return; }
-        traceBtn.disabled = true;
-        traceRunning[id] = true;                 // индикатор переживёт пере-сборку панели
-        setTraceOut(`<span class="trace-run">${esc(t("traceRunning"))}</span>`);
+      const ownName = (oid) => (nodes[oid] || {}).short || lbl(oid);
+      // одна проба: POST + поллинг ответа именно ОТ этого источника (path[0]===owner,
+      // т.к. traces[to] чистится на каждый POST) → путь, или null (не вернулась)
+      const oneTrace = async (ownerId) => {
         try { await fetch("/api/trace", { method: "POST", body: JSON.stringify({ node: ownerId, to: id }) }); } catch { }
         for (let k = 0; k < 9; k++) {
           await new Promise(r => setTimeout(r, 1800));
-          if (openId !== id) { delete traceRunning[id]; return; }
+          if (openId !== id) return "abort";
           let d = null;
           try { d = await (await fetch("/api/trace?to=" + encodeURIComponent(id), { cache: "no-store" })).json(); } catch { }
-          if (d && d.trace) {
-            lastTrace[id] = d.trace.path;         // пережить пере-рендер панели
-            delete traceRunning[id];
-            setTraceOut(traceHtml(d.trace.path));
-            enableTrace();
-            return;
-          }
-          if (d && !d.pending) break;
+          if (d && d.trace && (d.trace.path[0] || {}).id === ownerId) return d.trace.path;
+          if (d && !d.pending && !(d.trace)) break;
+        }
+        return null;
+      };
+      const srcBlock = (oid, inner) => `<div class="tsrc"><div class="tsrc-h">${esc(ownName(oid))}</div>${inner}</div>`;
+      if (traceBtn) traceBtn.onclick = async () => {
+        const sel = panel.querySelector(".tfrom");
+        const val = sel ? sel.value : null;
+        const onlineOwn = (lastLive && lastLive.nodes || []).filter(o => o.own && o.online);
+        const froms = val === "__all__" ? onlineOwn.map(o => o.id)
+          : [val || (onlineOwn[0] || {}).id];
+        if (!froms[0]) { setTraceOut(`<span>${esc(t("traceNoNode"))}</span>`); return; }
+        traceBtn.disabled = true;
+        traceRunning[id] = true;                 // индикатор переживёт пере-сборку панели
+        const running = `<span class="trace-run">${esc(t("traceRunning"))}</span>`;
+        if (froms.length === 1) {                // одиночная — как раньше
+          setTraceOut(running);
+          const path = await oneTrace(froms[0]);
+          if (path === "abort") { delete traceRunning[id]; return; }
+          delete traceRunning[id];
+          if (path) { lastTrace[id] = path; setTraceOut(traceHtml(path)); }
+          else setTraceOut(`<span>${esc(t("traceFail"))}</span>`);
+          enableTrace();
+          return;
+        }
+        // «Все» — последовательно со всех своих (одновременный залп забил бы канал)
+        const done = [];                         // [{oid, path|null}]
+        for (const oid of froms) {
+          setTraceOut(done.map(r => srcBlock(r.oid, r.path ? traceHtml(r.path)
+            : `<span class="tfail">${esc(t("traceFail"))}</span>`)).join("") + srcBlock(oid, running));
+          const path = await oneTrace(oid);
+          if (path === "abort") { delete traceRunning[id]; return; }
+          done.push({ oid, path });
+          if (path) lastTrace[id] = path;        // последний успешный — в кеш
         }
         delete traceRunning[id];
-        setTraceOut(`<span>${esc(t("traceFail"))}</span>`);
+        setTraceOut(done.map(r => srcBlock(r.oid, r.path ? traceHtml(r.path)
+          : `<span class="tfail">${esc(t("traceFail"))}</span>`)).join(""));
         enableTrace();
       };
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
@@ -1296,6 +1329,17 @@
       const th = panel.querySelector(".thread");
       if (th) th.scrollTop = th.scrollHeight;
       panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; applySel(); };
+      const favBtn = panel.querySelector(".pfav");   // избранное: не прунится из кеша
+      if (favBtn) favBtn.onclick = async () => {
+        const on = !favBtn.classList.contains("on");
+        favBtn.disabled = true;
+        try { await fetch("/api/favorite", { method: "POST", body: JSON.stringify({ id, on }) }); } catch { }
+        favBtn.classList.toggle("on", on); favBtn.textContent = on ? "★" : "☆";
+        favBtn.title = t(on ? "favOn" : "favOff"); favBtn.disabled = false;
+        if (nodes[id]) nodes[id].fav = on;           // локально → звезда на карте сразу
+        const ln = lastLive && lastLive.nodes.find(x => x.id === id);
+        if (ln) { ln.fav = on; render(lastLive); }
+      };
       // подсветить выбранную ноду на карте; наведение на плечо — синий контур соседа
       applySel();
       panel.querySelectorAll("[data-peer]").forEach(el => {

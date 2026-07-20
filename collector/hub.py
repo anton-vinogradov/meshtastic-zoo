@@ -42,6 +42,7 @@ OUT_MSGS = ROOT.parent / "data" / "messages.json"
 OUT_CHAN = ROOT.parent / "data" / "channel.json"
 OUT_TRACES = ROOT.parent / "data" / "traces.json"   # последняя трассировка на узел (персист)
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
+OUT_FAV = ROOT.parent / "data" / "favorites.json"   # id избранных — их НЕ прунит кеш
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
@@ -110,6 +111,26 @@ def load_messages():
     channel = load_list(OUT_CHAN)
 
 
+favorites = set()   # id избранных узлов: не прунятся из кеша, помечены звездой
+
+
+def load_favorites():
+    global favorites
+    try:
+        d = json.loads(OUT_FAV.read_text())
+        if isinstance(d, list):
+            favorites = set(d)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"⚠ favorites: {e!r}")
+
+
+def save_favorites():
+    with lock:
+        atomic_write(OUT_FAV, json.dumps(sorted(favorites), ensure_ascii=False))
+
+
 def load_traces():
     """Поднять сохранённые трассировки (переживают рестарт hub и F5 сайта)."""
     global traces
@@ -125,8 +146,8 @@ def load_traces():
 
 def save_traces():
     with lock:
-        if len(traces) > 500:            # держим последние ~500 по времени (в памяти)
-            for k in sorted(traces, key=lambda k: traces[k].get("ts", 0))[:-500]:
+        if len(traces) > 3000:           # держим последние ~3000 по времени (в памяти)
+            for k in sorted(traces, key=lambda k: traces[k].get("ts", 0))[:-3000]:
                 del traces[k]
         # на диск — только авто-survey (для traceNbr через рестарт); ручные, запрошенные
         # из интерфейса, живут лишь в памяти этой сессии и не персистятся
@@ -1029,24 +1050,32 @@ def trace_loop():
                 data = json.loads(OUT_LIVE.read_text())
             except Exception:
                 continue
-            # приоритет: (1) НЕПОДТВЕРЖДЁННЫЕ чёрные (слышим напрямую, но трасса ещё не
-            # подтвердила = 1 хоп); (2) неразрешённое зеркало est; (3) круг по всем чужим.
-            # ВНУТРИ группы — по МОЩНОСТИ СИГНАЛА (best SNR) убыв.: сильный сигнал =
-            # вероятнее реальный прямой сосед, его подтверждаем первым.
+            # УМНАЯ ОЧЕРЕДЬ (сходимость): backlog = ЧЁРНЫЕ неподтверждённые, которых
+            # ещё НЕ проверяли — нет успешной трассы в `traces`. Проверенный (получили
+            # ответ, сосед он или нет) выходит из очереди навсегда до перепроверки: не
+            # долбим = экономим эфир, а «осталось» честно тает к 0. Приоритет — по
+            # МОЩНОСТИ СИГНАЛА (best): сильный вероятнее реальный сосед. Не ответила →
+            # `_survey_last` держит retry-gap = уходит в конец очереди.
             now = time.time()
-            cooldown = CFG.get("traceRevisitH", 2) * 3600
-            elig = lambda lst: [x for x in lst if now - _survey_last.get(x[0], 0) >= cooldown]
-            unconf = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                      if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")]
+            gap = CFG.get("traceRetryGapS", 900)           # не пробовать одну чаще
+            recheck = CFG.get("traceRecheckH", 24) * 3600  # проверенных перепроверяем раз/сутки
+            fresh = lambda i: now - _survey_last.get(i, 0) < gap
+            todo = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                    if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")
+                    and n["id"] not in traces and not fresh(n["id"])]
             amb = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                   if n.get("est") and not n["est"].get("side") and not n.get("own")]
-            allc = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                    if not n.get("own") and n.get("id")]
-            pool = elig(unconf) or elig(amb) or elig(allc)
+                   if n.get("est") and not n["est"].get("side") and not n.get("own")
+                   and not fresh(n["id"])]
+            stale = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                     if not n.get("own") and n["id"] in traces and not fresh(n["id"])
+                     and now - traces[n["id"]].get("ts", 0) >= recheck]
+            pool = todo or amb or stale
             if not pool:
-                continue  # весь круг опрошен недавно (в пределах traceRevisitH) — не душним
+                continue  # нечего проверять / всё недавно пробовали — не душним
             target = max(pool, key=lambda x: x[1] if x[1] is not None else -999)[0]
             _survey_last[target] = now
+            n_todo = sum(1 for n in data.get("nodes", []) if not n.get("own")
+                         and n.get("hop") is None and not n.get("traceNbr") and n["id"] not in traces)
             sender = best_sender_for(target)
             ent = ent_by_id(sender) if sender else None
             if not ent:
@@ -1056,8 +1085,8 @@ def trace_loop():
                 continue
             with lock:
                 pending_traces.add(target)
-            beat("trace", f"трассирую {target}")
-            log(f"🧭 trace: трассирую {target} с {ent.get('id')} (chUtil {cu})")
+            beat("trace", f"осталось {n_todo} · трассирую {target}")
+            log(f"🧭 trace: трассирую {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
             try:
                 ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
             except Exception as e:
@@ -1283,7 +1312,7 @@ def reader_loop():
             if last_found:
                 store = nodestore.load(_store_keep_s())
                 data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
-                                             traces=dict(traces))
+                                             traces=dict(traces), favorites=set(favorites))
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
@@ -1303,10 +1332,11 @@ def reader_loop():
                         "own_online": sum(1 for c in list(conns.values()) if c.get("iface")),
                         "pruned": _pruned_total, "geocoded": _geocoded_count,
                         "tg_relayed": _tg_relayed, "own_traces": _own_traces_done,
-                        # остаток работы трассировки = неподтверждённые прямые соседи
-                        # (слышим напрямую, но traceNbr ещё нет) — сигнал сходимости
+                        # остаток трассировки = ЕЩЁ НЕ ПРОВЕРЕННЫЕ чёрные (не traceNbr и
+                        # нет успешной трассы в traces) — честный сигнал сходимости
                         "trace_todo": sum(1 for n in ln if not n.get("own")
-                                          and n.get("hop") is None and not n.get("traceNbr"))})
+                                          and n.get("hop") is None and not n.get("traceNbr")
+                                          and n["id"] not in traces)})
                 except Exception as e:
                     log(f"metrics: {e!r}")
         except Exception as e:
@@ -1315,12 +1345,12 @@ def reader_loop():
 
 
 def pruner_loop():
-    """Воркер №3 (ПРУНЕР): удаляет узлы, вышедшие за все лимиты (кроме своих)."""
+    """Воркер №3 (ПРУНЕР): удаляет узлы, вышедшие за все лимиты (кроме своих и избранных)."""
     global _pruned_total
     while True:
         time.sleep(CFG.get("pruneEveryS", 300))
         try:
-            n = nodestore.prune(_store_keep_s())
+            n = nodestore.prune(_store_keep_s(), keep_ids=favorites)
             _pruned_total += n
             beat("pruner", f"удалено {n} · всего {_pruned_total}")
         except Exception as e:
@@ -1573,6 +1603,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": repr(e)}, 500)
+        elif self.path == "/api/favorite":
+            # избранное: узел не прунится из кеша (для мобильных/важных, что молчат)
+            fid, on = body.get("id"), body.get("on", True)
+            if not fid:
+                self._json({"ok": False, "error": "нет id"}, 400)
+                return
+            with lock:
+                if on:
+                    favorites.add(fid)
+                else:
+                    favorites.discard(fid)
+            save_favorites()
+            self._json({"ok": True, "fav": on})
         elif self.path == "/api/config":
             clean = {}
             for k in EDITABLE:
@@ -1668,6 +1711,7 @@ def main():
     load_messages()
     load_traces()
     load_tgmap()
+    load_favorites()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):

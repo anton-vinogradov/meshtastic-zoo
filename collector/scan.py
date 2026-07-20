@@ -509,7 +509,7 @@ def flag_position_lies(nodes, links, geo):
         if level:
             n["posSus"] = dict(km=round(dkm, 1), snr=snr, by=by, n=len(hs), level=level)
 
-def build_from_store(store, found=None, xlinks=None, traces=None):
+def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -763,8 +763,20 @@ def build_from_store(store, found=None, xlinks=None, traces=None):
     # D адрес из имени, E оценка по графу/сигналу, F позиции нет
     own_geo = {k for k, g in (CFG.get("geo") or {}).items()
                if isinstance(g, dict) and g.get("lat") is not None}
+    favs = set(favorites or ())
+    # config `names` (по ID) — АВТОРИТЕТНЫЙ override подписи: идентичность узла = его
+    # ID, а не самоназвание (которое нода может менять). Твоё имя всегда побеждает.
+    cfg_names = CFG.get("names") or {}
+    for k, v in cfg_names.items():
+        names[k] = v                     # и для ссылок на узлы вне карты (трассы/плечи)
     for n in nodes:
         i = n.get("info") or {}
+        nm = cfg_names.get(n["id"])
+        if nm:
+            n["label"] = nm
+            n["short"] = nm
+        if n["id"] in favs:              # избранное — звезда, не прунится из кеша
+            n["fav"] = True
         if n["id"] in own_geo:
             c = "A"
         elif n.get("posSus"):
