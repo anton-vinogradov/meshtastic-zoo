@@ -57,6 +57,8 @@ channel = []   # публичный канал: [{id, pid, frm, frmName, text, t
 tgmap = {"offset": 0, "map": {}}
 pending_traces = set()  # id адресатов, чей traceroute-ответ ждём (Фаза 4, ч.3)
 manual_pending = set()  # из них — запрошенные из интерфейса (их результат НЕ персистим)
+id_mismatch = {}        # ip → {known, actual, name}: nodeid ноды ≠ config (рефлэш?)
+_mismatch_logged = {}   # ip → actual: чтобы логать смену один раз
 traces = {}             # id → {path:[{id,snr}], ts} — результат последней трассировки
 START_TS = time.time()  # старт hub — для uptime на странице статуса
 worker_beats = {}       # имя воркера → {ts, note}: пульс для /api/status
@@ -210,6 +212,21 @@ def connect_node(ip):
         with lock:
             conns[ip] = dict(iface=iface, id=nid, num=num, light=no_nodes,
                              last=time.time())
+        # АВТО-ДЕТЕКТ РЕФЛЭША: реальный nodeid ≠ тому, что ждёт config[known] по этому
+        # IP → нода перепрошита (id сменился), config устарел. Флажим для статуса + лог.
+        actual = user.get("id") or (num and f"!{num:08x}")
+        cfg_id = CFG.get("known", {}).get(ip)
+        with lock:
+            if actual and cfg_id and actual != cfg_id:
+                nm = (CFG.get("names") or {}).get(cfg_id, cfg_id)
+                id_mismatch[ip] = {"known": cfg_id, "actual": actual, "name": nm}
+                if _mismatch_logged.get(ip) != actual:
+                    _mismatch_logged[ip] = actual
+                    log(f"⚠ {ip}: config ждёт {cfg_id} ({nm}), а нода теперь {actual} — "
+                        f"обнови names/known (рефлэш?)")
+            else:
+                id_mismatch.pop(ip, None)
+                _mismatch_logged.pop(ip, None)
         log(f"⛓ {ip} ({nid}) на связи{' [лёгкая]' if no_nodes else ''}")
         return
     log(f"  {ip}: подключить не удалось, следующая попытка при рескане")
@@ -1473,8 +1490,11 @@ class Handler(SimpleHTTPRequestHandler):
                 "posSus": sum(1 for n in lnodes if n.get("posSus")),
                 "traceNbr": sum(1 for n in lnodes if n.get("traceNbr")),
                 "keyless": sum(1 for n in lnodes if not n.get("own") and not n.get("key"))}
+        with lock:
+            mism = [{"ip": ip, **v} for ip, v in id_mismatch.items()]
         return {"uptime": round(now - START_TS, 0), "now": int(now),
-                "chUtil": chan_util(), "workers": workers, "nodes": nodes, "data": data}
+                "chUtil": chan_util(), "workers": workers, "nodes": nodes, "data": data,
+                "mismatches": mism}
 
     def _history(self):
         u = urlparse(self.path)

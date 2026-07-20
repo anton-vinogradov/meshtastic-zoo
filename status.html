@@ -44,6 +44,10 @@
     .meta { color:var(--muted); font-size:12px; }
     .meta b { color:var(--text); font-weight:500; }
     .err { color:var(--red); }
+    #mism .warn { background:rgba(224,160,60,.12); border:1px solid rgba(224,160,60,.5); color:#e7c07a;
+      border-radius:10px; padding:9px 13px; margin-bottom:8px; font-size:13px; }
+    #mism .warn code { background:rgba(255,255,255,.08); border-radius:4px; padding:0 4px; font-size:12px; }
+    #mism .warn b { color:var(--text); }
     #upd { position:fixed; top:14px; right:18px; color:var(--muted); font-size:11.5px; }
   </style>
 </head>
@@ -51,6 +55,7 @@
   <div id="upd"></div>
   <h1>meshtastic-zoo · статус</h1>
   <div class="sub" id="head">загрузка…</div>
+  <div id="mism"></div>
   <h2>Загрузка канала <span class="meta" style="text-transform:none;letter-spacing:0">· 24ч по часам · чем тише, тем чаще воркеры выходят в эфир</span></h2>
   <div id="graphs"></div>
   <h2>Воркеры <span class="meta" style="text-transform:none;letter-spacing:0">· профиль за 24ч (по часам)</span></h2><div id="workers"></div>
@@ -121,6 +126,11 @@
       catch { el("head").innerHTML = '<span class="err">хаб недоступен</span>'; return; }
       el("upd").textContent = "обновлено " + new Date().toLocaleTimeString();
       el("head").innerHTML = `uptime <b>${up(s.uptime)}</b> · канал <b>${s.chUtil == null ? "—" : s.chUtil.toFixed(1)+"%"}</b> · в кеше <b>${s.data.cacheNodes}</b> узлов`;
+
+      // расхождение nodeid ↔ config (нода перепрошита — обнови config)
+      el("mism").innerHTML = (s.mismatches || []).map(m =>
+        `<div class="warn">⚠ <b>${esc(m.ip)}</b>: config ждёт <code>${esc(m.known)}</code>${
+          m.name ? ` (${esc(m.name)})` : ""}, а нода теперь <code>${esc(m.actual)}</code> — рефлэш? Обнови <b>names/known</b> на новый id.</div>`).join("");
 
       // воркеры (в фиксированном порядке; неизвестные — в конце)
       const seen = new Set();
