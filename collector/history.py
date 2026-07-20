@@ -37,8 +37,13 @@ CREATE INDEX IF NOT EXISTS ix_xlink_pair ON xlink_hist(a, b, ts);
 CREATE TABLE IF NOT EXISTS metrics_hist(
   ts INTEGER PRIMARY KEY, chutil REAL, cache INTEGER, live INTEGER,
   est INTEGER, possus INTEGER, tracenbr INTEGER, keyless INTEGER,
-  traces_done INTEGER, msgs INTEGER, chan INTEGER);
+  traces_done INTEGER, msgs INTEGER, chan INTEGER,
+  own_online INTEGER, pruned INTEGER, geocoded INTEGER,
+  tg_relayed INTEGER, own_traces INTEGER);
 """
+
+# новые столбцы metrics_hist, доливаемые в уже существующую БД (ALTER)
+_METRIC_MIGRATE = ("own_online", "pruned", "geocoded", "tg_relayed", "own_traces")
 
 _lock = threading.Lock()
 _conn = None
@@ -51,6 +56,11 @@ def _db():
         _conn = sqlite3.connect(str(DB), check_same_thread=False)
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.executescript(SCHEMA)
+        for col in _METRIC_MIGRATE:            # долить новые столбцы в старую БД
+            try:
+                _conn.execute(f"ALTER TABLE metrics_hist ADD COLUMN {col} INTEGER")
+            except sqlite3.OperationalError:
+                pass                           # столбец уже есть
         _conn.commit()
     return _conn
 
@@ -132,7 +142,8 @@ def xlink_pairs(hours=168):
 
 
 _METRIC_COLS = ("chutil", "cache", "live", "est", "possus", "tracenbr",
-                "keyless", "traces_done", "msgs", "chan")
+                "keyless", "traces_done", "msgs", "chan",
+                "own_online", "pruned", "geocoded", "tg_relayed", "own_traces")
 
 
 def record_metrics(m, ts=None):
@@ -146,7 +157,7 @@ def record_metrics(m, ts=None):
         c.commit()
 
 
-_CUM_METRICS = ("traces_done", "msgs")   # накопительные счётчики — не усредняем
+_CUM_METRICS = ("traces_done", "msgs", "pruned", "tg_relayed", "own_traces")  # накопительные — не усредняем
 
 
 def metrics_series(hours=24, bins=24):

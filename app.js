@@ -2174,6 +2174,9 @@
   }
   document.getElementById("viewtab").onclick = () => setGeoView(!geoView);
   setGeoView(geoView);  // применить сохранённое состояние вида
+  // отдельная кнопка страницы статуса сервиса (чтобы не лезть в настройки)
+  const stab = document.getElementById("statustab");
+  if (stab) { stab.title = t("statusPage"); stab.onclick = () => { location.href = "status.html"; }; }
 
   // мини-карта позиции в панели ноды (Leaflet — зум работает, в отличие от
   // OSM-embed iframe, у которого «минус» упирался в bbox)

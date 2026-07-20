@@ -60,6 +60,10 @@ traces = {}             # id → {path:[{id,snr}], ts} — результат п
 START_TS = time.time()  # старт hub — для uptime на странице статуса
 worker_beats = {}       # имя воркера → {ts, note}: пульс для /api/status
 _traces_done = 0        # накопительный счётчик завершённых трассировок (для графиков)
+_own_traces_done = 0    # накопит. трассировок СВОИХ пар (воркер свежести own↔own)
+_pruned_total = 0       # накопит. удалённых прунером узлов
+_tg_relayed = 0         # накопит. переслано telegram-мостом (mesh→tg)
+_geocoded_count = 0     # текущее число имён с координатами (геокодер)
 
 
 def beat(name, note=""):
@@ -796,9 +800,11 @@ def tg_send(text):
 
 def mirror_dm(node, peer, peer_name, pid, text):
     """Входящий DM → в Telegram; запомнить msg_id→(нода,адресат) для ответа-цитаты."""
+    global _tg_relayed
     own = (CFG.get("names") or {}).get(node, node)
     ids = tg_send(f"📡 Meshtastic DM → {own}\nот {peer_name}:\n{text}")
     if ids:
+        _tg_relayed += 1
         with lock:
             for mid in ids:
                 tgmap["map"][str(mid)] = dict(node=node, peer=peer, peerName=peer_name, pid=pid)
@@ -817,6 +823,8 @@ def tg_to_mesh(m, text):
             node = alt["id"]
     ok, err = send_dm(node, peer, text, reply_id=m.get("pid"))
     if ok:
+        global _tg_relayed
+        _tg_relayed += 1
         log(f"📩→📡 Telegram-ответ ушёл: {node} → {peer}: {text[:40]!r}")
     else:
         log(f"📩→📡 не отправлено ({err})")
@@ -1010,7 +1018,7 @@ def trace_loop():
     узел за такт, очередь по давности."""
     time.sleep(15)
     while True:
-        cu = paced_sleep(CFG.get("traceEveryS", 900))
+        cu = paced_sleep(CFG.get("traceEveryS", 300))
         beat("trace", f"тик · chUtil {round(cu, 1) if cu is not None else '?'}%")
         try:
             if not CFG.get("traceEnabled", True):
@@ -1021,21 +1029,23 @@ def trace_loop():
                 data = json.loads(OUT_LIVE.read_text())
             except Exception:
                 continue
-            # приоритет: (1) НЕПОДТВЕРЖДЁННЫЕ чёрные (слышим напрямую, но трасса
-            # ещё не подтвердила = 1 хоп) — подтвердить соседа; (2) неразрешённое
-            # зеркало est (трасса выберет сторону); (3) круг по всем чужим по давности.
-            unconf = [n["id"] for n in data.get("nodes", [])
-                      if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")]
-            amb = [n["id"] for n in data.get("nodes", [])
-                   if n.get("est") and not n["est"].get("side") and not n.get("own")]
-            cand = unconf or amb or [n["id"] for n in data.get("nodes", [])
-                                     if not n.get("own") and n.get("id")]
-            if not cand:
-                continue
+            # приоритет: (1) НЕПОДТВЕРЖДЁННЫЕ чёрные (слышим напрямую, но трасса ещё не
+            # подтвердила = 1 хоп); (2) неразрешённое зеркало est; (3) круг по всем чужим.
+            # ВНУТРИ группы — по МОЩНОСТИ СИГНАЛА (best SNR) убыв.: сильный сигнал =
+            # вероятнее реальный прямой сосед, его подтверждаем первым.
             now = time.time()
-            target = min(cand, key=lambda i: _survey_last.get(i, 0))
-            if now - _survey_last.get(target, 0) < 6 * 3600:
-                continue  # весь круг опрошен недавно — не душним
+            cooldown = CFG.get("traceRevisitH", 2) * 3600
+            elig = lambda lst: [x for x in lst if now - _survey_last.get(x[0], 0) >= cooldown]
+            unconf = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                      if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")]
+            amb = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                   if n.get("est") and not n["est"].get("side") and not n.get("own")]
+            allc = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                    if not n.get("own") and n.get("id")]
+            pool = elig(unconf) or elig(amb) or elig(allc)
+            if not pool:
+                continue  # весь круг опрошен недавно (в пределах traceRevisitH) — не душним
+            target = max(pool, key=lambda x: x[1] if x[1] is not None else -999)[0]
             _survey_last[target] = now
             sender = best_sender_for(target)
             ent = ent_by_id(sender) if sender else None
@@ -1056,6 +1066,50 @@ def trace_loop():
                 pending_traces.discard(target)
         except Exception as e:
             log(f"trace: {e!r}")
+
+
+_own_trace_i = 0
+
+
+def own_trace_loop():
+    """Воркер СВЕЖЕСТИ КАНАЛА МЕЖ СВОИМИ УЗЛАМИ: по кругу traceroute от одной своей
+    ноды к другой. Дёшево, потому что ОДНА проба даёт SNR сразу в ОБЕ стороны (в
+    ответе routeBack — измерения snrTowards на dst и snrBack на src), т.е. полное
+    качество звена src↔dst одним пакетом. Результат жнётся в xlink_hist (via='tr'),
+    откуда карта берёт свежие own↔own плечи. Темп по загрузке канала (в тишину чаще)."""
+    global _own_trace_i, _own_traces_done
+    time.sleep(25)
+    while True:
+        cu = paced_sleep(CFG.get("ownTraceEveryS", 600))
+        beat("otrace", f"тик · chUtil {round(cu, 1) if cu is not None else '?'}%")
+        try:
+            if not CFG.get("ownTraceEnabled", True):
+                continue
+            if cu is not None and cu > CFG.get("busyChUtil", 35):
+                continue
+            with lock:
+                owns = [{"id": c["id"], "iface": c["iface"]}
+                        for c in conns.values() if c.get("iface") and c.get("id")]
+            if len(owns) < 2:
+                continue
+            # направленные пары (src→dst) по кругу — каждая проба и так двунаправленна,
+            # но обход всех направлений даёт замер с обеих сторон как источника
+            pairs = [(a, b) for a in owns for b in owns if a["id"] != b["id"]]
+            src, dst = pairs[_own_trace_i % len(pairs)]
+            _own_trace_i += 1
+            with lock:
+                pending_traces.add(dst["id"])
+            beat("otrace", f"{src['id']} → {dst['id']}")
+            log(f"🧭 otrace: {src['id']} → {dst['id']} (chUtil {cu})")
+            try:
+                src["iface"].sendTraceRoute(dst["id"], 3)   # свои — близко, хопов мало
+                _own_traces_done += 1
+            except Exception as e:
+                log(f"🧭 otrace {dst['id']}: {e!r}")
+            with lock:
+                pending_traces.discard(dst["id"])
+        except Exception as e:
+            log(f"otrace: {e!r}")
 
 
 _keyfetch_last = {}   # id -> ts последнего запроса ключа
@@ -1158,10 +1212,11 @@ def _do_geocode():
             rec["verified"] = d < 0.6
         addr[nid] = rec
         new += 1
+    global _geocoded_count
+    _geocoded_count = sum(1 for v in addr.values() if v)
     if new:
         atomic_write(GEO_ADDR, json.dumps(addr, ensure_ascii=False, indent=1))
-        got = sum(1 for v in addr.values() if v)
-        log(f"🏠 геокодинг: +{new} имён, всего с координатами {got}")
+        log(f"🏠 геокодинг: +{new} имён, всего с координатами {_geocoded_count}")
 
 
 last_found = {}    # последний снимок своих нод (писатель → читатель)
@@ -1244,7 +1299,10 @@ def reader_loop():
                         "possus": sum(1 for n in ln if n.get("posSus")),
                         "tracenbr": sum(1 for n in ln if n.get("traceNbr")),
                         "keyless": sum(1 for n in ln if not n.get("own") and not n.get("key")),
-                        "msgs": len(messages), "chan": len(channel)})
+                        "msgs": len(messages), "chan": len(channel),
+                        "own_online": sum(1 for c in list(conns.values()) if c.get("iface")),
+                        "pruned": _pruned_total, "geocoded": _geocoded_count,
+                        "tg_relayed": _tg_relayed, "own_traces": _own_traces_done})
                 except Exception as e:
                     log(f"metrics: {e!r}")
         except Exception as e:
@@ -1253,12 +1311,14 @@ def reader_loop():
 
 
 def pruner_loop():
-    """Воркер №3 (ПРУНЕР): удаляет ключи, вышедшие за все лимиты (кроме своих)."""
+    """Воркер №3 (ПРУНЕР): удаляет узлы, вышедшие за все лимиты (кроме своих)."""
+    global _pruned_total
     while True:
         time.sleep(CFG.get("pruneEveryS", 300))
         try:
-            nodestore.prune(_store_keep_s())
-            beat("pruner", "чистка кеша")
+            n = nodestore.prune(_store_keep_s())
+            _pruned_total += n
+            beat("pruner", f"удалено {n} · всего {_pruned_total}")
         except Exception as e:
             log(f"pruner: {e!r}")
 
@@ -1606,7 +1666,7 @@ def main():
     load_tgmap()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
-    for _w in ("keeper", "writer", "reader", "pruner", "tg", "trace", "keyfetch", "geocode"):
+    for _w in ("keeper", "writer", "reader", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):
         beat(_w, "запуск…")   # чтобы все воркеры сразу видны на странице статуса
     threading.Thread(target=keeper, daemon=True).start()
     threading.Thread(target=writer_loop, daemon=True).start()   # №1 опрос → кеш
@@ -1614,6 +1674,7 @@ def main():
     threading.Thread(target=pruner_loop, daemon=True).start()   # №3 чистка кеша
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
     threading.Thread(target=trace_loop, daemon=True).start()    # отдельный воркер трассировки (темп по каналу)
+    threading.Thread(target=own_trace_loop, daemon=True).start()# свежесть канала меж своими (own↔own traceroute)
     threading.Thread(target=keyfetch_loop, daemon=True).start() # тихий добор ключей у keyless (темп по каналу)
     threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")

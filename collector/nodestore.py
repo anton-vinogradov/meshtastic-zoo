@@ -147,11 +147,13 @@ def load(max_age_s):
 
 
 def prune(max_age_s):
+    """Удаляет протухшие (кроме своих). Возвращает число удалённых узлов."""
     cut = int(time.time()) - int(max_age_s)
     with _lock:
         c = _db()
-        c.execute("DELETE FROM node_state WHERE last_heard<? AND own=0", (cut,))
+        cur = c.execute("DELETE FROM node_state WHERE last_heard<? AND own=0", (cut,))
         c.commit()
+        return cur.rowcount or 0
 
 
 def stats():

@@ -59,18 +59,24 @@
   <div class="sub" style="margin-top:20px"><a href="index.html">← на карту</a></div>
 
   <script>
-    const WARN = { keeper:700, writer:180, reader:180, pruner:900, trace:3600, keyfetch:1800, geocode:90000, tg:120 };
-    const ORDER = ["keeper","writer","reader","pruner","trace","keyfetch","geocode","tg"];
+    const WARN = { keeper:700, writer:180, reader:180, pruner:900, trace:1200, otrace:1800, keyfetch:1800, geocode:90000, tg:120 };
+    const ORDER = ["keeper","writer","reader","pruner","trace","otrace","keyfetch","geocode","tg"];
     const LABEL = { keeper:"keeper · соединения", writer:"writer · опрос→кеш", reader:"reader · кеш→карта",
-      pruner:"pruner · чистка", trace:"trace · трассировка", keyfetch:"keyfetch · ключи",
-      geocode:"geocode · адреса", tg:"tg · telegram" };
+      pruner:"pruner · чистка", trace:"trace · трассировка", otrace:"otrace · свои↔свои",
+      keyfetch:"keyfetch · ключи", geocode:"geocode · адреса", tg:"tg · telegram" };
     // профильная метрика воркера: столбец истории + подпись + цвет. down=«полезно вниз»
-    // (keyfetch добывает ключи → keyless падает), cum=накопительный счётчик.
+    // (keyfetch добывает ключи → keyless падает), cum=накопительный счётчик,
+    // level=показываем ТЕКУЩЕЕ значение без «/ч» (соединения, число адресов).
     const METRIC = {
-      writer:   { k:"cache",       lbl:"узлов",     unit:"/ч",        color:"#35c98e" },
-      reader:   { k:"live",        lbl:"на карте",  unit:"/ч",        color:"#6ea8ff" },
-      trace:    { k:"traces_done", lbl:"трасс",     unit:"/ч", cum:1, color:"#b98bff" },
-      keyfetch: { k:"keyless",     lbl:"без ключа", unit:"/ч добыто", color:"#e0a03c", down:1 },
+      keeper:   { k:"own_online",  lbl:"на связи",   level:1,          color:"#35c98e" },
+      writer:   { k:"cache",       lbl:"узлов",      unit:"/ч",        color:"#35c98e" },
+      reader:   { k:"live",        lbl:"на карте",   unit:"/ч",        color:"#6ea8ff" },
+      pruner:   { k:"pruned",      lbl:"удалено",    unit:"/ч", cum:1, color:"#e0533c" },
+      trace:    { k:"traces_done", lbl:"трасс",      unit:"/ч", cum:1, color:"#b98bff" },
+      otrace:   { k:"own_traces",  lbl:"own-трасс",  unit:"/ч", cum:1, color:"#8b7bff" },
+      keyfetch: { k:"keyless",     lbl:"без ключа",  unit:"/ч добыто", color:"#e0a03c", down:1 },
+      geocode:  { k:"geocoded",    lbl:"адресов",    level:1,          color:"#6ea8ff" },
+      tg:       { k:"tg_relayed",  lbl:"переслано",  unit:"/ч", cum:1, color:"#b98bff" },
     };
     let hist = [];  // последний ряд метрик (обновляет tickHist, рисует tick)
     const spanH = () => hist.length < 2 ? 0.05 : Math.max(0.05, (hist[hist.length-1].ts - hist[0].ts) / 3600);
@@ -81,15 +87,20 @@
       const vals = hist.map(p => p[m.k]), clean = vals.filter(v => v != null);
       if (clean.length < 2) return "";
       const cur = clean[clean.length-1];
-      let r;
-      if (m.cum) {  // накопительный счётчик (обнуляется при рестарте) — сумма приростов
-        r = 0; for (let i = 1; i < clean.length; i++) if (clean[i] > clean[i-1]) r += clean[i] - clean[i-1];
-        r /= spanH();
-      } else r = (clean[clean.length-1] - clean[0]) / spanH();
-      const shown = m.down ? Math.max(0, -r) : r;      // темп в «полезную» сторону
-      const rlbl = `${shown >= 0 ? "+" : ""}${shown.toFixed(1)}${m.unit}`;
-      return `<div class="wgraph"><div class="wg-lbl">${m.lbl} <b>${fmt(cur)}</b> · <span class="rate">${rlbl}</span></div>
-        ${spark(vals, { h:30, color:m.color })}</div>`;
+      let tail = "";
+      if (!m.level) {                        // rate-метрики: показываем темп /ч
+        let r;
+        if (m.cum) {  // накопительный счётчик (обнуляется при рестарте) — сумма приростов
+          r = 0; for (let i = 1; i < clean.length; i++) if (clean[i] > clean[i-1]) r += clean[i] - clean[i-1];
+          r /= spanH();
+        } else r = (clean[clean.length-1] - clean[0]) / spanH();
+        const shown = m.down ? Math.max(0, -r) : r;    // темп в «полезную» сторону
+        tail = ` · <span class="rate">${shown >= 0 ? "+" : ""}${shown.toFixed(1)}${m.unit}</span>`;
+      }
+      const sopt = { h: 30, color: m.color };
+      if (m.level) sopt.min = 0;             // уровневые (4/4, число адресов) — от нуля
+      return `<div class="wgraph"><div class="wg-lbl">${m.lbl} <b>${fmt(cur)}</b>${tail}</div>
+        ${spark(vals, sopt)}</div>`;
     };
     const age = (s) => s == null ? "—" : s < 60 ? Math.round(s)+"с" : s < 3600 ? Math.round(s/60)+"м" :
       s < 86400 ? (s/3600).toFixed(1)+"ч" : (s/86400).toFixed(1)+"д";
