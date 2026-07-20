@@ -116,6 +116,7 @@
       legOutTip: "reverse direction — how the far side hears (traceroute measurement)",
       asymTip: "asymmetric link: we hear {0} dB, they hear {1} dB",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
+      ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
       posClsLbl: "trust class",
       clsA: "manually placed / verified", clsB: "claimed GPS, unrefuted",
       clsC: "claimed GPS refuted by physics", clsD: "address from name (soft)",
@@ -202,6 +203,7 @@
       legOutTip: "обратное направление — как та сторона слышит (замер трассировкой)",
       asymTip: "асимметрия: мы слышим {0} дБ, нас слышат {1} дБ",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
+      ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
       posClsLbl: "класс доверия",
       clsA: "размещено вручную / подтверждено", clsB: "заявленный GPS, не опровергнут",
       clsC: "заявленный GPS опровергнут физикой", clsD: "адрес из имени (мягкий)",
@@ -2174,8 +2176,12 @@
     const estHint = geoEst && (!gc || !gc.nEst)
       ? `<div class="geoctl-h geo-est-none">${esc(t(gc && (gc.reason === "anchors" || gc.reason === "cal") ? "geoEstThin" : "geoEstNone"))}</div>`
       : "";
+    // призраки: сколько узлов вне нашего слуха размещено по xlink-партнёрам
+    const nGhosts = ((lastLive && lastLive.ghosts) || []).length;
+    const ghostHint = geoEst && nGhosts
+      ? `<div class="geoctl-h">${esc(t("ghostLegend", nGhosts))}</div>` : "";
     ctl.innerHTML = `<label class="geo-est-tog" title="${esc(t("geoEstTip"))}">
-        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>${estHint}
+        <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>${estHint}${ghostHint}
       <label class="geo-est-tog" title="${esc(t("geoAddrTip"))}">
         <input type="checkbox" id="geo-addr-cb"${geoAddr ? " checked" : ""}> ${esc(t("geoAddr"))}</label>`
       + `<div class="geoctl-h">${esc(t("geoPlaceHint"))}</div>` + own.map(n => {

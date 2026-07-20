@@ -107,7 +107,11 @@ tell which card a link goes to. The panel shows:
   release), hop limit, region, modem preset, TX power, battery, uptime,
   WiFi/BT/PKI, rebroadcast mode and more. For neighbors: **Mesh** (hops
   away, whether it came in over MQTT rather than RF, ham license) and
-  **Position** (its broadcast coordinates), when that data is available;
+  **Position** (its broadcast coordinates), when that data is available.
+  The Geolocation section also shows a **trust class** (A–F) for the
+  node's position — from "manually placed" down to "claimed GPS refuted
+  by physics"; the measured reasoning behind the whole truth stack lives
+  in [docs/truth.md](docs/truth.md);
 - **Conversation** — the full message history with this node: incoming
   on the left, your replies on the right. Outgoing messages show a
   delivery status: ⏳ on air → ✓ delivered, ✗ error (with the reason
