@@ -66,13 +66,14 @@
       keyfetch:"keyfetch · ключи", geocode:"geocode · адреса", tg:"tg · telegram" };
     // профильная метрика воркера: столбец истории + подпись + цвет. down=«полезно вниз»
     // (keyfetch добывает ключи → keyless падает), cum=накопительный счётчик,
-    // level=показываем ТЕКУЩЕЕ значение без «/ч» (соединения, число адресов).
+    // level=текущее значение без «/ч», conv=ОСТАТОК работы (сходимость: тает=зелёный,
+    // стоит/растёт=янтарный), sub=вторичный кумулятивный показатель (пропускная).
     const METRIC = {
       keeper:   { k:"own_online",  lbl:"на связи",   level:1,          color:"#35c98e" },
       writer:   { k:"cache",       lbl:"узлов",      unit:"/ч",        color:"#35c98e" },
       reader:   { k:"live",        lbl:"на карте",   unit:"/ч",        color:"#6ea8ff" },
       pruner:   { k:"pruned",      lbl:"удалено",    unit:"/ч", cum:1, color:"#e0533c" },
-      trace:    { k:"traces_done", lbl:"трасс",      unit:"/ч", cum:1, color:"#b98bff" },
+      trace:    { k:"trace_todo",  lbl:"осталось",   conv:1, sub:"traces_done", subLbl:"трасс", color:"#b98bff" },
       otrace:   { k:"own_traces",  lbl:"own-трасс",  unit:"/ч", cum:1, color:"#8b7bff" },
       keyfetch: { k:"keyless",     lbl:"без ключа",  unit:"/ч добыто", color:"#e0a03c", down:1 },
       geocode:  { k:"geocoded",    lbl:"адресов",    level:1,          color:"#6ea8ff" },
@@ -81,24 +82,29 @@
     let hist = [];  // последний ряд метрик (обновляет tickHist, рисует tick)
     const spanH = () => hist.length < 2 ? 0.05 : Math.max(0.05, (hist[hist.length-1].ts - hist[0].ts) / 3600);
     const fmt = (v) => v == null ? "—" : Number.isInteger(v) ? v : (+v).toFixed(1);
+    // темп накопительного счётчика = сумма ПОЛОЖИТЕЛЬНЫХ приростов /ч (устойчив к рестарту)
+    const cumRate = (a) => { let r = 0; for (let i = 1; i < a.length; i++) if (a[i] > a[i-1]) r += a[i] - a[i-1]; return r / spanH(); };
     // спарклайн + подпись профильной метрики воркера (или "" если данных нет)
     const workerGraph = (n) => {
       const m = METRIC[n]; if (!m || hist.length < 2) return "";
       const vals = hist.map(p => p[m.k]), clean = vals.filter(v => v != null);
       if (clean.length < 2) return "";
       const cur = clean[clean.length-1];
+      const sopt = { h: 30, color: m.color };
       let tail = "";
-      if (!m.level) {                        // rate-метрики: показываем темп /ч
-        let r;
-        if (m.cum) {  // накопительный счётчик (обнуляется при рестарте) — сумма приростов
-          r = 0; for (let i = 1; i < clean.length; i++) if (clean[i] > clean[i-1]) r += clean[i] - clean[i-1];
-          r /= spanH();
-        } else r = (clean[clean.length-1] - clean[0]) / spanH();
+      if (m.conv) {                          // ОСТАТОК работы: сходимость = убывает
+        const dr = (clean[clean.length-1] - clean[0]) / spanH();  // изменение остатка /ч
+        sopt.color = dr < -0.1 ? "#35c98e" : "#e0a03c";  // тает — зелёный, стоит/растёт — янтарный
+        sopt.min = 0;
+      } else if (!m.level) {                 // rate-метрики: темп /ч
+        const r = m.cum ? cumRate(clean) : (clean[clean.length-1] - clean[0]) / spanH();
         const shown = m.down ? Math.max(0, -r) : r;    // темп в «полезную» сторону
         tail = ` · <span class="rate">${shown >= 0 ? "+" : ""}${shown.toFixed(1)}${m.unit}</span>`;
+      } else sopt.min = 0;                    // уровневые (4/4, число адресов) — от нуля
+      if (m.sub) {                            // вторичный показатель (пропускная трасс/ч)
+        const sv = hist.map(p => p[m.sub]).filter(v => v != null);
+        if (sv.length >= 2) tail += ` · <span class="rate">${m.subLbl} +${cumRate(sv).toFixed(1)}/ч</span>`;
       }
-      const sopt = { h: 30, color: m.color };
-      if (m.level) sopt.min = 0;             // уровневые (4/4, число адресов) — от нуля
       return `<div class="wgraph"><div class="wg-lbl">${m.lbl} <b>${fmt(cur)}</b>${tail}</div>
         ${spark(vals, sopt)}</div>`;
     };

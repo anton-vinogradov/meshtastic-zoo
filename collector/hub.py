@@ -1302,7 +1302,11 @@ def reader_loop():
                         "msgs": len(messages), "chan": len(channel),
                         "own_online": sum(1 for c in list(conns.values()) if c.get("iface")),
                         "pruned": _pruned_total, "geocoded": _geocoded_count,
-                        "tg_relayed": _tg_relayed, "own_traces": _own_traces_done})
+                        "tg_relayed": _tg_relayed, "own_traces": _own_traces_done,
+                        # остаток работы трассировки = неподтверждённые прямые соседи
+                        # (слышим напрямую, но traceNbr ещё нет) — сигнал сходимости
+                        "trace_todo": sum(1 for n in ln if not n.get("own")
+                                          and n.get("hop") is None and not n.get("traceNbr"))})
                 except Exception as e:
                     log(f"metrics: {e!r}")
         except Exception as e:

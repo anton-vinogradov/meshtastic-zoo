@@ -39,11 +39,12 @@ CREATE TABLE IF NOT EXISTS metrics_hist(
   est INTEGER, possus INTEGER, tracenbr INTEGER, keyless INTEGER,
   traces_done INTEGER, msgs INTEGER, chan INTEGER,
   own_online INTEGER, pruned INTEGER, geocoded INTEGER,
-  tg_relayed INTEGER, own_traces INTEGER);
+  tg_relayed INTEGER, own_traces INTEGER, trace_todo INTEGER);
 """
 
 # новые столбцы metrics_hist, доливаемые в уже существующую БД (ALTER)
-_METRIC_MIGRATE = ("own_online", "pruned", "geocoded", "tg_relayed", "own_traces")
+_METRIC_MIGRATE = ("own_online", "pruned", "geocoded", "tg_relayed", "own_traces",
+                   "trace_todo")
 
 _lock = threading.Lock()
 _conn = None
@@ -143,7 +144,8 @@ def xlink_pairs(hours=168):
 
 _METRIC_COLS = ("chutil", "cache", "live", "est", "possus", "tracenbr",
                 "keyless", "traces_done", "msgs", "chan",
-                "own_online", "pruned", "geocoded", "tg_relayed", "own_traces")
+                "own_online", "pruned", "geocoded", "tg_relayed", "own_traces",
+                "trace_todo")
 
 
 def record_metrics(m, ts=None):
