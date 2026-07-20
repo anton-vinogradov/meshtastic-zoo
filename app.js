@@ -833,7 +833,8 @@
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
-          nn.hw || "", nn.key ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard)];
+          nn.hw || "", nn.key ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
+          unread[id] || 0];   // маркер «✉ N» — в сигнатуру, иначе прочтение не перерисует карту
       }),
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1]).sort()]);
     const svgHTML = `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
