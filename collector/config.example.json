@@ -10,6 +10,7 @@
   "autoKeyRequest": true,
   "keyMaxTries": 12,
   "keyWaitMin": 120,
+  "keySolicitGapS": 20,
   "topoEveryS": 30,
   "rescanS": 60,
   "snrScale": {
@@ -27,7 +28,8 @@
     "dm": true,
     "lowBatt": true,
     "lowBattPct": 20,
-    "tgReply": true
+    "tgReply": true,
+    "tgDelivery": true
   },
   "geo": {},
   "traceEnabled": true,

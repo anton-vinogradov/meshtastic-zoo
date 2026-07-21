@@ -297,10 +297,13 @@ def on_receive(packet=None, interface=None):
             ok = err in (None, 0, "NONE")
             changed = False
             pki_fail = None  # нет ключа адресата → запросим и повторим (раз)
+            notes = []       # телеграм-статусы (отправляем ПОСЛЕ выхода из lock)
             with lock:
                 for m in messages:
+                    # поздний ACK/NAK поднимает и уже помеченное noack (таймаут 90с мог
+                    # опередить квитанцию на медленном многохопе) → чинит ложный статус
                     if not (m.get("kind") == "out" and m.get("pktId") == rid
-                            and m.get("status") == "sent"):
+                            and m.get("status") in ("sent", "noack")):
                         continue
                     if ok:
                         m["status"] = "delivered"
@@ -314,9 +317,13 @@ def on_receive(packet=None, interface=None):
                     else:
                         m["status"], m["detail"] = "failed", str(err)
                     changed = True
+                    t = tg_note(m)
+                    if t:
+                        notes.append(t)
             if changed:
                 save_messages()
                 log(f"{'✓ доставлено' if ok else '✗ NAK ' + str(err)} (rid={rid})")
+            tg_send_batch(notes)
             if pki_fail:
                 solicit_key(pki_fail["to"])  # попросить ключ; доставим, как услышим
             return
@@ -531,6 +538,20 @@ def best_sender_for(to):
     return max(with_key or cands, key=lambda c: c[0])[1]
 
 
+def has_key_for(node, peer):
+    """Есть ли у нашей ноды `node` публичный ключ адресата `peer`? В live.json у
+    адресата keyBy перечисляет наши ноды, знающие его ключ. True/False, либо None
+    если адресат ещё не в live.json (неизвестно — не делаем поспешных выводов)."""
+    try:
+        live = json.loads(OUT_LIVE.read_text())
+    except Exception:
+        return None
+    tgt = next((n for n in live.get("nodes", []) if n.get("id") == peer), None)
+    if tgt is None:
+        return None
+    return node in set(tgt.get("keyBy", []))
+
+
 def request_key(ent, to):
     """Солицит ключа адресата: шлём ему наш NodeInfo с want_response — он
     отвечает своим NodeInfo (в нём publicKey), и наша нода узнаёт его ключ."""
@@ -550,9 +571,13 @@ def resend(m, auto=False):
     запись (в т.ч. время — видно, что повтор реально ушёл), а не плодим новую."""
     frm = best_sender_for(m.get("to")) or m.get("frm")
     ent = ent_by_id(frm) or ent_by_id(m.get("frm"))
+    # сброс tg.last делаем АТОМАРНО с записью статуса (не заранее): иначе в окне до
+    # обновления статуса writer_loop мог бы повторно зеркалить устаревший статус
     if not ent:
         with lock:
             m["status"] = "failed"
+            if m.get("tg"):
+                m["tg"]["last"] = "sent"  # повтор → перевзвести финальное уведомление
         save_messages()
         return False
     frm = ent["id"]
@@ -567,6 +592,8 @@ def resend(m, auto=False):
             m.pop("detail", None)
             m["tries"] = 0  # ручной повтор → сбросить счётчик, снова разрешить ожидание
             m.pop("waitSince", None)
+            if m.get("tg"):
+                m["tg"]["last"] = "sent"
         save_messages()
         log(f"↻ ретрай {frm} → {m['to']}: {m['text'][:40]!r}")
         return True
@@ -574,19 +601,29 @@ def resend(m, auto=False):
         with lock:
             m["status"] = "failed"
             m["detail"] = str(e)
+            if m.get("tg"):
+                m["tg"]["last"] = "sent"
         save_messages()
         return False
+
+
+_solicit_last = {}  # id → ts последнего solicit_key (антидубль эфира)
 
 
 def solicit_key(to):
     """Запросить ключ адресата (NodeInfo) с ноды, что лучше его слышит — чтобы
     он вскоре прислал свой NodeInfo (с ключом); его следующий пакет и станет
-    моментом доставки (см. try_deliver_waiting)."""
+    моментом доставки (см. try_deliver_waiting). Троттлится на keySolicitGapS,
+    чтобы проактивный запрос и повтор по PKI-NAK не слали два одинаковых NodeInfo."""
+    now = time.time()
+    if now - _solicit_last.get(to, 0) < CFG.get("keySolicitGapS", 20):
+        return
     ent = ent_by_id(best_sender_for(to) or "")
     if not ent:
         return
     try:
         request_key(ent, to)
+        _solicit_last[to] = now  # занимаем троттл только если запрос реально ушёл
         log(f"🔑 запросил ключ у {to} (через {ent['id']})")
     except Exception as e:
         log(f"🔑 запрос ключа не удался: {e!r}")
@@ -788,9 +825,10 @@ def clip_bytes(s, limit=200):
     return s if len(b) <= limit else b[:limit].decode("utf-8", "ignore")
 
 
-def send_dm(node, to, text, reply_id=None):
+def send_dm(node, to, text, reply_id=None, tg=None):
     """Отправить личное с ноды node адресату to + записать исходящее (как /api/send).
-    Возвращает (ok, err)."""
+    `tg` — контекст телеграм-моста {peer, last}: если задан, смена статуса доставки
+    зеркалится в чат (см. tg_note). Возвращает (ok, err)."""
     with lock:
         ent = next((c for c in conns.values() if c.get("id") == node and c.get("iface")), None)
     if not ent or not to or not text:
@@ -802,6 +840,8 @@ def send_dm(node, to, text, reply_id=None):
                    frm=node, to=to, text=text, ts=int(time.time()), status="sent", read=True)
         if reply_id:
             out["replyTo"] = reply_id
+        if tg:
+            out["tg"] = tg
         with lock:
             messages.append(out)
         save_messages()
@@ -836,6 +876,42 @@ def tg_send(text):
     return ids
 
 
+# Смена статуса доставки исходящего DM → строка для зеркалирования в Telegram.
+_TG_DLV = {
+    "delivered": "✅ доставлено",
+    "waiting":   "⏳ у адресата ещё нет нашего ключа — запросил, доставлю, как выйдет в эфир",
+    "noack":     "⚠️ без подтверждения — ACK не пришёл за отведённое время",
+    "failed":    "❌ не доставлено",
+}
+
+
+def tg_note(m):
+    """Вызывать ПОД lock. Если у исходящего m есть телеграм-контекст (m['tg']) и его
+    статус доставки сменился с последнего уведомления — зафиксировать новый статус и
+    вернуть текст для tg_send (слать ПОСЛЕ выхода из lock, в отдельном потоке). Иначе
+    None. Идемпотентно: один статус — не более одного сообщения."""
+    ctx = m.get("tg")
+    if not ctx or not (CFG.get("alerts") or {}).get("tgDelivery", True):
+        return None
+    st = m.get("status")
+    label = _TG_DLV.get(st)
+    if not label or ctx.get("last") == st:
+        return None
+    ctx["last"] = st
+    peer = ctx.get("peer") or m.get("to")
+    body = (m.get("text") or "").replace("\n", " ")[:50]
+    det = f"\n{m['detail']}" if st == "failed" and m.get("detail") else ""
+    return f"{label}\n→ {peer}: «{body}»{det}"
+
+
+def tg_send_batch(notes):
+    """Отправить пачку статусов доставки в Telegram ПОСЛЕДОВАТЕЛЬНО в одном фоновом
+    потоке: не плодим по потоку-субпроцессу на сообщение (после простоя разом
+    таймаутит много исходящих) и уважаем rate-limit чата."""
+    if notes:
+        threading.Thread(target=lambda: [tg_send(t) for t in notes], daemon=True).start()
+
+
 def mirror_dm(node, peer, peer_name, pid, text):
     """Входящий DM → в Telegram; запомнить msg_id→(нода,адресат) для ответа-цитаты."""
     global _tg_relayed
@@ -850,23 +926,38 @@ def mirror_dm(node, peer, peer_name, pid, text):
 
 
 def tg_to_mesh(m, text):
-    """Ответ-цитата из Telegram → отправить в меш от исходной ноды (или лучшей)."""
+    """Ответ-цитата из Telegram → в меш, с гарантией ключа и статусом доставки.
+    Отправитель: своя онлайн-нода, у которой ЕСТЬ ключ адресата (иначе PKI-сбой);
+    если ключа нет ни у кого — заранее его запрашиваем и уведомляем чат. Дальнейший
+    статус (доставлено/без ACK/не доставлено) зеркалится через tg-контекст."""
     node, peer = m.get("node"), m.get("peer")
+    peer_name = m.get("peerName") or peer
     text = clip_bytes(text, 200)
     with lock:
-        online = any(c.get("id") == node and c.get("iface") for c in conns.values())
-    if not online:
-        alt = best_sender_for(peer)  # исходная нода оффлайн — шлём с лучшей слышащей
-        if alt:
-            node = alt["id"]
-    ok, err = send_dm(node, peer, text, reply_id=m.get("pid"))
+        orig_online = any(c.get("id") == node and c.get("iface") for c in conns.values())
+    best = best_sender_for(peer)  # приоритет: своя нода с ключом адресата, громче слышащая
+    if not orig_online:
+        node = best or node  # исходная оффлайн — шлём с лучшей слышащей
+    elif best and has_key_for(node, peer) is False and has_key_for(best, peer):
+        node = best          # у исходной ключа нет, а у best есть — берём best
+    tg = {"peer": peer_name, "last": "sent"}
+    # ключа нет ни у кого, НО есть онлайн-нода для отправки → заранее солиситим и
+    # обещаем отложенную доставку (send_dm создаст waiting-запись, её добьёт
+    # try_deliver_waiting). Нет онлайн-ноды — не обещаем: send_dm ниже честно
+    # ответит «нода не на связи» одним сообщением, без ложного «доставлю».
+    if (CFG.get("autoKeyRequest", True) and ent_by_id(node)
+            and has_key_for(node, peer) is False):
+        solicit_key(peer)
+        tg["last"] = "waiting"
+        tg_send(f"🔑 у нас пока нет ключа {peer_name} — запросил; доставлю, как выйдет в эфир")
+    ok, err = send_dm(node, peer, text, reply_id=m.get("pid"), tg=tg)
     if ok:
         global _tg_relayed
         _tg_relayed += 1
         log(f"📩→📡 Telegram-ответ ушёл: {node} → {peer}: {text[:40]!r}")
     else:
         log(f"📩→📡 не отправлено ({err})")
-        tg_send(f"⚠️ не отправил {m.get('peerName', peer)}: {err}")
+        tg_send(f"⚠️ не отправил {peer_name}: {err}")
 
 
 def tg_poll_loop():
@@ -1302,6 +1393,7 @@ def writer_loop():
             log(f"writer: {e!r}")
         try:                                        # статусы исходящих (из topo)
             dirty = False
+            notes = []
             now, wait_ttl = time.time(), CFG.get("keyWaitMin", 120) * 60
             with lock:
                 for m in messages:
@@ -1312,8 +1404,13 @@ def writer_loop():
                     elif (m.get("status") == "waiting"
                           and now - m.get("waitSince", now) > wait_ttl):
                         m["status"], m["detail"], dirty = "failed", "PKI_SEND_FAIL_PUBLIC_KEY", True
+                    t = tg_note(m)
+                    if t:
+                        notes.append(t)
+                        dirty = True
             if dirty:
                 save_messages()
+            tg_send_batch(notes)
         except Exception:
             pass
         time.sleep(CFG.get("topoEveryS", 60))
