@@ -590,11 +590,21 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
     # со своей нодой (1 хоп) — наземная правда топологии, в отличие от «слышим»
     # по nodeDB (переизлучённые копии её сбивают).
     trace_nbrs = set()
+    # ПУТЬ ПО ТРАССЕ — авторитет о том, как узел достигается: 1 хоп = прямой сосед,
+    # больше = через ретрансляторы (даже если nodeDB считает его прямым: её путают
+    # переизлучённые копии). Берём кратчайший из свежих путей и его источник —
+    # свою ноду, от которой трасса шла.
+    trace_hops, trace_src = {}, {}
+    trust = now - CFG.get("traceRecheckH", 24) * 3600
     for tr in (traces or {}).values():
         path = [p.get("id") for p in (tr.get("path") or [])]
         for j, nid in enumerate(path):
             if (j > 0 and path[j - 1] in own) or (j + 1 < len(path) and path[j + 1] in own):
                 trace_nbrs.add(nid)
+        if len(path) >= 2 and path[0] in own and (tr.get("ts") or 0) >= trust:
+            tgt, h = path[-1], len(path) - 1
+            if tgt not in own and h < trace_hops.get(tgt, 99):
+                trace_hops[tgt], trace_src[tgt] = h, path[0]
     trace_nbrs -= own
 
     def src_of(n):  # поля, которые читает node_info()
@@ -621,15 +631,32 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         hb = n.get("heard_by") or {}
         dlegs = [(o, e) for o, e in hb.items()
                  if o in own and not e.get("hops") and e.get("snr") is not None]
-        if ld and now - ld < directW and dlegs:            # ЧЁРНАЯ (прямой сосед)
-            direct_seen[nid] = int(ld)
+        th, tsrc = trace_hops.get(nid), trace_src.get(nid)
+        if th == 1 or (th is None and ld and now - ld < directW and dlegs):  # ЧЁРНАЯ (прямой сосед)
+            direct_seen[nid] = int(ld or now)
             c = src_of(n)
             c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
-                     heard=int(ld), best=max(e["snr"] for _, e in dlegs),
+                     heard=int(ld or n.get("last_heard") or now),
+                     best=(max(e["snr"] for _, e in dlegs) if dlegs else None),
                      named=bool(n.get("name")))
             world.append(c)
             for o, e in dlegs:
                 rf.append(dict(frm=nid, to=o, snr=e["snr"], heard=int(e.get("ts") or ld)))
+            if not dlegs and tsrc:
+                # трасса подтвердила соседство, а прямого плеча в nodeDB нет —
+                # рисуем плечо к той своей ноде, от которой шла трасса
+                rf.append(dict(frm=nid, to=tsrc, snr=None,
+                               heard=int(n.get("last_heard") or ld or now)))
+        elif th and th > 1:                                # ТРАССА: через ретрансляторы
+            direct_seen[nid] = int(ld or now)
+            c = src_of(n)
+            c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
+                     hops=th, heard=int(n.get("last_heard") or ld or now), silent=False,
+                     named=bool(n.get("name")))
+            hops_nodes.append(c)
+            if tsrc:
+                rf.append(dict(frm=nid, to=tsrc, snr=None, hops=th,
+                               heard=int(n.get("last_heard") or ld or now)))
         elif ld and now - ld < directW + formerW:          # СЕРАЯ (бывший 0)
             direct_seen[nid] = int(ld)
             relay = [(o, e) for o, e in hb.items() if o in own and e.get("hops")]
