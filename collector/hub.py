@@ -680,6 +680,8 @@ def any_online_ent():
 OUT_HEARSUS = ROOT.parent / "data" / "hearsus.json"   # id → {ts, own}: узел слышит НАС
 _hears_us = {}
 _relay_map = (0.0, {})    # (ts, {последний байт NodeNum: [id, ...]}) — кеш на минуту
+_relay_stats = {"pkt": 0, "field": 0, "relayed": 0, "resolved": 0, "ambig": 0,
+                "leg": 0, "hearsus": 0}   # видно на статусе: работает ли жатва
 
 
 def load_hears_us():
@@ -708,21 +710,25 @@ def own_ids():
 
 
 def relay_byte_map():
-    """{последний байт NodeNum → [id узлов]} по текущей карте. relay_node в
-    заголовке несёт ТОЛЬКО последний байт, поэтому разрешать его можно лишь когда
-    кандидат единственный — иначе припишем чужой линк не тому узлу."""
+    """{последний байт NodeNum → [id узлов]} для разрешения relay_node.
+    В заголовке лежит ТОЛЬКО последний байт, поэтому пул кандидатов обязан быть
+    узким: по ВСЕМ узлам карты уникальны лишь 18% байтов (до 11 узлов на байт), а
+    среди слышанных за последние relayResolveMin минут — 62%. Сужение честное по
+    смыслу: передавшего нам пакет мы только что слышали, значит он свежий."""
     global _relay_map
     now = time.time()
     ts, m = _relay_map
     if now - ts < 60:
         return m
-    m = {}
+    m, win = {}, CFG.get("relayResolveMin", 30) * 60
     try:
         for n in json.loads(OUT_LIVE.read_text()).get("nodes", []):
-            try:
-                m.setdefault(int(n["id"][1:], 16) & 0xFF, []).append(n["id"])
-            except Exception:
-                pass
+            h = n.get("heard")
+            if not n.get("own") and h and now - h < win:
+                try:
+                    m.setdefault(int(n["id"][1:], 16) & 0xFF, []).append(n["id"])
+                except Exception:
+                    pass
     except Exception:
         pass
     _relay_map = (now, m)
@@ -737,18 +743,25 @@ def note_relay(packet, ent, hs, hl, snr, frm_num):
          НАПРЯМУЮ, и rxSnr — честный SNR этого линка (в отличие от nodeDB);
       2) переизлучили НАШ пакет на первом хопе → он слышит НАС. Вместе с (1) это
          доказанная двусторонняя смежность, и всё это без единого нашего запроса."""
+    _relay_stats["pkt"] += 1
     rn = packet.get("relayNode")
     if not isinstance(rn, int) or not rn:
         return                     # прошивка зануляет поле у непереизлучённых
+    _relay_stats["field"] += 1
+    relayed = isinstance(hs, int) and isinstance(hl, int) and hs > hl
+    if relayed:
+        _relay_stats["relayed"] += 1
     ids = relay_byte_map().get(rn & 0xFF) or []
     if len(ids) != 1:
+        _relay_stats["ambig"] += 1
         return                     # байт неоднозначен — молчим, а не угадываем
     rid = ids[0]
     if rid == ent.get("id") or rid in own_ids():
         return
-    relayed = isinstance(hs, int) and isinstance(hl, int) and hs > hl
+    _relay_stats["resolved"] += 1
     if relayed and snr is not None:
         nodestore.note_leg(rid, ent["id"], float(snr), 0, ts=int(time.time()))
+        _relay_stats["leg"] += 1
     if relayed and hs - hl == 1 and isinstance(frm_num, int) \
             and f"!{frm_num:08x}" in own_ids():
         with lock:
@@ -756,6 +769,7 @@ def note_relay(packet, ent, hs, hl, snr, frm_num):
             e["ts"], e["own"] = int(time.time()), ent.get("id")
             e["n"] = int(e.get("n") or 0) + 1
             first = e["n"] == 1
+        _relay_stats["hearsus"] += 1
         save_hears_us()
         if first:
             log(f"📶 {rid} переизлучил наш пакет — слышит нас (через {ent.get('id')})")
@@ -2074,7 +2088,7 @@ class Handler(SimpleHTTPRequestHandler):
             mism = [{"ip": ip, **v} for ip, v in id_mismatch.items()]
         return {"uptime": round(now - START_TS, 0), "now": int(now),
                 "chUtil": chan_util(), "workers": workers, "nodes": nodes, "data": data,
-                "mismatches": mism}
+                "mismatches": mism, "relay": dict(_relay_stats)}
 
     def _history(self):
         u = urlparse(self.path)

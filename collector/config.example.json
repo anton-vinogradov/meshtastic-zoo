@@ -55,5 +55,6 @@
   "pruneEveryS": 300,
   "traceWaitS": 45,
   "nbrFromRelay": true,
-  "relayProofH": 6
+  "relayProofH": 6,
+  "relayResolveMin": 30
 }
