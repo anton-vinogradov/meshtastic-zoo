@@ -417,6 +417,17 @@ def on_receive(packet=None, interface=None):
                 last_xlinks = history.xlink_pairs(hours=CFG.get("xlinkHours", 336))
             except Exception as e:
                 log(f"trace xlinks: {e!r}")
+            # Ответ мы ПРИНЯЛИ САМИ — это прямое плечо с честным rxSnr, и его надо
+            # сбросить в кеш ЗДЕСЬ же. Иначе оно ждёт такта писателя (topoEveryS) и
+            # доезжает на карту рендером позже встречного «нас слышат» из snrTowards:
+            # ручная трассировка перерисовывала одно плечо из пары, второе — спустя
+            # минуту. Пишем только если приём был прямым (буфер заполняется при
+            # hopStart==hopLimit), через реле — плеча нет и выдумывать нечего.
+            with rx_lock:
+                dv = direct_live.get(frm)
+            if dv and dv[1] is not None:
+                nodestore.note_leg(frm, dv[2] or ent.get("id"), dv[1], 0,
+                                   ts=int(dv[0]), src="rx")
             render_now.set()
             log(f"🧭 traceroute {frm}: {' → '.join(p['id'] for p in path)}")
             return
