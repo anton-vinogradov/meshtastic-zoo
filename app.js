@@ -367,7 +367,28 @@
     return crit;
   }
 
-  function render(D) {
+  // уступить событийному циклу БЕЗ 4мс-клэмпа setTimeout (MessageChannel будит на
+  // следующем макротаске почти мгновенно) — рендеры сериализованы насосом, поэтому
+  // в каждый момент ждёт максимум один _yield
+  const _yield = (() => {
+    const ch = new MessageChannel();
+    let resume = null;
+    ch.port1.onmessage = () => { const r = resume; resume = null; r && r(); };
+    return () => new Promise(r => { resume = r; ch.port2.postMessage(0); });
+  })();
+  // Тайм-слайсинг: тяжёлый рендер (раздвижка/рёбра при сотнях узлов) уступает потоку
+  // между кусками, чтобы страница не фризилась. render() лишь кладёт последний D в
+  // очередь; насос гонит _doRender ДО КОНЦА (всегда дорисовывает), затем берёт
+  // последний ожидающий → шторм вызовов схлопывается в ≤2 полных рендера.
+  let _renderPending = null, _rendering = false;
+  function render(D) { _renderPending = D; if (!_rendering) _renderPump(); }
+  async function _renderPump() {
+    _rendering = true;
+    try {
+      while (_renderPending) { const D = _renderPending; _renderPending = null; await _doRender(D); }
+    } finally { _rendering = false; }
+  }
+  async function _doRender(D) {
     // Уровень карты (ползунок): оставляем узлы вплоть до выбранного тира (и их
     // плечи), остальное убираем ДО раскладки — карта вписывается по видимым.
     {
@@ -526,6 +547,7 @@
           }
         }
         for (const id of ids) { const p = px[id]; p[0] = clX(p[0]); p[1] = clY(p[1]); }
+        if ((r & 15) === 15) await _yield();
         if (!moved) break;
       }
     }
@@ -744,6 +766,7 @@
     };
 
     for (const [li, l] of D.links.entries()) {
+      if ((li & 31) === 31) await _yield();
       const a = nodes[l.from], b = nodes[l.to];
       if (!a || !b || l.type !== "rf") continue;
       const cls = `edge e-${l.from} e-${l.to}`;
@@ -899,6 +922,7 @@
     // на кадр «бланкует» картинки, пока декодирует новые элементы).
     const _now = Date.now() / 1000;
     const ageBk = (h) => !h ? -1 : (_now - h < 3600 ? Math.floor((_now - h) / 300) : Math.floor((_now - h) / 3600));
+    await _yield();
     const mapSig = JSON.stringify([CW, CH, mapLevel, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
