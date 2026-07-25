@@ -1257,7 +1257,29 @@ def paced_sleep(base_s):
     return cu
 
 
-_survey_last = {}  # id -> ts последней фоновой трассировки
+_survey_last = {}   # id -> ts последней фоновой трассировки
+_trace_fails = {}   # id -> сколько проб ПОДРЯД осталось без ответа
+
+
+def note_trace_result(target, ok):
+    """Итог пробы трассировки. Неудача — ОТРИЦАТЕЛЬНОЕ доказательство: после
+    traceFailDrop неответов подряд снимаем подтверждение соседства, и обязательно
+    с диска. Иначе старая успешная трасса держит узел «соседом» до перепроверки
+    (сутки), а рестарт хаба ещё и восстанавливает её из traces.json — узел не
+    уходит с карты, сколько ни трассируй."""
+    drop = False
+    with lock:
+        if ok:
+            _trace_fails.pop(target, None)
+            return False
+        n = _trace_fails[target] = _trace_fails.get(target, 0) + 1
+        if n >= CFG.get("traceFailDrop", 2):
+            traces.pop(target, None)
+            drop = True
+    if drop:
+        save_traces()
+        log(f"🧭 соседство не подтверждено: {target} не ответил {n} раз(а) — снял")
+    return drop
 
 
 def trace_loop():
@@ -1324,9 +1346,14 @@ def trace_loop():
                               + (f" (пачка {len(targets)})" if len(targets) > 1 else ""))
                 log(f"🧭 trace: трассирую {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
                 try:
-                    ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
+                    # для подтверждения СОСЕДСТВА хватает пары хопов, а ждать ответа
+                    # с hopLimit=7 можно минутами (вызов блокирующий) — потому у
+                    # опроса свой, короткий лимит; ручная трасса ищет полный путь
+                    ent["iface"].sendTraceRoute(target, CFG.get("traceHops", 3))
+                    note_trace_result(target, True)
                 except Exception as e:
                     log(f"🧭 trace {target}: {e!r}")
+                    note_trace_result(target, False)
                 with lock:
                     pending_traces.discard(target)
         except Exception as e:
@@ -2130,6 +2157,11 @@ class Handler(SimpleHTTPRequestHandler):
                 time.sleep(2)
                 with lock:
                     pending_traces.discard(to)
+                    answered = to in traces
+                # неответ на РУЧНУЮ пробу — тоже доказательство: снимаем соседство
+                # (иначе узел висел бы «соседом» по старой трассе, а рестарт хаба
+                # поднимал бы её с диска)
+                note_trace_result(to, answered)
             threading.Thread(target=_trace, daemon=True).start()
             self._json({"ok": True})
         else:

@@ -37,6 +37,8 @@
   "traceEnabled": true,
   "traceEveryS": 900,
   "traceBatch": 3,
+  "traceHops": 3,
+  "traceFailDrop": 2,
   "keyFetchEnabled": true,
   "keyFetchEveryS": 300,
   "keyFetchPerNodeH": 3,
