@@ -395,6 +395,15 @@ def on_receive(packet=None, interface=None):
                                **({"manual": True} if is_manual else {})}
             if not is_manual:
                 save_traces()   # персист только авто-survey (переживёт рестарт hub)
+            # Трасса открыла каналы между узлами (и подтвердила соседство) —
+            # пересобираем карту СРАЗУ, не ожидая тика: обновляем срез чужих звеньев
+            # и будим читателя. Иначе результат ручной трассы виден лишь через минуту.
+            global last_xlinks
+            try:
+                last_xlinks = history.xlink_pairs(hours=CFG.get("xlinkHours", 336))
+            except Exception as e:
+                log(f"trace xlinks: {e!r}")
+            render_now.set()
             log(f"🧭 traceroute {frm}: {' → '.join(p['id'] for p in path)}")
             return
         if dec.get("portnum") == "NEIGHBORINFO_APP":
@@ -1432,6 +1441,7 @@ def _do_geocode():
 
 last_found = {}    # последний снимок своих нод (писатель → читатель)
 last_xlinks = []
+render_now = threading.Event()   # «пересобери карту сейчас» (например, пришла трассировка)
 
 
 def _store_keep_s():
@@ -1529,7 +1539,9 @@ def reader_loop():
                     log(f"metrics: {e!r}")
         except Exception as e:
             log(f"reader: {e!r}")
-        time.sleep(CFG.get("renderEveryS", 60))
+        # обычный темп, но просыпаемся раньше по render_now (пришла трассировка)
+        render_now.wait(CFG.get("renderEveryS", 60))
+        render_now.clear()
 
 
 def node_tier(n):

@@ -144,6 +144,8 @@
       weHear: "we hear", theyHear: "they hear",
       outLegTip: "reverse leg (from traceroute): {0} hears {1} at {2} dB",
       asymTip: "asymmetric link: we hear {0} dB, they hear {1} dB",
+      viaLeg: "link between other nodes", viaTr: "seen in a traceroute", viaNi: "from NeighborInfo",
+      viaTip: "{0} → {1}: {2} hears {3} at {4} dB — we do not hear this link ourselves ({5})",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
       posClsLbl: "trust class",
@@ -234,6 +236,8 @@
       weHear: "мы слышим", theyHear: "нас слышат",
       outLegTip: "встречное плечо (из трассы): {0} слышит {1} на {2} dB",
       asymTip: "асимметрия: мы слышим {0} дБ, нас слышат {1} дБ",
+      viaLeg: "канал между чужими узлами", viaTr: "видно в трассировке", viaNi: "из NeighborInfo",
+      viaTip: "{0} → {1}: {2} слышит {3} на {4} дБ — сами мы этот канал не слышим ({5})",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
       posClsLbl: "класс доверия",
@@ -808,7 +812,11 @@
       const k = [l.from, l.to].sort().join("|");
       const label = l.hops ? t("hop", l.hops)
         : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
-      const tip = (l.outLeg
+      const tip = (l.via
+        // канал между ЧУЖИМИ узлами: сами не слышим, узнали из трассы/NeighborInfo
+        ? t("viaTip", l.from, l.to, lbl2(l.to), lbl2(l.from), fmtSnr(l.snr),
+            t(l.via === "ni" ? "viaNi" : "viaTr"))
+        : l.outLeg
         ? t("outLegTip", l.to, l.from, fmtSnr(l.snr))   // встречное плечо: как сосед слышит нас
         : l.hops
           ? t("hopTip", l.from, l.to, l.hops)
@@ -865,7 +873,9 @@
       const [edx, edy] = along(x2 - qcx, y2 - qcy, 6);
       x1 += sdx; y1 += sdy; x2 -= edx; y2 -= edy;
       // встречное плечо «нас слышат» — мелкий пунктир, чтобы отличать от «мы слышим»
-      const dash = l.outLeg ? "2 4" : "6 6";
+      // чужой канал (из трассы/NeighborInfo) — точечный пунктир: видно, что это
+      // не наш замер; встречное плечо — мелкий; наш прямой — обычный
+      const dash = l.via ? "1 5" : l.outLeg ? "2 4" : "6 6";
       const geom = bend
         ? `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${qcx.toFixed(1)} ${qcy.toFixed(1)}
             ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${col}" stroke-width="2"
@@ -1359,7 +1369,7 @@
           const path = await oneTrace(froms[0]);
           if (path === "abort") { delete traceRunning[id]; return; }
           delete traceRunning[id];
-          if (path) { lastTrace[id] = path; setTraceOut(traceHtml(path)); }
+          if (path) { lastTrace[id] = path; setTraceOut(traceHtml(path)); tick(); }
           else setTraceOut(`<span>${esc(t("traceFail"))}</span>`);
           enableTrace();
           return;
@@ -1378,6 +1388,8 @@
         setTraceOut(done.map(r => srcBlock(r.oid, r.path ? traceHtml(r.path)
           : `<span class="tfail">${esc(t("traceFail"))}</span>`)).join(""));
         enableTrace();
+        // трасса открыла каналы между узлами → забираем пересобранную карту сразу
+        if (done.some(r => r.path)) tick();
       };
       // Графики истории (Фаза 1) — асинхронно; кэш в histFetch гасит частые перерисовки
       (async () => {
@@ -1565,6 +1577,7 @@
       <span class="item">0%<span class="grad" style="background:${grad}"></span>
         ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
       <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
+      ${D.links.some(l => l.via) ? `<span class="item" title="${esc(t("viaTr"))}"><span class="swatch dotted" style="border-color:#8a8a90"></span>${t("viaLeg")}</span>` : ""}
       ${mapLevel >= 3 ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
       ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,

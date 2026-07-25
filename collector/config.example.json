@@ -32,6 +32,8 @@
     "tgDelivery": true
   },
   "geo": {},
+  "traceLinks": true,
+  "traceLinkHours": 24,
   "traceEnabled": true,
   "traceEveryS": 900,
   "keyFetchEnabled": true,

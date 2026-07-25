@@ -524,6 +524,28 @@ def flag_position_lies(nodes, links, geo):
         if level:
             n["posSus"] = dict(km=round(dkm, 1), snr=snr, by=by, n=len(hs), level=level)
 
+def trace_legs(xlinks, node_ids, own, hours):
+    """Плечи СОСЕД↔СОСЕД, открытые трассировками (и NeighborInfo): в маршруте видно,
+    кто кого слышит МЕЖДУ СОБОЙ — этих связей нет в нашем nodeDB, сами мы их не
+    слышим. Берём только свежие и только между узлами, которые и так на карте.
+    Пары со своей нодой пропускаем: там есть настоящий замер (и встречное outLeg).
+    Направление как везде: (a,b) = «b услышал a», стрелка к услышавшему."""
+    cut = time.time() - hours * 3600
+    out, seen = [], set()
+    for p in (xlinks or []):
+        a, b, snr = p.get("a"), p.get("b"), p.get("snr")
+        if snr is None or not a or not b or a == b:
+            continue
+        if a not in node_ids or b not in node_ids or a in own or b in own:
+            continue
+        if (p.get("last") or 0) < cut or (a, b) in seen:
+            continue
+        seen.add((a, b))
+        out.append(dict(frm=a, to=b, snr=float(snr), heard=int(p.get("last") or 0),
+                        via=p.get("via") or "tr"))
+    return out
+
+
 def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
@@ -636,6 +658,12 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
     node_ids = own | {c["id"] for c in world} | {c["id"] for c in hops_nodes}
     names.update({nid: (n.get("long") or n["short"]) for nid, n in stat.items()})
 
+    # каналы сосед↔сосед из трассировок — в общий список плеч ДО раскладки: они и
+    # рисуются, и участвуют в геометрии (граф становится полнее, чем «только то,
+    # что слышим мы сами»)
+    if CFG.get("traceLinks", True):
+        rf += trace_legs(xlinks, node_ids, own, CFG.get("traceLinkHours", 24))
+
     # желаемые дистанции/веса (как в build)
     S = CFG["snrScale"]
 
@@ -727,6 +755,8 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             d["hops"] = l["hops"]
         if l.get("heard"):
             d["heard"] = l["heard"]
+        if l.get("via"):
+            d["via"] = l["via"]   # плечо не наше: узнали из трассы/NeighborInfo
         out_links.append(d)
         # прямое плечо сосед→своя + есть замер «как своя долетела до соседа» →
         # встречное плечо своя→сосед («нас слышат»)
