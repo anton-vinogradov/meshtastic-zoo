@@ -51,8 +51,14 @@ body {
 /* Узкое окно: правый ряд (кнопки + зум) занимает 262px, и на телефоне он
    встречается с поиском. Двигать зум некуда — ниже по правому краю панель
    узла, снизу слева панель канала. Поэтому ужимаем поиск, а не ряд. */
+/* Узкий экран: ряд из пяти элементов не влезает — ужимаем поле поиска, оно
+   единственное тянущееся. Двигать ряд некуда: ниже справа панель узла,
+   слева — панель канала. */
+@media (max-width: 900px) {
+  #searchbox input { width: 100px; }
+}
 @media (max-width: 560px) {
-  #searchbox input { width: 84px; }
+  #searchbox input { width: 70px; }
   #searchbox #searchcnt { display: none; }
 }
 #mapzoom button:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
@@ -168,11 +174,11 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #channel .chcompose input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 5px 8px; font-size: 13px; }
 #channel .chcompose button { background: rgba(255, 255, 255, .08); border: none; color: var(--text); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
 
-/* Общий маркер непрочитанной почты (правее поиска, чтобы не наложиться) */
+/* Общий маркер непрочитанной почты — слева сверху свободно снова (поиск уехал) */
 #mail {
   position: fixed;
   top: 14px;
-  left: 262px;
+  left: 14px;
   z-index: 6;
   background: #e0a03c;
   color: #141416;
@@ -313,9 +319,10 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #panel .pcompose button:disabled { opacity: .4; cursor: default; }
 
 /* Настройки (⚙) */
-/* Поиск по имени: слот сверху слева (справа занят кнопками, снизу слева — зумом) */
+/* Поиск — пятым в том же верхнем правом ряду (кнопки + зум). Слева нельзя:
+   там во всю высоту разворачивается панель общего канала и перекрывает поле. */
 #searchbox {
-  position: fixed; top: 14px; left: 14px; z-index: 7;
+  position: fixed; top: 14px; right: 270px; z-index: 7;
   display: flex; align-items: center; gap: 6px;
   padding: 0 10px; height: 38px;
   border: 1px solid var(--zone-stroke); border-radius: 19px;
