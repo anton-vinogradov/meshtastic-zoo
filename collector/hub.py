@@ -1481,12 +1481,64 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    # Текстовая статика, которую отдаём сами: gzip + ETag (см. _static).
+    TEXT_TYPES = {".json": "application/json; charset=utf-8",
+                  ".js": "text/javascript; charset=utf-8",
+                  ".css": "text/css; charset=utf-8",
+                  ".svg": "image/svg+xml",
+                  ".html": "text/html; charset=utf-8"}
+
     def end_headers(self):
-        # статику отдаём без кэша, чтобы браузер всегда брал свежий app.js/css
-        # (API уже ставит no-store сам)
-        if not self.path.startswith("/api/"):
+        p = urlparse(self.path).path
+        if p.startswith("/api/"):
+            pass                        # API ставит no-store сам
+        elif p.startswith("/img/") or p.startswith("/vendor/"):
+            # Иконки устройств и вендорный leaflet практически не меняются, но весят
+            # больше всего (img/hw ~1.3МБ, leaflet 162КБ). С no-cache браузер
+            # ревалидировал ДЕСЯТКИ файлов на каждой перезагрузке — теперь берёт из
+            # своего кэша, не тратя ни запроса. Обновление иконок — раз в жизнь.
+            self.send_header("Cache-Control", "public, max-age=604800")
+        else:
+            # app.js/style.css/index.html — всегда свежие (ревалидация дешёвая: ETag→304)
             self.send_header("Cache-Control", "no-cache, must-revalidate")
         super().end_headers()
+
+    def _static(self):
+        """Текстовая статика своими руками: gzip (SVG-иконки, app.js, css) + ETag/304,
+        чтобы перезагрузка не тянула тело повторно. True = запрос обработали."""
+        p = urlparse(self.path).path
+        ctype = self.TEXT_TYPES.get(os.path.splitext(p)[1].lower())
+        if not ctype:
+            return False
+        fs = self.translate_path(self.path)
+        try:
+            st = os.stat(fs)
+        except OSError:
+            return False
+        if not os.path.isfile(fs):
+            return False
+        etag = f'W/"{int(st.st_mtime)}-{st.st_size}"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.end_headers()
+            return True
+        try:
+            raw = open(fs, "rb").read()
+        except OSError:
+            return False
+        gz = len(raw) > 512 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+        body = gzip.compress(raw, 6) if gz else raw
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("ETag", etag)
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
@@ -1555,24 +1607,7 @@ class Handler(SimpleHTTPRequestHandler):
                                 pk=len(u.get("publicKey") or ""), role=u.get("role"), hw=u.get("hwModel"))
                 out[c["id"]] = info
             self._json({"id": tid, "seenBy": out})
-        elif (urlparse(self.path).path.endswith(".json")
-              and "gzip" in (self.headers.get("Accept-Encoding") or "")):
-            # крупная статика (data/live.json ~300КБ, тянется каждые 60с) — gzip'ом.
-            # ?ts= уже cache-bust'ит её, поэтому 304 тут и так не работал.
-            try:
-                raw = open(self.translate_path(self.path), "rb").read()
-            except OSError:
-                super().do_GET()
-                return
-            body = gzip.compress(raw, 6)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Encoding", "gzip")
-            self.send_header("Vary", "Accept-Encoding")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()   # добавит Cache-Control для не-/api/
-            self.wfile.write(body)
-        else:
+        elif not self._static():   # текстовая статика: gzip + ETag/304
             super().do_GET()
 
     def _status(self):
