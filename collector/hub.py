@@ -733,7 +733,8 @@ def relay_byte_map():
     try:
         for n in json.loads(OUT_LIVE.read_text()).get("nodes", []):
             h = n.get("heard")
-            if not n.get("own") and h and now - h < win:
+            # своя нода без TCP переизлучает как любая другая — её байт тоже разрешаем
+            if (not n.get("own") or not n.get("online")) and h and now - h < win:
                 try:
                     m.setdefault(int(n["id"][1:], 16) & 0xFF, []).append(n["id"])
                 except Exception:
@@ -1488,21 +1489,29 @@ def trace_loop():
                 n = int((_trace_fails.get(i) or {}).get("n") or 0)
                 need = min(gap * (2 ** n), 24 * 3600) if n else gap
                 return now - last < need
+
+            def probe(n):
+                """Кого вообще можно трассировать. Своя нода на TCP — не цель (мы и так
+                говорим с ней напрямую), но своя БЕЗ TCP (Cardputer уехал с WiFi) —
+                обычный узел меша, и другого способа узнать, жива ли она, нет. Раньше
+                исключение по `own` было безусловным: такая нода не пробовалась НИКОГДА
+                и висела на карте по уликам многочасовой давности."""
+                return not n.get("own") or not n.get("online")
             # КАНДИДАТЫ по СВЕЖЕСТИ ПРИЁМА, а не по nodeDB-SNR: этот SNR принадлежит
             # громкому реле, а не узлу, поэтому сортировка по нему детерминированно
             # выбирала недостижимые фантомы (29 из топ-30). Свежесть же честна: кого
             # слышали минуту назад, тот сейчас в эфире и может ответить.
             cand_win = CFG.get("traceCandMin", 180) * 60
             todo = [(n["id"], n.get("heard") or 0) for n in data.get("nodes", [])
-                    if not n.get("own") and n.get("hop") is None
+                    if probe(n) and n.get("hop") is None
                     and not (n.get("traceNbr") or n.get("relayNbr"))
                     and n.get("heard") and now - n["heard"] < cand_win
                     and n["id"] not in traces and not fresh(n["id"])]
             amb = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                   if n.get("est") and not n["est"].get("side") and not n.get("own")
+                   if n.get("est") and not n["est"].get("side") and probe(n)
                    and not fresh(n["id"])]
             stale = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                     if not n.get("own") and n["id"] in traces and not fresh(n["id"])
+                     if probe(n) and n["id"] in traces and not fresh(n["id"])
                      and now - traces[n["id"]].get("ts", 0) >= recheck]
             # ПРИОРИТЕТ ОЧЕРЕДИ. Тир «соседи» наполняют только пути длиной 1 хоп,
             # поэтому вперёд идут те, у кого шанс подтвердиться максимален:
@@ -1515,7 +1524,7 @@ def trace_loop():
                 tr_snap = {k: (v.get("ts") or 0, len((v.get("path") or [])))
                            for k, v in traces.items()}
             renbr = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                     if not n.get("own") and not fresh(n["id"])
+                     if probe(n) and not fresh(n["id"])
                      and tr_snap.get(n["id"], (0, 0))[1] == 2
                      and now - tr_snap[n["id"]][0] >= recheck]
             relay = [(n["id"], n.get("best")) for n in data.get("nodes", [])
@@ -1535,7 +1544,7 @@ def trace_loop():
             # честный остаток: кандидаты, у которых НЕТ подтверждения (ни трассой, ни
             # двусторонностью). Раньше считалось «нет записи в traces» — счётчик не
             # убывал от подтверждений и показывал 251 при трёх новых соседях
-            n_todo = sum(1 for n in data.get("nodes", []) if not n.get("own")
+            n_todo = sum(1 for n in data.get("nodes", []) if probe(n)
                          and n.get("hop") is None
                          and not (n.get("traceNbr") or n.get("relayNbr")))
             # ВЕЕР вместо очереди: on_receive асинхронный, поэтому шлём всю пачку со

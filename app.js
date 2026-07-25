@@ -136,6 +136,7 @@
       cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI keys", cRebroadcast: "Rebroadcast",
       cNodeInfo: "NodeInfo interval",
       secMesh: "Mesh", secPos: "Position", cHopsAway: "Hops away", direct: "direct",
+      staleLbl: "Link", staleVal: "silent — measurements expired",
       posSus: "claims {0} km away, yet heard directly ({1} dB) — position likely wrong or stale",
       geoSec: "Geolocation", gpsSrc: "reported by the node (GPS)", estSrc: "estimated from signal (radio)", estCoarse: "rough guess from signal", addrSrc: "geocoded from name",
       geoUnc: "uncertainty", geoByAnchors: "heard by (sites)", geoNear: "nearest site", geoSide: "side", geoSideOk: "resolved via {0}", geoSideMirror: "mirror — not resolved",
@@ -243,6 +244,7 @@
       cWifi: "WiFi", cBt: "Bluetooth", cPkc: "PKI-ключи", cRebroadcast: "Ретрансляция",
       cNodeInfo: "Интервал NodeInfo",
       secMesh: "Сеть", secPos: "Позиция", cHopsAway: "Прыжков до неё", direct: "напрямую",
+      staleLbl: "Связь", staleVal: "молчит — замеры просрочены",
       posSus: "заявлено {0} км, но слышна напрямую ({1} дБ) — позиция, вероятно, неверна или устарела",
       geoSec: "Геопозиция", gpsSrc: "передана узлом (GPS)", estSrc: "оценка по сигналу (радио)", estCoarse: "грубая прикидка по сигналу", addrSrc: "геокод по имени",
       geoUnc: "неопределённость", geoByAnchors: "слышат площадок", geoNear: "ближайшая площадка", geoSide: "сторона", geoSideOk: "разрешена ({0})", geoSideMirror: "зеркало — не разрешена",
@@ -1010,7 +1012,7 @@
       traceNbrOnly ? 1 : 0,
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
-        return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
+        return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0, nn.stale ? 1 : 0,
           nn.hw || "", nn.key ? 1 : 0, nn.traceNbr ? 1 : 0, nn.traceRelay ? 1 : 0, nn.relayNbr ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
           unread[id] || 0, nn.fav ? 1 : 0];   // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
       }),
@@ -1099,7 +1101,11 @@
         ["IP", n.sub !== n.id ? n.sub : null],
         [t("model"), n.hw],
         [t("role"), i.role],
-        [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—"],
+        [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—",
+          n.stale ? "#e0a03c" : null],
+        // молчит дольше окна присутствия: подтверждения сняты, плечи — пунктиром.
+        // Без этой строки узел просто «терял» стрелки без объяснения
+        n.stale ? [t("staleLbl"), t("staleVal"), "#e0a03c"] : [null, null],
         ...(() => {
           // «Ключ» — про адресата, которому шлёшь; у своей ноды бессмысленно
           // (и противоречит статусу конкретных исходящих) — не показываем

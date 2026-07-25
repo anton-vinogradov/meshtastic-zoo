@@ -557,6 +557,11 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
     known, subnets = CFG.get("known", {}), CFG["subnets"]
     directW = CFG.get("directWindowH", 24) * 3600
     formerW = CFG.get("formerWindowH", 1) * 3600
+    # ПРИСУТСТВИЕ. «Сосед» — утверждение о СЕЙЧАС, а улика живёт часами: трасса
+    # годна сутки, snrTowards — сутки, плечо nodeDB — сутки. Живой сосед в одном
+    # хопе шлёт телеметрию/позицию каждые 15-60 мин, поэтому полная тишина дольше
+    # окна означает «его больше нет», что бы ни говорили старые улики.
+    silentW = CFG.get("proofSilentH", 3) * 3600
 
     def subnet_of(ip):
         a = ipaddress.ip_address(ip)
@@ -820,8 +825,15 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             node["traceRelay"] = True
         if c["id"] in own_cfg:
             # своё железо, временно не на связи по TCP: показываем своей карточкой,
-            # а не «чужим соседом» — трассировкой его не судим
+            # а не «чужим соседом» — статус СВОЕЙ у него не отнимаем
             node["own"], node["online"] = True, False
+        if not node["heard"] or now - node["heard"] >= silentW:
+            # МОЛЧИТ дольше окна присутствия: улики есть, узла нет. Снимаем все
+            # утверждения «сосед сейчас» — иначе своя молчащая нода висела соседом
+            # со стрелками по замерам шестичасовой давности, пока трассы к ней падали.
+            for k in ("traceNbr", "traceRelay", "relayNbr", "hearsUs"):
+                node.pop(k, None)
+            node["stale"] = True
         if c.get("hw"):
             node["hw"] = c["hw"]
         if node_info(c):
@@ -846,6 +858,25 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         if p.get("a") and p.get("b"):
             xd[(p["a"], p["b"])] = (p.get("snr"), p.get("last"))
     own_set = {n["id"] for n in nodes if n.get("own")}
+    # Плечи молчащей СВОЕЙ ноды — те же просроченные улики: восемь сплошных стрелок
+    # с SNR делали из отвалившегося Cardputer'а самый связный узел карты. Оставляем
+    # ОДНО, самое свежее, и без замера (пунктир «нет данных»): след последнего
+    # известного соседства, чтобы узел не висел оторванным, но и не врал о канале.
+    # Только своих: чужой молчун теряет подтверждение (выше) и уезжает в тир
+    # «слышим», где плечи — заведомо история, а не утверждение о сейчас.
+    stale_ids = {n["id"] for n in nodes if n.get("stale") and n.get("own")}
+    if stale_ids:
+        keep, age = {}, lambda l: (l or {}).get("heard") or 0
+        for l in rf:
+            for side in (l["frm"], l["to"]):
+                if side in stale_ids and age(l) >= age(keep.get(side)):
+                    keep[side] = l
+        rf = [l for l in rf
+              if not (l["frm"] in stale_ids or l["to"] in stale_ids)
+              or l is keep.get(l["frm"]) or l is keep.get(l["to"])]
+        for l in rf:
+            if l["frm"] in stale_ids or l["to"] in stale_ids:
+                l["snr"], l["stale"] = None, True
     out_links, extra, seen_rev = [], [], set()
     for l in rf:
         d = {"from": l["frm"], "to": l["to"], "type": "rf",
@@ -856,10 +887,13 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             d["heard"] = l["heard"]
         if l.get("via"):
             d["via"] = l["via"]   # плечо не наше: узнали из трассы/NeighborInfo
+        if l.get("stale"):
+            d["stale"] = True     # замер просрочен: рисуем пунктиром, без SNR
         out_links.append(d)
         # прямое плечо сосед→своя + есть замер «как своя долетела до соседа» →
         # встречное плечо своя→сосед («нас слышат»)
-        if l["to"] in own_set and l["frm"] not in own_set and not l.get("hops"):
+        if (l["to"] in own_set and l["frm"] not in own_set
+                and not l.get("hops") and not l.get("stale")):
             key = (l["to"], l["frm"])
             rev = xd.get(key)
             if rev and rev[0] is not None and key not in seen_rev:
