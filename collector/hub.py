@@ -165,9 +165,19 @@ def save_traces():
         if len(traces) > 3000:           # держим последние ~3000 по времени (в памяти)
             for k in sorted(traces, key=lambda k: traces[k].get("ts", 0))[:-3000]:
                 del traces[k]
-        # на диск — только авто-survey (для traceNbr через рестарт); ручные, запрошенные
-        # из интерфейса, живут лишь в памяти этой сессии и не персистятся
-        persist = {k: v for k, v in traces.items() if not v.get("manual")}
+        # На диск — только авто-survey (для traceNbr через рестарт); ручные,
+        # запрошенные из интерфейса, живут лишь в памяти этой сессии. Отбрасываем
+        # РУЧНЫЕ ПУТИ, а не запись целиком: в одной записи теперь лежат трассы с
+        # разных своих нод, и раньше одна ручная уносила с собой все автоматические.
+        persist = {}
+        for k, v in traces.items():
+            by = {s2: r for s2, r in (v.get("by") or {}).items() if not r.get("manual")}
+            if by:
+                best = min(by.values(), key=lambda r: (len(r.get("path") or []),
+                                                       -(r.get("ts") or 0)))
+                persist[k] = {"path": best.get("path"), "ts": best.get("ts") or 0, "by": by}
+            elif not v.get("by") and not v.get("manual"):
+                persist[k] = v          # легаси-запись, ещё не прошедшая мерж
         atomic_write(OUT_TRACES, json.dumps(persist, ensure_ascii=False))
 
 
