@@ -12,21 +12,26 @@
   <button id="chtab" title="Public channel">💬</button>
   <aside id="channel"></aside>
   <div id="mail" hidden></div>
-  <button id="viewtab" title="geographic view">🗺</button>
-  <button id="statustab" title="service status">📟</button>
-  <button id="gear" title="settings">⚙</button>
+  <!-- Верхний правый ряд одним контейнером: отступы задаёт flex-gap, а не
+       вычисленные вручную right: у каждого элемента (ширина поиска и зума
+       зависит от содержимого, и зазоры разъезжались). -->
+  <div id="topbar">
+    <div id="searchbox">
+      <span class="sicon">🔍</span>
+      <input id="searchin" type="search" autocomplete="off" spellcheck="false">
+      <span id="searchcnt"></span>
+    </div>
+    <div id="mapzoom">
+      <button id="mz-out" title="zoom out" aria-label="zoom out">−</button>
+      <button id="mz-lbl" title="reset zoom">100%</button>
+      <button id="mz-in" title="zoom in" aria-label="zoom in">+</button>
+    </div>
+    <button id="viewtab" title="geographic view">🗺</button>
+    <button id="statustab" title="service status">📟</button>
+    <button id="gear" title="settings">⚙</button>
+  </div>
   <aside id="settings"></aside>
-  <div id="searchbox">
-    <span class="sicon">🔍</span>
-    <input id="searchin" type="search" autocomplete="off" spellcheck="false">
-    <span id="searchcnt"></span>
-  </div>
   <main id="map"></main>
-  <div id="mapzoom">
-    <button id="mz-out" title="zoom out" aria-label="zoom out">−</button>
-    <button id="mz-lbl" title="reset zoom">100%</button>
-    <button id="mz-in" title="zoom in" aria-label="zoom in">+</button>
-  </div>
   <div id="geomap"></div>
   <div id="geoctl"></div>
   <footer id="legend"></footer>
