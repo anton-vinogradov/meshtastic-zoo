@@ -15,8 +15,13 @@
   let mapLevel = _lvl0 == null ? 3 : Math.max(0, Math.min(3, +_lvl0));
   // показывать узел на текущем уровне: 0 свои · 1 +подтв.трассировкой · 2 +слышим
   // напрямую (чёрные) · 3 +слышали напрямую (серые = всё). Каждый включает предыдущий.
+  // «соседом» считаем только узел, до которого ДОШЛА трассировка (traceNbr) —
+  // наземная правда против слухов nodeDB, где переизлучённые копии выглядят как
+  // прямой приём. Неподтверждённые не теряются: они уходят в тир «слышали».
+  let traceNbrOnly = localStorage.getItem("mzTraceNbrOnly") !== "0";
   const showAt = (n) => n.own || (n.traceNbr && mapLevel >= 1)
-    || (n.hop == null && mapLevel >= 2) || (n.hop != null && mapLevel >= 3);
+    || (n.hop == null && mapLevel >= (traceNbrOnly && !n.traceNbr ? 3 : 2))
+    || (n.hop != null && mapLevel >= 3);
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
   let mapZoom = Math.min(5, Math.max(1, +localStorage.getItem("mzMapZoom") || 1)); // масштаб карты весов (кнопки +/−), 1 = влезает в экран
@@ -30,7 +35,7 @@
   // заменяет разметку (сигнатура карты после перезагрузки всегда «изменилась»).
   const MAP_CACHE_KEY = "mzMapCache";
   const mapCacheCtx = () =>
-    [mapLevel, nodeCap, geoOrient ? 1 : 0, showCrit ? 1 : 0, lang].join("|");
+    [mapLevel, nodeCap, geoOrient ? 1 : 0, showCrit ? 1 : 0, traceNbrOnly ? 1 : 0, lang].join("|");
 
   function saveMapCache(svg) {
     if (!svg || svg.length > 3e6) return;          // не забиваем квоту гигантской картой
@@ -169,6 +174,8 @@
       geoAddr: "geocoded from name", geoAddrTip: "nodes whose name is a street address, placed via OSM geocoding (solid = GPS-verified, dashed = unverified)",
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
+      traceNbrLbl: "neighbours only when a trace reached them",
+      traceNbrTip: "A node counts as a neighbour only once a traceroute confirmed it next to one of ours. Nodes that merely look direct in the nodeDB (relayed copies fool it) move to the +heard tier instead of vanishing.",
       mapSettings: "Weighted map", mapCliHint: "display options — this browser only",
       capLbl: "max neighbors on map", capTip: "keep the N strongest neighbors (by SNR); 0 = show all",
       capOf: "{0} heard", capHint: "0 = all",
@@ -271,6 +278,8 @@
       geoAddr: "геокод по имени", geoAddrTip: "ноды, чьё имя — адрес улицы; ставятся геокодингом OSM (сплошной = сверено по GPS, пунктир — не сверено)",
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
+      traceNbrLbl: "соседи только по трассе",
+      traceNbrTip: "Соседом считается узел, до которого дошла трассировка и который в маршруте стоит рядом с нашей нодой. Те, что лишь выглядят прямыми в nodeDB (её путают переизлучённые копии), уезжают в тир «+слышим», а не исчезают.",
       mapSettings: "Карта весов", mapCliHint: "настройки отображения — только этот браузер",
       capLbl: "макс. соседей на карте", capTip: "оставить N самых сильных соседей (по SNR); 0 = показать всех",
       capOf: "слышно {0}", capHint: "0 = все",
@@ -982,6 +991,7 @@
     const ageBk = (h) => !h ? -1 : (_now - h < 3600 ? Math.floor((_now - h) / 300) : Math.floor((_now - h) / 3600));
     await _yield();
     const mapSig = JSON.stringify([CW, CH, mapLevel, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
+      traceNbrOnly ? 1 : 0,
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
@@ -1966,6 +1976,9 @@
     } else if (e.target.id === "critToggle") {
       showCrit = e.target.checked;
       localStorage.setItem("mzShowCrit", showCrit ? "1" : "0");
+    } else if (e.target.id === "traceNbrToggle") {
+      traceNbrOnly = e.target.checked;
+      localStorage.setItem("mzTraceNbrOnly", traceNbrOnly ? "1" : "0");
     } else if (e.target.id === "nodeCapIn") {
       nodeCap = Math.max(0, Math.min(999, parseInt(e.target.value, 10) || 0));
       localStorage.setItem("mzNodeCap", String(nodeCap));
@@ -2048,6 +2061,9 @@
       <label class="srow stog" title="${esc(t("critTip"))}">
         <span>⚠ ${t("critLbl")}</span>
         <input type="checkbox" id="critToggle" ${showCrit ? "checked" : ""}></label>
+      <label class="srow stog" title="${esc(t("traceNbrTip"))}">
+        <span>🧭 ${t("traceNbrLbl")}</span>
+        <input type="checkbox" id="traceNbrToggle" ${traceNbrOnly ? "checked" : ""}></label>
       <label class="srow stog" title="${esc(t("capTip"))}">
         <span>${t("capLbl")}</span>
         <input type="number" id="nodeCapIn" min="0" max="999" step="10" value="${nodeCap}"

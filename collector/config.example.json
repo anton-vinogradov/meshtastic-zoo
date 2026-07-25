@@ -36,6 +36,7 @@
   "traceLinkHours": 24,
   "traceEnabled": true,
   "traceEveryS": 900,
+  "traceBatch": 3,
   "keyFetchEnabled": true,
   "keyFetchEveryS": 300,
   "keyFetchPerNodeH": 3,

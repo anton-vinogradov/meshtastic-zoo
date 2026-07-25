@@ -1300,27 +1300,35 @@ def trace_loop():
             pool = todo or amb or stale
             if not pool:
                 continue  # нечего проверять / всё недавно пробовали — не душним
-            target = max(pool, key=lambda x: x[1] if x[1] is not None else -999)[0]
-            _survey_last[target] = now
+            # Сколько узлов проверить за такт: карта показывает соседями только
+            # подтверждённых трассой, поэтому очередь надо разбирать за часы, а не
+            # за сутки. В тишину берём пачку (traceBatch), в средний эфир — один.
+            batch = (CFG.get("traceBatch", 3)
+                     if cu is not None and cu < CFG.get("quietChUtil", 8) else 1)
+            targets = [x[0] for x in sorted(
+                pool, key=lambda x: -(x[1] if x[1] is not None else -999))[:batch]]
             n_todo = sum(1 for n in data.get("nodes", []) if not n.get("own")
                          and n.get("hop") is None and not n.get("traceNbr") and n["id"] not in traces)
-            sender = best_sender_for(target)
-            ent = ent_by_id(sender) if sender else None
-            if not ent:
+            for target in targets:
+                _survey_last[target] = now
+                sender = best_sender_for(target)
+                ent = ent_by_id(sender) if sender else None
+                if not ent:
+                    with lock:
+                        ent = next((c for c in conns.values() if c.get("iface")), None)
+                if not ent:
+                    break
                 with lock:
-                    ent = next((c for c in conns.values() if c.get("iface")), None)
-            if not ent:
-                continue
-            with lock:
-                pending_traces.add(target)
-            beat("trace", f"осталось {n_todo} · трассирую {target}")
-            log(f"🧭 trace: трассирую {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
-            try:
-                ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
-            except Exception as e:
-                log(f"🧭 trace {target}: {e!r}")
-            with lock:
-                pending_traces.discard(target)
+                    pending_traces.add(target)
+                beat("trace", f"осталось {n_todo} · трассирую {target}"
+                              + (f" (пачка {len(targets)})" if len(targets) > 1 else ""))
+                log(f"🧭 trace: трассирую {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
+                try:
+                    ent["iface"].sendTraceRoute(target, 7)  # блокируется до ответа
+                except Exception as e:
+                    log(f"🧭 trace {target}: {e!r}")
+                with lock:
+                    pending_traces.discard(target)
         except Exception as e:
             log(f"trace: {e!r}")
 
