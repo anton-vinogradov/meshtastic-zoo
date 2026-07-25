@@ -58,7 +58,7 @@
   "relayProofH": 6,
   "relayResolveMin": 30,
   "bidirProofH": 24,
-  "proofSilentH": 3,
+  "proofSilentH": 6,
   "traceStaggerS": 4,
   "traceCandMin": 180
 }

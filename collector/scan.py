@@ -562,7 +562,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
     # годна сутки, snrTowards — сутки, плечо nodeDB — сутки. Живой сосед в одном
     # хопе шлёт телеметрию/позицию каждые 15-60 мин, поэтому полная тишина дольше
     # окна означает «его больше нет», что бы ни говорили старые улики.
-    silentW = CFG.get("proofSilentH", 3) * 3600
+    silentW = CFG.get("proofSilentH", 6) * 3600
 
     def subnet_of(ip):
         a = ipaddress.ip_address(ip)
@@ -830,7 +830,17 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             # своё железо, временно не на связи по TCP: показываем своей карточкой,
             # а не «чужим соседом» — статус СВОЕЙ у него не отнимаем
             node["own"], node["online"] = True, False
-        if not node["heard"] or now - node["heard"] >= silentW:
+        # ПРИСУТСТВИЕ считаем по самой свежей улике ЛЮБОГО рода. Дошедшая трасса
+        # и переизлучение нашего пакета доказывают, что узел был жив, не хуже
+        # маяка, а по одному лишь пассивному приёму порог срезал ЖИВЫХ соседей:
+        # ретро по 48 ч показало обычные паузы телеметрии до 4.7 ч у нод, которые
+        # в тот же момент отвечали на трассировку.
+        seen = node["heard"] or 0
+        tr = (traces or {}).get(c["id"]) or {}
+        if tr.get("path"):
+            seen = max(seen, int(tr.get("ts") or 0))
+        seen = max(seen, int((hu or {}).get("ts") or 0))
+        if now - seen >= silentW:
             # МОЛЧИТ дольше окна присутствия: улики есть, узла нет. Снимаем все
             # утверждения «сосед сейчас» — иначе своя молчащая нода висела соседом
             # со стрелками по замерам шестичасовой давности, пока трассы к ней падали.
