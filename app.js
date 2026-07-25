@@ -22,10 +22,13 @@
   // ОДНО определение правды на весь клиент: кто сосед, а кто «слышим, но трасса
   // не дошла». Раньше счётчик в легенде считал соседями всё не-своё — и не менялся
   // от подтверждений вовсе.
-  const isNbr = (n) => !n.own && n.hop == null && (!traceNbrOnly || !!n.traceNbr);
-  const heardOnly = (n) => !n.own && n.hop == null && traceNbrOnly && !n.traceNbr;
-  const showAt = (n) => n.own || (n.traceNbr && mapLevel >= 1)
-    || (n.hop == null && mapLevel >= (traceNbrOnly && !n.traceNbr ? 3 : 2))
+  // подтверждением считаем и трассу, и «он переизлучил наш пакет» (relayNbr):
+  // второе — та же двусторонняя смежность, доказанная бесплатно из чужого трафика
+  const proven = (n) => !!(n.traceNbr || n.relayNbr);
+  const isNbr = (n) => !n.own && n.hop == null && (!traceNbrOnly || proven(n));
+  const heardOnly = (n) => !n.own && n.hop == null && traceNbrOnly && !proven(n);
+  const showAt = (n) => n.own || (proven(n) && mapLevel >= 1)
+    || (n.hop == null && mapLevel >= (traceNbrOnly && !proven(n) ? 3 : 2))
     || (n.hop != null && mapLevel >= 3);
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
@@ -164,6 +167,7 @@
       weHear: "we hear", theyHear: "they hear",
       outLegTip: "reverse leg (from traceroute): {0} hears {1} at {2} dB",
       asymTip: "asymmetric link: we hear {0} dB, they hear {1} dB",
+      relayProof: "it relayed our packet — hears us directly",
       viaLeg: "link between other nodes", viaTr: "seen in a traceroute", viaNi: "from NeighborInfo",
       viaTip: "{0} → {1}: {2} hears {3} at {4} dB — we do not hear this link ourselves ({5})",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
@@ -270,6 +274,7 @@
       weHear: "мы слышим", theyHear: "нас слышат",
       outLegTip: "встречное плечо (из трассы): {0} слышит {1} на {2} dB",
       asymTip: "асимметрия: мы слышим {0} дБ, нас слышат {1} дБ",
+      relayProof: "переизлучил наш пакет — слышит нас напрямую",
       viaLeg: "канал между чужими узлами", viaTr: "видно в трассировке", viaNi: "из NeighborInfo",
       viaTip: "{0} → {1}: {2} слышит {3} на {4} дБ — сами мы этот канал не слышим ({5})",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
@@ -484,8 +489,8 @@
       }
       // подтверждённых трассой не режем: иначе лимит выбрасывал именно тех,
       // ради кого включён строгий режим (отбор шёл чисто по SNR)
-      const keep = new Set(D.nodes.filter(n => n.own || n.hop != null || n.traceNbr).map(n => n.id));
-      D.nodes.filter(n => !n.own && n.hop == null && !n.traceNbr)
+      const keep = new Set(D.nodes.filter(n => n.own || n.hop != null || proven(n)).map(n => n.id));
+      D.nodes.filter(n => !n.own && n.hop == null && !proven(n))
         .sort((a, b) => (bestSnr[b.id] ?? -1e3) - (bestSnr[a.id] ?? -1e3))
         .slice(0, nodeCap).forEach(n => keep.add(n.id));
       D = { ...D, nodes: D.nodes.filter(n => keep.has(n.id)),
@@ -1006,7 +1011,7 @@
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
-          nn.hw || "", nn.key ? 1 : 0, nn.traceNbr ? 1 : 0, nn.traceRelay ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
+          nn.hw || "", nn.key ? 1 : 0, nn.traceNbr ? 1 : 0, nn.traceRelay ? 1 : 0, nn.relayNbr ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
           unread[id] || 0, nn.fav ? 1 : 0];   // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
       }),
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
@@ -1154,6 +1159,8 @@
         [t("cHopsAway"), hopsAway == null ? null
           : hopsAway !== 0 ? hopsAway
           : n.traceNbr ? t("direct")
+          : n.relayNbr ? `${t("direct")} · ${t("relayProof")}`
+          : n.hearsUs ? t("relayProof")
           : n.traceRelay ? t("traceRelayLbl")
           : heardOnly(n) ? t("traceNotReached")
           : t("direct")],

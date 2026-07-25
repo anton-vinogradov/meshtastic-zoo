@@ -53,5 +53,7 @@
   "formerWindowH": 1,
   "renderEveryS": 60,
   "pruneEveryS": 300,
-  "traceWaitS": 45
+  "traceWaitS": 45,
+  "nbrFromRelay": true,
+  "relayProofH": 6
 }

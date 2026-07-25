@@ -301,6 +301,7 @@ def on_receive(packet=None, interface=None):
                              if packet.get("rxRssi") is not None else None))
                 # он в эфире и слышен напрямую — лучший момент попросить ключ
                 maybe_solicit_key(f"!{fn:08x}", True)
+            note_relay(packet, ent, hs, hl, snr, fn)   # бесплатные улики смежности
         except Exception:
             pass
         dec = (packet or {}).get("decoded") or {}
@@ -674,6 +675,90 @@ def note_key_ask(nid):
 def any_online_ent():
     with lock:
         return next((c for c in conns.values() if c.get("iface")), None)
+
+
+OUT_HEARSUS = ROOT.parent / "data" / "hearsus.json"   # id → {ts, own}: узел слышит НАС
+_hears_us = {}
+_relay_map = (0.0, {})    # (ts, {последний байт NodeNum: [id, ...]}) — кеш на минуту
+
+
+def load_hears_us():
+    global _hears_us
+    try:
+        d = json.loads(OUT_HEARSUS.read_text())
+        _hears_us = {k: v for k, v in d.items() if isinstance(v, dict)}
+    except Exception:
+        _hears_us = {}
+
+
+def save_hears_us():
+    try:
+        with lock:
+            d = dict(sorted(_hears_us.items(), key=lambda kv: -(kv[1].get("ts") or 0))[:2000])
+            _hears_us.clear()
+            _hears_us.update(d)
+        atomic_write(OUT_HEARSUS, json.dumps(d, ensure_ascii=False))
+    except Exception as e:
+        log(f"hearsus: {e!r}")
+
+
+def own_ids():
+    with lock:
+        return {c["id"] for c in conns.values() if c.get("id")}
+
+
+def relay_byte_map():
+    """{последний байт NodeNum → [id узлов]} по текущей карте. relay_node в
+    заголовке несёт ТОЛЬКО последний байт, поэтому разрешать его можно лишь когда
+    кандидат единственный — иначе припишем чужой линк не тому узлу."""
+    global _relay_map
+    now = time.time()
+    ts, m = _relay_map
+    if now - ts < 60:
+        return m
+    m = {}
+    try:
+        for n in json.loads(OUT_LIVE.read_text()).get("nodes", []):
+            try:
+                m.setdefault(int(n["id"][1:], 16) & 0xFF, []).append(n["id"])
+            except Exception:
+                pass
+    except Exception:
+        pass
+    _relay_map = (now, m)
+    return m
+
+
+def note_relay(packet, ent, hs, hl, snr, frm_num):
+    """ЖАТВА relay_node — бесплатные доказательства смежности из каждого пакета.
+    relay_node лежит в ОТКРЫТОМ заголовке и называет того, кто передал нам этот
+    пакет последним. Два вывода:
+      1) пакет пришёл переизлучённым (hopStart>hopLimit) → передавшего мы слышим
+         НАПРЯМУЮ, и rxSnr — честный SNR этого линка (в отличие от nodeDB);
+      2) переизлучили НАШ пакет на первом хопе → он слышит НАС. Вместе с (1) это
+         доказанная двусторонняя смежность, и всё это без единого нашего запроса."""
+    rn = packet.get("relayNode")
+    if not isinstance(rn, int) or not rn:
+        return                     # прошивка зануляет поле у непереизлучённых
+    ids = relay_byte_map().get(rn & 0xFF) or []
+    if len(ids) != 1:
+        return                     # байт неоднозначен — молчим, а не угадываем
+    rid = ids[0]
+    if rid == ent.get("id") or rid in own_ids():
+        return
+    relayed = isinstance(hs, int) and isinstance(hl, int) and hs > hl
+    if relayed and snr is not None:
+        nodestore.note_leg(rid, ent["id"], float(snr), 0, ts=int(time.time()))
+    if relayed and hs - hl == 1 and isinstance(frm_num, int) \
+            and f"!{frm_num:08x}" in own_ids():
+        with lock:
+            e = _hears_us.setdefault(rid, {"n": 0})
+            e["ts"], e["own"] = int(time.time()), ent.get("id")
+            e["n"] = int(e.get("n") or 0) + 1
+            first = e["n"] == 1
+        save_hears_us()
+        if first:
+            log(f"📶 {rid} переизлучил наш пакет — слышит нас (через {ent.get('id')})")
 
 
 def anyone_has_key(nid):
@@ -1682,8 +1767,9 @@ def reader_loop():
                 store = nodestore.load(_store_keep_s())
                 with lock:
                     asks_snap = {k: dict(v) for k, v in _key_asks.items()}
+                    hears_snap = {k: dict(v) for k, v in _hears_us.items()}
                 data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
-                                             asks=asks_snap,
+                                             asks=asks_snap, hears_us=hears_snap,
                                              traces=dict(traces), favorites=set(favorites))
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
@@ -2248,6 +2334,7 @@ def main():
     load_favorites()
     load_key_asks()
     load_trace_fails()
+    load_hears_us()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):

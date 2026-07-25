@@ -20,3 +20,4 @@ collector/config.json
 __pycache__/
 *.pyc
 data/tracefail.json
+data/hearsus.json

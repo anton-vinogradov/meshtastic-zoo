@@ -546,7 +546,8 @@ def trace_legs(xlinks, node_ids, own, hours):
     return out
 
 
-def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None, asks=None):
+def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None, asks=None,
+                     hears_us=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -795,6 +796,14 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             node["hop"] = c["hops"]
         if c.get("silent"):
             node["silent"] = True
+        hu = (hears_us or {}).get(c["id"])
+        if hu and now - (hu.get("ts") or 0) < CFG.get("relayProofH", 6) * 3600:
+            # он переизлучил НАШ пакет, услышав его напрямую → слышит нас. Вместе с
+            # нашим прямым приёмом это доказанная двусторонняя смежность — тот самый
+            # факт, за которым мы гоняем трассировку, только бесплатно
+            node["hearsUs"] = True
+            if c.get("best") is not None and CFG.get("nbrFromRelay", True):
+                node["relayNbr"] = True
         if c["id"] in trace_nbrs:            # наша свежая трасса дошла до него за 1 хоп
             node["traceNbr"] = True
         elif c["id"] in trace_relay:         # нёс наш трафик в маршруте, но сам не пробован
