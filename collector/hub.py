@@ -513,24 +513,45 @@ def on_receive(packet=None, interface=None):
 
         # РЕАКЦИЯ (тапбэк): emoji=1 + reply_id → привязать к целевому сообщению
         if dec.get("emoji") and reply_id:
+            own_set = own_ids()
+            react_q = None
             with lock:
                 tgt = find_by_pid(reply_id)
                 if tgt is not None:
                     who = tgt.setdefault("reactions", {}).setdefault(text, [])
                     if frm not in who:
                         who.append(frm)
+                        # реакция на НАШЕ сообщение — то же событие «нам ответили»,
+                        # только одним символом; шлём один раз на пару (кто, что)
+                        if frm not in own_set and (tgt.get("kind") == "out"
+                                                   or tgt.get("frm") in own_set):
+                            react_q = tgt.get("text") or ""
             save_messages()
             save_channel()
             log(f"👍 {frm_name} {text} → pkt {reply_id}")
+            if react_q is not None and (CFG.get("alerts") or {}).get("chanReact", True):
+                threading.Thread(target=mirror_chan_reply, daemon=True,
+                                 args=(ent["id"], frm_name, "", react_q, text)).start()
             return
 
         if to in (0xFFFFFFFF, 4294967295, "^all", "!ffffffff"):
             # публичный канал (broadcast): один пакет слышат несколько наших нод —
             # группируем по id и копим, кто именно принял (с SNR)
             pid = packet.get("id")
+            # Кого считать «нашим»: ответ на СВОЁ сообщение (kind=out) или на
+            # сообщение своей ноды. Считаем ДО lock — own_ids() берёт тот же
+            # RLock, и хотя он реентрантный, порядок захвата держим простым.
+            own_set = own_ids()
+            reply_q = None
             with lock:
                 m = next((x for x in channel if pid and x.get("pid") == pid), None)
                 if m is None:
+                    # уведомляем ОДИН раз на пакет: этот же broadcast прилетит с
+                    # каждой своей ноды, но карточка канала создаётся только здесь
+                    if reply_id and frm not in own_set:
+                        tgt = find_by_pid(reply_id)
+                        if tgt and (tgt.get("kind") == "out" or tgt.get("frm") in own_set):
+                            reply_q = tgt.get("text") or ""
                     m = dict(id=f"ch·{pid or int(time.time() * 1000)}", pid=pid, frm=frm,
                              frmName=frm_name, text=text, ts=int(time.time()),
                              ch=packet.get("channel", 0), gotBy={})
@@ -549,6 +570,9 @@ def on_receive(packet=None, interface=None):
                     m["gotBy"][ent["id"]] = {"snr": packet.get("rxSnr"), "hops": hops}
             save_channel()
             log(f"📡 канал: {frm_name} → всем (принял {ent['id']}): {text[:50]!r}")
+            if reply_q is not None and (CFG.get("alerts") or {}).get("chanReply", True):
+                threading.Thread(target=mirror_chan_reply, daemon=True,
+                                 args=(ent["id"], frm_name, text, reply_q)).start()
             return
 
         if to != ent.get("num"):
@@ -1229,6 +1253,23 @@ def tg_send_batch(notes):
     таймаутит много исходящих) и уважаем rate-limit чата."""
     if notes:
         threading.Thread(target=lambda: [tg_send(t) for t in notes], daemon=True).start()
+
+
+def mirror_chan_reply(node, frm_name, text, quoted, react=None):
+    """Ответ в ОБЩЕМ канале на наше сообщение → в Telegram.
+
+    Личку зеркалим давно, а канал молчал: ответ на нашу же реплику видно было
+    только в интерфейсе. Шлём не весь канал (он шумный), а именно ответы нам —
+    то же правило, по которому интерфейс красит сообщение «вам ответили»."""
+    global _tg_relayed
+    own = (CFG.get("names") or {}).get(node, node)
+    q = (quoted or "").replace("\n", " ")[:60]
+    head = (f"💬 Реакция {react} в общем канале → {own}" if react
+            else f"💬 Ответ в общем канале → {own}")
+    who = f"\nот {frm_name}" + ("" if react else f":\n{text}")
+    ids = tg_send(head + who + (f"\n\n↩ на наше: «{q}»" if q else ""))
+    if ids:
+        _tg_relayed += 1
 
 
 def mirror_dm(node, peer, peer_name, pid, text):

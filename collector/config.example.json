@@ -29,7 +29,9 @@
     "lowBatt": true,
     "lowBattPct": 20,
     "tgReply": true,
-    "tgDelivery": true
+    "tgDelivery": true,
+    "chanReply": true,
+    "chanReact": true
   },
   "geo": {},
   "traceLinks": true,
