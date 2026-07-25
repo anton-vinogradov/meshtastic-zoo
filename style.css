@@ -524,9 +524,12 @@ body:not(.geo-on) #geoctl { display: none; }
   background: rgba(255,255,255,.06); border-radius: 12px; padding: 4px; }
 #panel .phead b { font-size: 17px; }
 #panel .plong { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
-/* звезда «избранное» в шапке панели */
+/* звезда «избранное» в шапке панели — по НИЖНЕМУ краю шапки (в уровень с фото
+   устройства), а не у верхнего: там она вплотную к «×» и легко промахнуться,
+   закрыв панель вместо добавления в избранное (было 0 зазора, стало 25px).
+   padding даёт палец-дружественную зону нажатия. */
 #panel .phead .pfav { margin-left: auto; background: none; border: 0; cursor: pointer;
-  font-size: 21px; line-height: 1; color: #55555c; padding: 2px 4px; align-self: flex-start; }
+  font-size: 21px; line-height: 1; color: #55555c; padding: 6px; align-self: flex-end; }
 #panel .phead .pfav.on { color: #e0c341; }
 #panel .phead .pfav:hover { color: #e0c341; }
 #panel .prow { display: flex; justify-content: space-between; gap: 12px;
