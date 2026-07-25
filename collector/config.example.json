@@ -36,9 +36,9 @@
   "traceLinkHours": 24,
   "traceEnabled": true,
   "traceEveryS": 900,
-  "traceBatch": 3,
-  "traceHops": 3,
-  "traceFailDrop": 2,
+  "traceBatch": 4,
+  "traceHops": 0,
+  "traceFailDrop": 4,
   "keyFetchEnabled": true,
   "keyFetchEveryS": 300,
   "keyFetchPerNodeH": 3,
@@ -53,9 +53,10 @@
   "formerWindowH": 1,
   "renderEveryS": 60,
   "pruneEveryS": 300,
-  "traceWaitS": 45,
+  "traceWaitS": 15,
   "nbrFromRelay": true,
   "relayProofH": 6,
   "relayResolveMin": 30,
-  "bidirProofH": 24
+  "bidirProofH": 24,
+  "traceStaggerS": 4
 }

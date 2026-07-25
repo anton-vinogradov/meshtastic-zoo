@@ -378,8 +378,16 @@ def on_receive(packet=None, interface=None):
                     history.record_xlinks(hx)
             except Exception:
                 pass
+            # СВОЙ ответ отличаем по requestId: матч только по отправителю пускал
+            # чужие RouteDiscovery (они к нам реально приходят — см. жатву xlink выше),
+            # а с пробами в один хоп чужой ответ с пустым route[] выглядел бы как
+            # «путь длиной 1 хоп» и покрасил бы несуществующего соседа.
+            rq = dec.get("requestId") or packet.get("requestId")
             with lock:
-                waited = frm in pending_traces
+                want = _trace_req.get(frm)
+                waited = frm in pending_traces and (want is None or rq == want)
+                if waited:
+                    _trace_req.pop(frm, None)
             if not waited:
                 return
             path = []
@@ -679,6 +687,7 @@ def any_online_ent():
 
 OUT_HEARSUS = ROOT.parent / "data" / "hearsus.json"   # id → {ts, own}: узел слышит НАС
 _hears_us = {}
+_trace_req = {}           # id цели → id нашего последнего traceroute-запроса
 _relay_map = (0.0, {})    # (ts, {последний байт NodeNum: [id, ...]}) — кеш на минуту
 _relay_stats = {"pkt": 0, "field": 0, "relayed": 0, "resolved": 0, "ambig": 0,
                 "leg": 0, "hearsus": 0}   # видно на статусе: работает ли жатва
@@ -1368,9 +1377,16 @@ def send_trace(ent, to, hops):
     воркер вставал на минуты, а ручная проба успевала «не ответить» задолго до
     настоящего ответа. Ответ ловит on_receive, вердикт выносим своим таймаутом."""
     from meshtastic import mesh_pb2, portnums_pb2
-    ent["iface"].sendData(mesh_pb2.RouteDiscovery(), destinationId=to,
-                          portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
-                          wantResponse=True, hopLimit=hops)
+    # wantAck НЕ ставим: при want_ack и hop_limit=0 прошивка молча заменяет лимит
+    # на дефолтный (Router.cpp), и «проба ровно на один хоп» перестаёт быть таковой
+    pkt = ent["iface"].sendData(mesh_pb2.RouteDiscovery(), destinationId=to,
+                                portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                                wantResponse=True, hopLimit=hops)
+    rid = getattr(pkt, "id", None)
+    if rid:
+        with lock:
+            _trace_req[to] = rid     # ответ примем только с этим requestId
+    return rid
 
 
 def await_trace(to, started):
@@ -1426,7 +1442,7 @@ def note_trace_result(target, ok):
             e = _trace_fails.setdefault(target, {"n": 0, "ts": 0})
             n = e["n"] = int(e.get("n") or 0) + 1
             e["ts"] = int(time.time())
-            if n >= CFG.get("traceFailDrop", 2):
+            if n >= CFG.get("traceFailDrop", 4):
                 traces.pop(target, None)
                 drop = True
     save_trace_fails()
@@ -1463,7 +1479,15 @@ def trace_loop():
             now = time.time()
             gap = CFG.get("traceRetryGapS", 900)           # не пробовать одну чаще
             recheck = CFG.get("traceRecheckH", 24) * 3600  # проверенных перепроверяем раз/сутки
-            fresh = lambda i: now - _survey_last.get(i, 0) < gap
+            def fresh(i):
+                """Рано пробовать снова? Обычный gap, а для молчащих — экспоненциальный
+                backoff: n-й неответ подряд → пауза min(900·2ⁿ, 24ч). Без него ~250
+                глухих узлов вечно конкурируют с полезными кандидатами (замерено: 77%
+                проб уходило в узлы с нулём ответов, один получил 34 пробы)."""
+                last = _survey_last.get(i, 0)
+                n = int((_trace_fails.get(i) or {}).get("n") or 0)
+                need = min(gap * (2 ** n), 24 * 3600) if n else gap
+                return now - last < need
             todo = [(n["id"], n.get("best")) for n in data.get("nodes", [])
                     if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")
                     and n["id"] not in traces and not fresh(n["id"])]
@@ -1501,8 +1525,17 @@ def trace_loop():
                      if cu is not None and cu < CFG.get("quietChUtil", 8) else 1)
             targets = [x[0] for x in sorted(
                 pool, key=lambda x: -(x[1] if x[1] is not None else -999))[:batch]]
+            # честный остаток: кандидаты, у которых НЕТ подтверждения (ни трассой, ни
+            # двусторонностью). Раньше считалось «нет записи в traces» — счётчик не
+            # убывал от подтверждений и показывал 251 при трёх новых соседях
             n_todo = sum(1 for n in data.get("nodes", []) if not n.get("own")
-                         and n.get("hop") is None and not n.get("traceNbr") and n["id"] not in traces)
+                         and n.get("hop") is None
+                         and not (n.get("traceNbr") or n.get("relayNbr")))
+            # ВЕЕР вместо очереди: on_receive асинхронный, поэтому шлём всю пачку со
+            # стаггером и ждём ОДНО окно на всех. Было send→wait×K (такт до 315 с),
+            # стало K отправок + одно окно (замер: p50 ответа 1 с, p95 15 с).
+            # Перекрытие проб к РАЗНЫМ целям на успех не влияет (χ², p=0.91).
+            started, sent = int(time.time()), []
             for target in targets:
                 _survey_last[target] = now
                 sender = best_sender_for(target)
@@ -1515,20 +1548,28 @@ def trace_loop():
                 with lock:
                     pending_traces.add(target)
                 beat("trace", f"{kind} {target} · осталось {n_todo}"
-                              + (f" · пачка {len(targets)}" if len(targets) > 1 else ""))
+                              + (f" · веер {len(targets)}" if len(targets) > 1 else ""))
                 log(f"🧭 trace [{kind}]: {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
-                started = int(time.time())
                 try:
-                    # соседство подтверждает путь длиной 1 хоп, дальние нам тут не
-                    # нужны — короткий лимит быстрее отсекает «не сосед»
-                    send_trace(ent, target, CFG.get("traceHops", 3))
+                    send_trace(ent, target, CFG.get("traceHops", 0))
+                    sent.append(target)
                 except Exception as e:
                     log(f"🧭 trace {target}: {e!r}")
                     note_trace_result(target, False)
-                else:
-                    note_trace_result(target, await_trace(target, started))
-                with lock:
-                    pending_traces.discard(target)
+                    with lock:
+                        pending_traces.discard(target)
+                if len(targets) > 1:
+                    time.sleep(CFG.get("traceStaggerS", 4))   # не бить пачкой в один слот
+            if sent:
+                deadline = time.time() + CFG.get("traceWaitS", 15)
+                while time.time() < deadline and any(
+                        (traces.get(t) or {}).get("ts", 0) < started for t in sent):
+                    time.sleep(1)
+                for target in sent:
+                    ok = (traces.get(target) or {}).get("ts", 0) >= started
+                    note_trace_result(target, ok)
+                    with lock:
+                        pending_traces.discard(target)
         except Exception as e:
             log(f"trace: {e!r}")
 
@@ -1567,8 +1608,10 @@ def own_trace_loop():
             beat("otrace", f"{src['id']} → {dst['id']}")
             log(f"🧭 otrace: {src['id']} → {dst['id']} (chUtil {cu})")
             try:
-                src["iface"].sendTraceRoute(dst["id"], 3)   # свои — близко, хопов мало
-                _own_traces_done += 1
+                started = int(time.time())
+                send_trace({"iface": src["iface"], "id": src["id"]}, dst["id"], 3)
+                if await_trace(dst["id"], started):
+                    _own_traces_done += 1
             except Exception as e:
                 log(f"🧭 otrace {dst['id']}: {e!r}")
             with lock:
@@ -1820,13 +1863,15 @@ def reader_loop():
 
 def node_tier(n):
     """Тир узла — та же классификация, по которой карта показывает уровни:
-    own (своя) · nbr (слышим напрямую) · trace (подтверждён трассировкой) · former
-    (бывший прямой, теперь через хопы). est — не тир, а признак «позиция оценена»."""
+    own (своя) · nbr (подтверждён: трасса дошла или доказана двусторонность) ·
+    heard (слышим напрямую, подтверждения нет) · former (через хопы)."""
     if n.get("own"):
         return "own"
+    if n.get("traceNbr") or n.get("relayNbr"):
+        return "nbr"          # подтверждён: трасса дошла или доказана двусторонность
     if n.get("hop") is None:
-        return "nbr"
-    return "trace" if n.get("traceNbr") else "former"
+        return "heard"        # слышим напрямую, но подтверждения нет
+    return "former"
 
 
 def prep_loop():
@@ -1848,7 +1893,7 @@ def prep_loop():
                 nodes = data.get("nodes", []) or []
                 tier = {n["id"]: node_tier(n) for n in nodes if n.get("id")}
                 cnt = {t: sum(1 for v in tier.values() if v == t)
-                       for t in ("own", "nbr", "trace", "former")}
+                       for t in ("own", "nbr", "heard", "former")}
                 cnt["est"] = sum(1 for n in nodes if n.get("est"))
                 out = {"updated": (data.get("meta") or {}).get("updated"),
                        "counts": cnt, "tier": tier}
@@ -1860,8 +1905,8 @@ def prep_loop():
                 atomic_write_bytes(OUT_TIERS.with_name(OUT_TIERS.name + ".gz"),
                                    gzip.compress(body.encode(), 6))
                 last_mtime = mtime
-                beat("prep", f"свои {cnt['own']} · соседи {cnt['nbr']} · "
-                             f"трасс {cnt['trace']} · бывшие {cnt['former']} · est {cnt['est']}")
+                beat("prep", f"свои {cnt['own']} · подтв. соседи {cnt['nbr']} · "
+                             f"слышим {cnt['heard']} · бывшие {cnt['former']} · est {cnt['est']}")
             else:
                 beat("prep", "актуально")
         except Exception as e:
