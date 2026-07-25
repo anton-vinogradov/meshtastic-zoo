@@ -1270,8 +1270,14 @@ def feed_store(found):
             # hopsAway в mesh.proto — optional: прошивка выставляет поле только
             # когда знает дистанцию. Отсутствие = НЕИЗВЕСТНО, а не «прямой приём»
             hops = e.get("hopsAway")
-            heard = int(e.get("lastHeard") or 0) or now
-            nodestore.note_leg(did, oid, e.get("snr"), hops, ts=heard, src="db")
+            # lastHeard=0 — прошивка НЕ ЗНАЕТ, когда слышала (сбитые часы, свежий
+            # ребут). Раньше стояло `or now`, и незнание становилось «слышим прямо
+            # сейчас»: замер показал 203 из 457 чужих узлов (44%) с выдуманной
+            # свежестью, завышение до 60 ч. Такой узел не мог стать молчащим ни при
+            # каком молчании — правило присутствия у него не срабатывало никогда.
+            heard = int(e.get("lastHeard") or 0)
+            if heard:
+                nodestore.note_leg(did, oid, e.get("snr"), hops, ts=heard, src="db")
             u = e.get("user") or {}
             f = {}
             if u.get("longName") or u.get("shortName"):
@@ -1289,14 +1295,14 @@ def feed_store(found):
             p = e.get("position") or {}
             if p.get("latitudeI"):
                 f.update(lat=p["latitudeI"] / 1e7, lon=(p.get("longitudeI") or 0) / 1e7,
-                         alt=p.get("altitude"), pos_ts=heard)
+                         alt=p.get("altitude"), pos_ts=heard or None)
             dm = e.get("deviceMetrics") or {}
             if dm:
                 f.update(batt=dm.get("batteryLevel"), volt=dm.get("voltage"),
                          chutil=dm.get("channelUtilization"), air=dm.get("airUtilTx"),
-                         uptime=dm.get("uptimeSeconds"), dm_ts=heard)
+                         uptime=dm.get("uptimeSeconds"), dm_ts=heard or None)
             if f:
-                nodestore.upsert(did, ts=heard, **f)
+                nodestore.upsert(did, ts=heard, **f)   # heard=0 → свежесть не трогаем
 
 
 def rx_flush():
@@ -2410,6 +2416,12 @@ def main():
     load_key_asks()
     load_trace_fails()
     load_hears_us()
+    try:
+        n = nodestore.repair_freshness()
+        if n:
+            log(f"🩹 свежесть без улик исправлена у {n} узлов (метки от сбитых часов nodeDB)")
+    except Exception as e:
+        log(f"repair_freshness: {e}")
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):

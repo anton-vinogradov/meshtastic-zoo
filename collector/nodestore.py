@@ -64,13 +64,19 @@ def _row(c, nid):
 def upsert(nid, ts=None, own=False, **fields):
     """Влить в узел `nid` то, что он о себе прислал. ts — время наблюдения:
     двигает last_heard; поля из _MERGE перезаписываются только НЕ-None значением
-    (не затираем известное пустым). last_direct/last_relay ставит note_leg."""
-    ts = int(ts or time.time())
+    (не затираем известное пустым). last_direct/last_relay ставит note_leg.
+
+    ts=0 — время наблюдения НЕИЗВЕСТНО (nodeDB со сбитыми часами отдаёт
+    lastHeard=0): сведения вливаем, но свежесть НЕ двигаем. Иначе «не знаю,
+    когда слышала» читается как «слышу сейчас» — и узел уже не может замолчать."""
+    unknown = ts == 0
+    ts = int(time.time() if ts is None else ts)
     with _lock:
         c = _db()
         cur = _row(c, nid)
         data = dict(cur) if cur else {"id": nid}
-        data["last_heard"] = max(data.get("last_heard") or 0, ts)
+        if not unknown:
+            data["last_heard"] = max(data.get("last_heard") or 0, ts)
         data["updated"] = int(time.time())
         if own:
             data["own"] = 1
@@ -175,6 +181,39 @@ def load(max_age_s):
                     d[j] = None
         out.append(d)
     return out
+
+
+def repair_freshness(min_gap_s=3600):
+    """Разовая починка свежести, не подтверждённой ни одной уликой.
+
+    Пока nodeDB со сбитыми часами читалась как «слышим сейчас», узлам массово
+    проставлялся last_heard текущей секундой опроса. Такая метка живёт до суток
+    и всё это время держит узел на карте и вне правила присутствия. Опускаем
+    last_heard до самой свежей РЕАЛЬНОЙ улики (максимум ts по heard_by).
+
+    Чиним только разрыв больше min_gap_s: мелкая разница законна — свежесть
+    двигают и пути без плеча (текст, NodeInfo). Узлы вовсе без улик не трогаем:
+    там опускать не к чему, ими занимается prune. Возвращает число исправленных."""
+    fixed = 0
+    with _lock:
+        c = _db()
+        rows = c.execute("SELECT id, last_heard, heard_by FROM node_state "
+                         "WHERE own=0 AND last_heard IS NOT NULL").fetchall()
+        for r in rows:
+            lh = r["last_heard"] or 0
+            ev = 0
+            try:
+                for e in json.loads(r["heard_by"] or "{}").values():
+                    if isinstance(e, dict):
+                        ev = max(ev, int(e.get("ts") or 0))
+            except Exception:
+                continue
+            if ev and lh > ev + min_gap_s:
+                c.execute("UPDATE node_state SET last_heard=? WHERE id=?", (ev, r["id"]))
+                fixed += 1
+        if fixed:
+            c.commit()
+    return fixed
 
 
 def prune(max_age_s, keep_ids=None):
