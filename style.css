@@ -34,10 +34,13 @@ body {
 /* margin:auto центрирует при масштабе ≤100%; при зуме svg шире контейнера —
    margin схлопывается в 0, карта слева и скроллится (без flex, иначе не доскроллить) */
 #map svg { display: block; height: 100%; width: 100%; margin: 0 auto; }
+/* Зум — четвёртым в верхнем правом ряду к кнопкам (⚙ 🗺 📟). Снизу слева он
+   наезжал на панель канала; ниже по правому краю нельзя — с y=60 там панель
+   узла. Высота и скругление как у круглых кнопок, чтобы ряд читался единым. */
 #mapzoom {
-  position: fixed; left: 14px; bottom: 46px; z-index: 7;
-  display: flex; align-items: stretch;
-  border: 1px solid var(--zone-stroke); border-radius: 9px;
+  position: fixed; top: 14px; right: 152px; z-index: 7;
+  display: flex; align-items: stretch; height: 38px;
+  border: 1px solid var(--zone-stroke); border-radius: 19px;
   background: var(--zone-bg); overflow: hidden;
 }
 #mapzoom button {
@@ -45,6 +48,13 @@ body {
   cursor: pointer; font-size: 16px; padding: 5px 11px; line-height: 1;
 }
 #mapzoom #mz-lbl { font-size: 12px; min-width: 46px; border-left: 1px solid var(--zone-stroke); border-right: 1px solid var(--zone-stroke); }
+/* Узкое окно: правый ряд (кнопки + зум) занимает 262px, и на телефоне он
+   встречается с поиском. Двигать зум некуда — ниже по правому краю панель
+   узла, снизу слева панель канала. Поэтому ужимаем поиск, а не ряд. */
+@media (max-width: 560px) {
+  #searchbox input { width: 84px; }
+  #searchbox #searchcnt { display: none; }
+}
 #mapzoom button:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
 body.geo-on #mapzoom { display: none; }
 
