@@ -691,13 +691,20 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                                heard=int(n.get("last_heard") or ld or now)))
         elif th and th > 1:                                # ТРАССА: через ретрансляторы
             direct_seen[nid] = int(ld or now)
+            # ДВЕ ШКАЛЫ В ОДНОМ ПОЛЕ. В трассе th — число ЗВЕНЬЕВ пути (наша нода
+            # тоже в нём), а `hop` в карточке означает hopsAway из mesh.proto:
+            # «через сколько ретрансляторов», у прямого соседа — ноль. Путь
+            # [своя, R, цель] это 2 звена и ОДИН хоп. Раньше сюда шло th, и
+            # трассированные узлы показывались на хоп дальше, чем те же узлы по
+            # nodeDB, — рядом на карте стояли числа из разных систем счёта.
+            hops_away = th - 1
             c = src_of(n)
             c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
-                     hops=th, heard=int(n.get("last_heard") or ld or now), silent=False,
-                     named=bool(n.get("name")))
+                     hops=hops_away, heard=int(n.get("last_heard") or ld or now),
+                     silent=False, named=bool(n.get("name")))
             hops_nodes.append(c)
             if tsrc:
-                rf.append(dict(frm=nid, to=tsrc, snr=None, hops=th, src="tr",
+                rf.append(dict(frm=nid, to=tsrc, snr=None, hops=hops_away, src="tr",
                                heard=int(n.get("last_heard") or ld or now)))
         elif ld and now - ld < directW + formerW:          # СЕРАЯ (бывший 0)
             direct_seen[nid] = int(ld)
