@@ -653,11 +653,11 @@ def maybe_solicit_key(nid, direct):
         return                       # общий газ: пачка пакетов не превращается в пачку запросов
     if now - _keyfetch_last.get(nid, 0) < CFG.get("keyFetchPerNodeH", 3) * 3600:
         return
+    if anyone_has_key(nid):
+        return                       # дешёвая проверка (nodeDB в памяти) — ДО чтения live.json
     cu = chan_util()
     if cu is not None and cu > CFG.get("busyChUtil", 35):
         return                       # эфир занят — не мешаем
-    if anyone_has_key(nid):
-        return
     _keyfetch_last[nid] = now
     _solicit_any = now
     log(f"🔑 {nid} в эфире и без ключа — запрашиваю сразу")
@@ -1158,15 +1158,29 @@ def rx_flush():
         log(f"rx_flush: {e!r}")
 
 
+_chan_util_cache = (0.0, None)   # (ts, значение): live.json ~300КБ, парсить на каждый вызов дорого
+
+
 def chan_util():
-    """Макс. загрузка канала (%) по своим нодам из live.json, или None."""
+    """Макс. загрузка канала (%) по своим нодам из live.json, или None.
+    Мемоизировано на chanUtilCacheS: значение меняется медленно (телеметрия нод),
+    а зовут его все эфирные воркеры каждый такт и приёмный путь — незачем
+    перечитывать и разбирать 300КБ JSON каждый раз."""
+    global _chan_util_cache
+    now = time.time()
+    ts, val = _chan_util_cache
+    if now - ts < CFG.get("chanUtilCacheS", 15):
+        return val
     try:
         data = json.loads(OUT_LIVE.read_text())
     except Exception:
+        _chan_util_cache = (now, None)
         return None
     ch = [(n.get("info") or {}).get("chUtil") for n in data.get("nodes", []) if n.get("own")]
     ch = [c for c in ch if c is not None]
-    return max(ch) if ch else None
+    val = max(ch) if ch else None
+    _chan_util_cache = (now, val)
+    return val
 
 
 def paced_sleep(base_s):
