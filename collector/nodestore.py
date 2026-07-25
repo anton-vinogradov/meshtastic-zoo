@@ -183,6 +183,16 @@ def load(max_age_s):
     return out
 
 
+def names():
+    """{id: имя} по всем известным узлам. Нужен для подписи отправителя: пакеты
+    реакций и тапбэков приходят БЕЗ user-блока, и без кеша в канал и в телеграм
+    попадал сырой id даже у ноды, чьё имя мы давно знаем."""
+    with _lock:
+        rows = _db().execute(
+            "SELECT id, name FROM node_state WHERE name IS NOT NULL AND name<>''").fetchall()
+    return {r["id"]: r["name"] for r in rows}
+
+
 def repair_freshness(min_gap_s=3600):
     """Разовая починка свежести, не подтверждённой ни одной уликой.
 

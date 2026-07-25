@@ -498,7 +498,7 @@ def on_receive(packet=None, interface=None):
         frm_num = packet.get("from")
         frm = f"!{frm_num:08x}" if isinstance(frm_num, int) else str(frm_num)
         u = ((dict(interface.nodes or {}).get(frm) or {}).get("user") or {})
-        frm_name = u.get("longName") or u.get("shortName") or frm
+        frm_name = node_name(frm, u)
         text = dec.get("text") or ""
         reply_id = dec.get("replyId") or dec.get("reply_id")
         # «Писатель» канала/лички → ОПЕРАТИВНО в store: узел, вышедший в эфир с
@@ -818,6 +818,54 @@ def save_hears_us():
 def own_ids():
     with lock:
         return {c["id"] for c in conns.values() if c.get("id")}
+
+
+_name_cache = (0.0, {})
+
+
+def node_name(nid, u=None):
+    """Человеческое имя узла для подписи: override из конфига (идентичность = id,
+    имя ноды она может менять) → что прислал сам пакет → наш кеш → id.
+
+    Кеш обязателен: реакции и тапбэки идут без user-блока, и подпись
+    отправителя вырождалась в сырой id, хотя имя лежит в базе."""
+    global _name_cache
+    cfg = (CFG.get("names") or {}).get(nid)
+    if cfg:
+        return cfg
+    if u:
+        nm = u.get("longName") or u.get("shortName")
+        if nm:
+            return nm
+    now = time.time()
+    ts, m = _name_cache
+    if now - ts > 60:
+        try:
+            m = nodestore.names()
+            _name_cache = (now, m)
+        except Exception:
+            pass
+    return m.get(nid) or nid
+
+
+def backfill_names():
+    """Разово подписать историю: где отправитель записан сырым id (пакет пришёл
+    без user-блока — так приходят реакции), подставить имя из кеша. Иначе старые
+    сообщения навсегда остаются подписанными «!aca96630»."""
+    n = 0
+    with lock:
+        for arr in (channel, messages):
+            for m in arr:
+                f = m.get("frm")
+                if f and m.get("frmName") == f:
+                    nm = node_name(f)
+                    if nm and nm != f:
+                        m["frmName"] = nm
+                        n += 1
+    if n:
+        save_channel()
+        save_messages()
+    return n
 
 
 def relay_byte_map():
@@ -2575,6 +2623,12 @@ def main():
             log(f"🩹 снято ложных «слышит нас» по байту своей ноды: {n}")
     except Exception as e:
         log(f"purge_byte_collisions: {e}")
+    try:
+        n = backfill_names()
+        if n:
+            log(f"🩹 подписано имён в истории вместо сырых id: {n}")
+    except Exception as e:
+        log(f"backfill_names: {e}")
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):
