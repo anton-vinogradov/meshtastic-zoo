@@ -688,8 +688,8 @@ def any_online_ent():
 OUT_HEARSUS = ROOT.parent / "data" / "hearsus.json"   # id → {ts, own}: узел слышит НАС
 _hears_us = {}
 _trace_req = {}           # id цели → id нашего последнего traceroute-запроса
-_relay_map = (0.0, {})    # (ts, {последний байт NodeNum: [id, ...]}) — кеш на минуту
-_relay_stats = {"pkt": 0, "field": 0, "relayed": 0, "resolved": 0, "ambig": 0,
+_relay_map = (0.0, ({}, {}))   # (ts, (кандидаты, все носители)) по байту — кеш на минуту
+_relay_stats = {"pkt": 0, "field": 0, "relayed": 0, "resolved": 0, "ambig": 0, "own": 0,
                 "leg": 0, "hearsus": 0}   # видно на статусе: работает ли жатва
 
 
@@ -700,6 +700,35 @@ def load_hears_us():
         _hears_us = {k: v for k, v in d.items() if isinstance(v, dict)}
     except Exception:
         _hears_us = {}
+
+
+def purge_byte_collisions():
+    """Снять улики «слышит нас», выписанные по байту НАШЕЙ ЖЕ ноды.
+
+    Свои ноды переизлучают наш трафик постоянно, а в карту байтов они не попадали
+    — кредит за переизлучение уходил случайному чужому узлу с тем же последним
+    байтом. Такая улика живёт relayProofH часов, обновляется каждым новым промахом
+    и всё это время держит узел в тире «соседи» И вне очереди трассировки: узел,
+    который трассировка уже опровергла, не проверялся больше никогда.
+    Разово чистим накопленное — источник закрыт в relay_byte_map()."""
+    try:
+        own = {n["id"] for n in json.loads(OUT_LIVE.read_text()).get("nodes", [])
+               if n.get("own") and n.get("id")}
+        ob = {int(i[1:], 16) & 0xFF for i in own}
+    except Exception:
+        return 0
+    bad = []
+    with lock:
+        for k in list(_hears_us):
+            try:
+                if k not in own and (int(k[1:], 16) & 0xFF) in ob:
+                    bad.append(k)
+                    _hears_us.pop(k, None)
+            except Exception:
+                pass
+    if bad:
+        save_hears_us()
+    return len(bad)
 
 
 def save_hears_us():
@@ -719,28 +748,43 @@ def own_ids():
 
 
 def relay_byte_map():
-    """{последний байт NodeNum → [id узлов]} для разрешения relay_node.
-    В заголовке лежит ТОЛЬКО последний байт, поэтому пул кандидатов обязан быть
-    узким: по ВСЕМ узлам карты уникальны лишь 18% байтов (до 11 узлов на байт), а
-    среди слышанных за последние relayResolveMin минут — 62%. Сужение честное по
-    смыслу: передавшего нам пакет мы только что слышали, значит он свежий."""
+    """Два пула по последнему байту NodeNum: (КАНДИДАТЫ, ВСЕ НОСИТЕЛИ).
+
+    В заголовке лежит только последний байт, а носителей у байта в базе в среднем
+    три. Поэтому два вопроса решаются РАЗНЫМИ множествами:
+      кандидаты   — в кого вообще можно разрешить. Переизлучивший передал пакет
+                    НАМ, значит был в прямом радиодоступе: берём только узлы,
+                    которых мы слышим напрямую (без hop) и недавно. Свои — тоже,
+                    включая онлайн: без них кредит за наше же переизлучение
+                    доставался чужому узлу с тем же байтом (замер: байт своей
+                    ноды разрешался в чужого в 12-16% срезов, и так был выписан
+                    «сосед», которого четыре трассы подряд опровергли);
+      носители    — кто ВООБЩЕ недавно в эфире с этим байтом, включая узлы в
+                    хопах. В ответ они не годятся, но доказывают неоднозначность.
+    Раньше пул был один и брался по любому приёму: 87% кандидатов оказывались
+    узлами в 2-5 хопах, физически не способными передать нам пакет напрямую, —
+    и каждому выписывалось «прямое» плечо, которое трасса тут же опровергала."""
     global _relay_map
     now = time.time()
     ts, m = _relay_map
     if now - ts < 60:
         return m
-    m, win = {}, CFG.get("relayResolveMin", 30) * 60
+    res, seen, win = {}, {}, CFG.get("relayResolveMin", 30) * 60
     try:
         for n in json.loads(OUT_LIVE.read_text()).get("nodes", []):
             h = n.get("heard")
-            # своя нода без TCP переизлучает как любая другая — её байт тоже разрешаем
-            if (not n.get("own") or not n.get("online")) and h and now - h < win:
-                try:
-                    m.setdefault(int(n["id"][1:], 16) & 0xFF, []).append(n["id"])
-                except Exception:
-                    pass
+            if not h or now - h >= win:
+                continue
+            try:
+                b = int(n["id"][1:], 16) & 0xFF
+            except Exception:
+                continue
+            seen.setdefault(b, []).append(n["id"])
+            if n.get("own") or n.get("hop") is None:
+                res.setdefault(b, []).append(n["id"])
     except Exception:
         pass
+    m = (res, seen)
     _relay_map = (now, m)
     return m
 
@@ -761,12 +805,19 @@ def note_relay(packet, ent, hs, hl, snr, frm_num):
     relayed = isinstance(hs, int) and isinstance(hl, int) and hs > hl
     if relayed:
         _relay_stats["relayed"] += 1
-    ids = relay_byte_map().get(rn & 0xFF) or []
-    if len(ids) != 1:
+    res, seen = relay_byte_map()
+    byte = rn & 0xFF
+    ids = res.get(byte) or []
+    # «Других кандидатов среди свежих нет» — ЕЩЁ НЕ однозначность: раньше молчание
+    # о носителе читалось как его отсутствие, и 25 из 29 «уникальных» байтов имели
+    # других известных носителей. Поэтому: разрешаем только в единственного
+    # кандидата И только если других носителей этого байта в эфире не слышно.
+    if len(ids) != 1 or len(seen.get(byte) or []) != 1:
         _relay_stats["ambig"] += 1
         return                     # байт неоднозначен — молчим, а не угадываем
     rid = ids[0]
     if rid == ent.get("id") or rid in own_ids():
+        _relay_stats["own"] += 1   # наше же переизлучение: кредит не выписываем никому
         return
     _relay_stats["resolved"] += 1
     if relayed and snr is not None:
@@ -2422,6 +2473,12 @@ def main():
             log(f"🩹 свежесть без улик исправлена у {n} узлов (метки от сбитых часов nodeDB)")
     except Exception as e:
         log(f"repair_freshness: {e}")
+    try:
+        n = purge_byte_collisions()
+        if n:
+            log(f"🩹 снято ложных «слышит нас» по байту своей ноды: {n}")
+    except Exception as e:
+        log(f"purge_byte_collisions: {e}")
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):
