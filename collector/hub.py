@@ -1372,7 +1372,25 @@ def trace_loop():
             stale = [(n["id"], n.get("best")) for n in data.get("nodes", [])
                      if not n.get("own") and n["id"] in traces and not fresh(n["id"])
                      and now - traces[n["id"]].get("ts", 0) >= recheck]
-            pool = todo or amb or stale
+            # ПРИОРИТЕТ ОЧЕРЕДИ. Тир «соседи» наполняют только пути длиной 1 хоп,
+            # поэтому вперёд идут те, у кого шанс подтвердиться максимален:
+            #  1) уже подтверждались соседом, но улика просрочена — перепроверка;
+            #  2) несли наш трафик в нашей трассе (traceRelay) — почти наверняка рядом;
+            # и только потом слепой перебор «прямых по nodeDB» (их 250+, и трассы
+            # показывают, что реально это 3-9 хопов). Раньше pool = todo or amb or
+            # stale голодал перепроверку: todo не пустеет никогда.
+            with lock:
+                tr_snap = {k: (v.get("ts") or 0, len((v.get("path") or [])))
+                           for k, v in traces.items()}
+            renbr = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                     if not n.get("own") and not fresh(n["id"])
+                     and tr_snap.get(n["id"], (0, 0))[1] == 2
+                     and now - tr_snap[n["id"]][0] >= recheck]
+            relay = [(n["id"], n.get("best")) for n in data.get("nodes", [])
+                     if n.get("traceRelay") and not fresh(n["id"]) and n["id"] not in tr_snap]
+            pool = renbr or relay or todo or amb or stale
+            kind = ("перепроверка" if pool is renbr else "ретранслятор" if pool is relay
+                    else "новый" if pool is todo else "уточнение" if pool is amb else "рекеш")
             if not pool:
                 continue  # нечего проверять / всё недавно пробовали — не душним
             # Сколько узлов проверить за такт: карта показывает соседями только
@@ -1395,9 +1413,9 @@ def trace_loop():
                     break
                 with lock:
                     pending_traces.add(target)
-                beat("trace", f"осталось {n_todo} · трассирую {target}"
-                              + (f" (пачка {len(targets)})" if len(targets) > 1 else ""))
-                log(f"🧭 trace: трассирую {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
+                beat("trace", f"{kind} {target} · осталось {n_todo}"
+                              + (f" · пачка {len(targets)}" if len(targets) > 1 else ""))
+                log(f"🧭 trace [{kind}]: {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
                 started = int(time.time())
                 try:
                     # соседство подтверждает путь длиной 1 хоп, дальние нам тут не
