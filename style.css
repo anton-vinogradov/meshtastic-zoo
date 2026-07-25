@@ -327,6 +327,9 @@ body.geo-on #searchbox { display: none; }
 #map svg.searching .node.hit { opacity: 1; }
 #map svg.searching .edge.hit { opacity: .8; }
 #map svg.searching .node.hit > rect:first-of-type { stroke: #8fce6a; stroke-width: 2.5; }
+/* призрак: узел вне нашего слуха — приглушён, пунктиром, но кликабельно-наводимый */
+#map svg .node.ghost { cursor: help; }
+#map svg .node.ghost:hover > rect:first-of-type { stroke: var(--text); }
 
 #gear {
   position: fixed;

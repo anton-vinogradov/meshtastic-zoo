@@ -12,7 +12,7 @@
   // Язык интерфейса выбирается в настройках, хранится локально
   let lang = localStorage.getItem("mzLang") || "en";
   const _lvl0 = localStorage.getItem("mzMapLevel");           // уровень карты (ползунок)
-  let mapLevel = _lvl0 == null ? 3 : Math.max(0, Math.min(3, +_lvl0));
+  let mapLevel = _lvl0 == null ? 3 : Math.max(0, Math.min(4, +_lvl0));
   // показывать узел на текущем уровне: 0 свои · 1 +подтв.трассировкой · 2 +слышим
   // напрямую (чёрные) · 3 +слышали напрямую (серые = всё). Каждый включает предыдущий.
   // «соседом» считаем только узел, до которого ДОШЛА трассировка (traceNbr) —
@@ -55,10 +55,14 @@
       if (cnt) { cnt.textContent = ""; cnt.classList.remove("none"); }
       return;
     }
-    const all = (lastLive && lastLive.nodes) || [];
+    // Призраки — тоже узлы карты (ступень «+призраки»), и искать их надо
+    // наравне: вопрос «куда делся узел» приходит именно про них.
+    const all = ((lastLive && lastLive.nodes) || [])
+      .concat((lastLive && lastLive.ghosts) || []);
     const fq = fold(q);
     const ids = new Set(all.filter(n =>
-      fold(`${n.label || ""} ${n.short || ""} ${n.id}`).includes(fq)).map(n => n.id));
+      fold(`${n.label || ""} ${n.name || ""} ${n.short || ""} ${n.id}`).includes(fq))
+      .map(n => n.id));
     let shown = 0;
     svg.querySelectorAll("g.node").forEach(g => {
       const on = ids.has(g.dataset.id);
@@ -222,7 +226,10 @@
       hop: "{0} hop", hopTip: "{0} → {1}: reachable via {2} hop(s), not heard directly",
       showHops: "former neighbor", showHopsTip: "show former direct neighbors now reached via relays",
       lvlLbl: "Show", lvlTip: "how many nodes to show: own only → traceroute-confirmed neighbors → heard directly now → heard directly before (each adds the previous)",
-      lvl0: "own", lvl1: "+trace ✓", lvl2: "+heard", lvl3: "+former",
+      lvl0: "own", lvl1: "+trace ✓", lvl2: "+heard", lvl3: "+former", lvl4: "+ghosts",
+      ghostCard: "we never hear it — known only from other nodes' traceroutes",
+      ghostSeen: "last seen in the air {0}", ghostPos: "position: {0}",
+      ghostPosGps: "its own GPS", ghostPosEst: "estimate from {0} partners, ±{1} km",
       resizeTip: "drag to resize",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
@@ -339,7 +346,10 @@
       hop: "{0} хоп", hopTip: "{0} → {1}: через {2} хоп(ов), напрямую не слышно",
       showHops: "бывший сосед", showHopsTip: "показывать бывших прямых соседей, теперь достижимых через ретрансляторы",
       lvlLbl: "Показ", lvlTip: "сколько узлов показывать: только свои → подтверждённые трассировкой соседи → слышим напрямую сейчас → слышали напрямую раньше (каждый включает предыдущий)",
-      lvl0: "свои", lvl1: "+трасса ✓", lvl2: "+слышим", lvl3: "+бывшие",
+      lvl0: "свои", lvl1: "+трасса ✓", lvl2: "+слышим", lvl3: "+бывшие", lvl4: "+призраки",
+      ghostCard: "мы его не слышим — знаем только из чужих трассировок",
+      ghostSeen: "в эфире {0}", ghostPos: "позиция: {0}",
+      ghostPosGps: "его собственный GPS", ghostPosEst: "оценка по {0} партнёрам, ±{1} км",
       resizeTip: "потяните, чтобы изменить ширину",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
@@ -1062,6 +1072,46 @@
     }
     out.push(...edgeSvg);
 
+    // ПРИЗРАКИ (ступень «+призраки»): узлы, которых мы не слышим сами — знаем о
+    // них только из чужих трасс. В раскладке сборщика их нет, поэтому ставим в
+    // центроид ВИДИМЫХ партнёров и отталкиваем наружу от центра карты, чтобы не
+    // лечь поверх них. Плечи к партнёрам — пунктиром без замера: это смежность,
+    // а не измеренный канал.
+    const ghostCards = [];
+    if (mapLevel >= 4) {
+      for (const g of (D.ghosts || [])) {
+        const prt = (g.parts || []).map(id => nodes[id]).filter(Boolean);
+        if (!prt.length) continue;
+        const gx0 = prt.reduce((s2, n) => s2 + n.cx, 0) / prt.length;
+        const gy0 = prt.reduce((s2, n) => s2 + n.cy, 0) / prt.length;
+        const vx = gx0 - CW / 2, vy = gy0 - CH / 2;
+        const vl = Math.hypot(vx, vy) || 1;
+        const gx = Math.max(60, Math.min(CW - 60, gx0 + vx / vl * 95));
+        const gy = Math.max(40, Math.min(CH - 40, gy0 + vy / vl * 95));
+        const nm = String(g.name || g.id.slice(-4));
+        const posTxt = g.src === "gps" ? t("ghostPosGps")
+          : t("ghostPosEst", g.by, (g.unc ?? 0).toFixed(1));
+        const tip = [nm, t("ghostCard"), t("ghostSeen", fmtAgo(g.seen)),
+          t("ghostPos", posTxt)].join(" · ");
+        for (const pn of prt) {
+          ghostCards.push(`<g class="edge ghostleg e-${g.id} e-${pn.id}">
+            <line x1="${gx.toFixed(1)}" y1="${gy.toFixed(1)}"
+              x2="${pn.cx.toFixed(1)}" y2="${pn.cy.toFixed(1)}"
+              stroke="#8a8a90" stroke-width="1" stroke-dasharray="2 6" opacity="0.55"/></g>`);
+        }
+        ghostCards.push(`<g class="node ghost n-${g.id}" data-id="${g.id}">
+          <title>${esc(tip)}</title>
+          <rect x="${(gx - 34).toFixed(1)}" y="${(gy - 15).toFixed(1)}" width="68" height="30" rx="8"
+            fill="var(--world-card)" stroke="#8a8a90" stroke-width="1.2" stroke-dasharray="4 4"/>
+          <text x="${gx.toFixed(1)}" y="${(gy - 1).toFixed(1)}" text-anchor="middle"
+            fill="var(--muted)" font-size="10" font-weight="700">${esc(nm.slice(0, 11))}</text>
+          <text x="${gx.toFixed(1)}" y="${(gy + 10).toFixed(1)}" text-anchor="middle"
+            fill="var(--muted)" font-size="8.5">👻 ${esc(fmtAgeS(g.seen))}</text>
+        </g>`);
+      }
+      out.push(...ghostCards);
+    }
+
     // Карточки нод (поверх рёбер). Свои — последними, чтобы рисовались ПОВЕРХ
     // соседей и клик по своей ноде не перехватывался наложившимся соседом.
     for (const n of Object.values(nodes).sort((a, b) => (a.world === b.world ? 0 : a.world ? -1 : 1))) {
@@ -1129,7 +1179,8 @@
       }),
       showAge ? 1 : 0,
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
-        l.outLeg ? 1 : 0, l.src || "", showAge ? ageBk(l.heard) : 0]).sort()]);   // outLeg, источник, возраст — в сигнатуру
+        l.outLeg ? 1 : 0, l.src || "", showAge ? ageBk(l.heard) : 0]).sort(),   // outLeg, источник, возраст — в сигнатуру
+      mapLevel >= 4 ? (D.ghosts || []).map(g => [g.id, g.src, ageBk(g.seen)]).sort() : 0]);
     const svgHTML = `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
@@ -2114,7 +2165,7 @@
   // Ползунок уровня карты — «input» (живо при перетаскивании)
   document.getElementById("settings").addEventListener("input", (e) => {
     if (e.target.id !== "lvlSlider") return;
-    mapLevel = Math.max(0, Math.min(3, +e.target.value || 0));
+    mapLevel = Math.max(0, Math.min(4, +e.target.value || 0));
     localStorage.setItem("mzMapLevel", String(mapLevel));
     const nm = document.getElementById("lvl-name");
     if (nm) nm.textContent = t("lvl" + mapLevel);
@@ -2207,8 +2258,8 @@
       <b class="ssub">${t("mapSettings")}</b>
       <div class="srow scol slvl" title="${esc(t("lvlTip"))}">
         <span>${t("lvlLbl")}: <b id="lvl-name">${esc(t("lvl" + mapLevel))}</b></span>
-        <input type="range" id="lvlSlider" min="0" max="3" step="1" value="${mapLevel}">
-        <div class="lvl-ticks"><span>${t("lvl0")}</span><span>${t("lvl1")}</span><span>${t("lvl2")}</span><span>${t("lvl3")}</span></div>
+        <input type="range" id="lvlSlider" min="0" max="4" step="1" value="${mapLevel}">
+        <div class="lvl-ticks"><span>${t("lvl0")}</span><span>${t("lvl1")}</span><span>${t("lvl2")}</span><span>${t("lvl3")}</span><span>${t("lvl4")}</span></div>
       </div>
       <label class="srow stog" title="${esc(t("geoOrientTip"))}">
         <span>🧭 ${t("geoOrientLbl")}</span>
@@ -2493,7 +2544,7 @@
     // ПРИЗРАКИ (truth v2): узлы вне нашего слуха, размещённые графово по
     // xlink-партнёрам из трасс — серым пунктиром, попап вместо постоянной
     // подписи (уверенность низкая, не засоряем карту)
-    if (geoEst) ((lastLive && lastLive.ghosts) || []).forEach(g => {
+    if (mapLevel >= 4) ((lastLive && lastLive.ghosts) || []).forEach(g => {
       const p = [g.lat, g.lon];
       pts.push(p);
       L.circle(p, { radius: Math.max(200, g.unc * 1000), color: "#8a8a90", weight: 1,
@@ -2570,7 +2621,7 @@
       : "";
     // призраки: сколько узлов вне нашего слуха размещено по xlink-партнёрам
     const nGhosts = ((lastLive && lastLive.ghosts) || []).length;
-    const ghostHint = geoEst && nGhosts
+    const ghostHint = mapLevel >= 4 && nGhosts
       ? `<div class="geoctl-h">${esc(t("ghostLegend", nGhosts))}</div>` : "";
     ctl.innerHTML = `<label class="geo-est-tog" title="${esc(t("geoEstTip"))}">
         <input type="checkbox" id="geo-est-cb"${geoEst ? " checked" : ""}> ${esc(t("geoEst"))}</label>${estHint}${ghostHint}
