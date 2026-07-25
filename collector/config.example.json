@@ -56,5 +56,6 @@
   "traceWaitS": 45,
   "nbrFromRelay": true,
   "relayProofH": 6,
-  "relayResolveMin": 30
+  "relayResolveMin": 30,
+  "bidirProofH": 24
 }

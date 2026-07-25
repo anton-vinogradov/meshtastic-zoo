@@ -621,6 +621,15 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                 trace_relay.add(path[j])
     trace_nbrs -= own
     trace_relay -= own | trace_nbrs
+    # «ОН СЛЫШИТ НАС» из snrTowards трасс: в ответе есть замер каждого звена, включая
+    # первое — наша нода → первый релей. Такое звено доказывает, что узел принял наш
+    # запрос НАПРЯМУЮ, независимо от длины всего пути. Вместе с нашим прямым приёмом
+    # это двусторонняя смежность — то же, что даёт путь длиной 1 хоп, но добывается
+    # из ЛЮБОЙ успешной трассы.
+    bidir_win = now - CFG.get("bidirProofH", 24) * 3600
+    hear_us = {p["b"] for p in (xlinks or [])
+               if p.get("a") in own and p.get("b") not in own
+               and p.get("snr") is not None and (p.get("last") or 0) >= bidir_win}
 
     def src_of(n):  # поля, которые читает node_info()
         s = dict(long=n.get("name"), role=n.get("role"), mqtt=n.get("mqtt"),
@@ -797,7 +806,8 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         if c.get("silent"):
             node["silent"] = True
         hu = (hears_us or {}).get(c["id"])
-        if hu and now - (hu.get("ts") or 0) < CFG.get("relayProofH", 6) * 3600:
+        hu_fresh = bool(hu) and now - (hu.get("ts") or 0) < CFG.get("relayProofH", 6) * 3600
+        if hu_fresh or c["id"] in hear_us:
             # он переизлучил НАШ пакет, услышав его напрямую → слышит нас. Вместе с
             # нашим прямым приёмом это доказанная двусторонняя смежность — тот самый
             # факт, за которым мы гоняем трассировку, только бесплатно
