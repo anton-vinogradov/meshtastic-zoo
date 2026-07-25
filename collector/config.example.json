@@ -37,7 +37,7 @@
   "keyFetchEnabled": true,
   "keyFetchEveryS": 300,
   "keyFetchPerNodeH": 3,
-  "keyFetchFreshMin": 30,
+  "keyFetchFreshMin": 180,
   "quietChUtil": 8,
   "busyChUtil": 35,
   "paceFloorS": 60,

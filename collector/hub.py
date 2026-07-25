@@ -297,6 +297,8 @@ def on_receive(packet=None, interface=None):
                         rx_acc.setdefault((ent.get("id"), f"!{fn:08x}"), []).append(
                             (float(snr), float(packet.get("rxRssi"))
                              if packet.get("rxRssi") is not None else None))
+                # он в эфире и слышен напрямую — лучший момент попросить ключ
+                maybe_solicit_key(f"!{fn:08x}", True)
         except Exception:
             pass
         dec = (packet or {}).get("decoded") or {}
@@ -620,6 +622,46 @@ def resend(m, auto=False):
 
 
 _solicit_last = {}  # id → ts последнего solicit_key (антидубль эфира)
+_solicit_any = 0.0  # ts ЛЮБОГО событийного запроса ключа (общий газ на эфир)
+
+
+def anyone_has_key(nid):
+    """Знает ли ХОТЬ ОДНА своя нода публичный ключ узла — по её nodeDB в памяти
+    (без чтения live.json: вызывается на каждый принятый пакет)."""
+    with lock:
+        ifaces = [c["iface"] for c in conns.values() if c.get("iface")]
+    for i in ifaces:
+        try:
+            if (((i.nodes or {}).get(nid) or {}).get("user") or {}).get("publicKey"):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def maybe_solicit_key(nid, direct):
+    """Ключ просим В МОМЕНТ, когда узел только что вышел в эфир и слышен НАПРЯМУЮ:
+    он точно жив и в зоне, значит ответ на NodeInfo дойдёт. Пассивный keyfetch_loop
+    берёт только «свежих» (heard < keyFetchFreshMin), а большинство keyless-нод
+    бьётся раз в 1-3 часа и в это окно почти не попадает — поэтому и копился
+    хвост без ключей. Порядок проверок: сначала дешёвые счётчики, потом эфир."""
+    global _solicit_any
+    if not direct or not CFG.get("keyFetchEnabled", True):
+        return
+    now = time.time()
+    if now - _solicit_any < CFG.get("keySolicitGapS", 20):
+        return                       # общий газ: пачка пакетов не превращается в пачку запросов
+    if now - _keyfetch_last.get(nid, 0) < CFG.get("keyFetchPerNodeH", 3) * 3600:
+        return
+    cu = chan_util()
+    if cu is not None and cu > CFG.get("busyChUtil", 35):
+        return                       # эфир занят — не мешаем
+    if anyone_has_key(nid):
+        return
+    _keyfetch_last[nid] = now
+    _solicit_any = now
+    log(f"🔑 {nid} в эфире и без ключа — запрашиваю сразу")
+    threading.Thread(target=solicit_key, args=(nid,), daemon=True).start()
 
 
 def solicit_key(to):
@@ -1283,15 +1325,21 @@ def keyfetch_loop():
             except Exception:
                 continue
             now = time.time()
-            fresh = CFG.get("keyFetchFreshMin", 30) * 60
+            # окно «был в эфире недавно»: 30 мин отсекало почти всех (keyless-ноды
+            # бьются раз в 1-3 часа), а воркер и так берёт не больше одной за такт
+            fresh = CFG.get("keyFetchFreshMin", 180) * 60
             per = CFG.get("keyFetchPerNodeH", 3) * 3600
             # кандидаты: keyless, слышимые НАПРЯМУЮ (hop=None) и недавно (в эфире),
             # не дёрганные за per часов
-            elig = [n for n in data.get("nodes", [])
-                    if not n.get("own") and not n.get("key") and n.get("hop") is None
-                    and n.get("heard") and now - n["heard"] < fresh
+            keyless = [n for n in data.get("nodes", [])
+                       if not n.get("own") and not n.get("key") and n.get("hop") is None]
+            elig = [n for n in keyless
+                    if n.get("heard") and now - n["heard"] < fresh
                     and now - _keyfetch_last.get(n["id"], 0) >= per]
             if not elig:
+                # видно, сколько ещё без ключа: основную работу делает событийный
+                # путь (maybe_solicit_key при приёме), этот воркер — добор в тишину
+                beat("keyfetch", f"нет подходящих · без ключа {len(keyless)}")
                 continue
             # приоритет: сначала posSus-нарушители, затем давно не дёрганные
             elig.sort(key=lambda n: (0 if n.get("posSus") else 1, _keyfetch_last.get(n["id"], 0)))
