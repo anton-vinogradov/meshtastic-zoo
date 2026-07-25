@@ -555,7 +555,7 @@ def trace_legs(xlinks, node_ids, own, hours):
 
 
 def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None, asks=None,
-                     hears_us=None, known=None):
+                     hears_us=None, cache_wide=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -962,7 +962,9 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
     # падает ниже 50% — отсюда дефолт окна.
     ghosts = (geocal or {}).pop("ghosts", []) if isinstance(geocal, dict) else []
     if ghosts:
-        byrow = {r.get("id"): r for r in (known or store)}
+        # ВНИМАНИЕ: имя `known` в этой функции уже занято конфигом (ip→id) —
+        # параметр с таким именем молча перезатирался, и здесь итерировались IP
+        byrow = {r.get("id"): r for r in (cache_wide or store)}
         gwin = CFG.get("ghostWindowH", 24) * 3600
         alive = []
         for g in ghosts:

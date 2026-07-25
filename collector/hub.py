@@ -1950,11 +1950,11 @@ def reader_loop():
                 # призракам нужен ШИРОКИЙ снимок: store грузится окном карты
                 # (25 ч), а узел из чужой трассы может быть слышан нами куда
                 # реже — без него призрак остаётся безымянным и без своего GPS
-                known = nodestore.load(CFG.get("xlinkHours", 336) * 3600)
+                cache_wide = nodestore.load(CFG.get("xlinkHours", 336) * 3600)
                 data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
                                              asks=asks_snap, hears_us=hears_snap,
                                              traces=dict(traces), favorites=set(favorites),
-                                             known=known)
+                                             cache_wide=cache_wide)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
@@ -1982,7 +1982,8 @@ def reader_loop():
                 except Exception as e:
                     log(f"metrics: {e!r}")
         except Exception as e:
-            log(f"reader: {e!r}")
+            import traceback
+            log(f"reader: {e!r}\n{traceback.format_exc()}")
         # обычный темп, но просыпаемся раньше по render_now (пришла трассировка)
         render_now.wait(CFG.get("renderEveryS", 60))
         render_now.clear()
