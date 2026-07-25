@@ -30,6 +30,20 @@
   // e-<from> e-<to>"), поэтому набор текста не вызывает перерисовку карты.
   let searchQ = "";
 
+  // Имена узлов в этой сети — латиница (в том числе транслит улиц: Bogatyrskiy,
+  // Verhne-Kamenskaya), а искать их будут кириллицей. Поэтому обе стороны
+  // сводим к общему скелету: транслит + схлопывание y/i/j, которые в транслите
+  // взаимозаменяемы (Bogatyrskiy / Bogatirskiy / Bogatyrskii — одно и то же).
+  const TR = {
+    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z",
+    и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r",
+    с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch",
+    ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya",
+  };
+  const fold = (v) => String(v || "").toLowerCase()
+    .replace(/[а-яё]/g, (c) => (c in TR ? TR[c] : c))
+    .replace(/[yij]/g, "i");
+
   function applySearch() {
     const svg = document.querySelector("#map svg");
     const cnt = document.getElementById("searchcnt");
@@ -42,8 +56,9 @@
       return;
     }
     const all = (lastLive && lastLive.nodes) || [];
+    const fq = fold(q);
     const ids = new Set(all.filter(n =>
-      `${n.label || ""} ${n.short || ""} ${n.id}`.toLowerCase().includes(q)).map(n => n.id));
+      fold(`${n.label || ""} ${n.short || ""} ${n.id}`).includes(fq)).map(n => n.id));
     let shown = 0;
     svg.querySelectorAll("g.node").forEach(g => {
       const on = ids.has(g.dataset.id);
