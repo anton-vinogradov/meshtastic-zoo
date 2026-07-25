@@ -206,7 +206,12 @@ def merge_trace(tgt, path, src, is_manual):
     cut = now - CFG.get("traceRecheckH", 24) * 3600
     fresh = [v for v in by.values() if (v.get("ts") or 0) >= cut and v.get("path")]
     best = min(fresh, key=lambda v: (len(v["path"]), -(v.get("ts") or 0))) if fresh else by[src]
+    # `ts` — время ЛУЧШЕГО пути (по нему судят свежесть соседства), а `ans` — когда
+    # нам вообще последний раз ОТВЕТИЛИ. Разные вещи: ответ по длинному пути не
+    # двигает `ts` (лучший путь остаётся коротким и старым), и проверка «ответила
+    # ли нода» по `ts` считала живой ответ неответом — со штрафом и снятием.
     traces[tgt] = {"path": best["path"], "ts": best.get("ts") or now, "by": by,
+                   "ans": max(int(v.get("ts") or 0) for v in by.values()),
                    **({"manual": True} if best.get("manual") else {})}
 
 
@@ -1585,13 +1590,20 @@ def send_trace(ent, to, hops):
     return rid
 
 
+def trace_answered(to, started):
+    """Ответила ли нода ПОСЛЕ момента started. Смотрим на `ans` (последний ответ
+    любой из наших нод), а не на `ts` лучшего пути: длинный ответ лучший путь не
+    двигает, и проверка по `ts` записывала ответившую ноду в молчуны."""
+    e = traces.get(to) or {}
+    return max(int(e.get("ans") or 0), int(e.get("ts") or 0)) >= started
+
+
 def await_trace(to, started):
     """Дождаться ответа на пробу (traceWaitS) — True, если пришёл СВЕЖИЙ путь."""
     deadline = time.time() + CFG.get("traceWaitS", 45)
     while time.time() < deadline:
         with lock:
-            e = traces.get(to)
-            if e and (e.get("ts") or 0) >= started:
+            if trace_answered(to, started):
                 return True
         time.sleep(1)
     return False
@@ -1624,12 +1636,17 @@ def save_trace_fails():
         log(f"tracefail: {e!r}")
 
 
-def note_trace_result(target, ok):
+def note_trace_result(target, ok, src=None):
     """Итог пробы трассировки. Неудача — ОТРИЦАТЕЛЬНОЕ доказательство: после
     traceFailDrop неответов подряд снимаем подтверждение соседства, и обязательно
     с диска. Иначе старая успешная трасса держит узел «соседом» до перепроверки
     (сутки), а рестарт хаба ещё и восстанавливает её из traces.json — узел не
-    уходит с карты, сколько ни трассируй."""
+    уходит с карты, сколько ни трассируй.
+
+    Снимаем ПУТЬ НЕОТВЕТИВШЕЙ НОДЫ, а не запись целиком: цель трассируется с
+    разных своих нод, и «FADV не достучался» ничего не говорит о том, что FCB
+    достучался минуту назад за один хоп. Раньше одна такая неудача сносила все
+    пути сразу — узел мигал на карте прямо во время режима «все по очереди»."""
     drop, n = False, 0
     with lock:
         if ok:
@@ -1639,8 +1656,23 @@ def note_trace_result(target, ok):
             n = e["n"] = int(e.get("n") or 0) + 1
             e["ts"] = int(time.time())
             if n >= CFG.get("traceFailDrop", 4):
-                traces.pop(target, None)
-                drop = True
+                rec = traces.get(target) or {}
+                by = {k: v for k, v in (rec.get("by") or {}).items() if k != src}
+                if src and by:
+                    cut = time.time() - CFG.get("traceRecheckH", 24) * 3600
+                    fresh = [v for v in by.values()
+                             if (v.get("ts") or 0) >= cut and v.get("path")]
+                    if fresh:
+                        best = min(fresh, key=lambda v: (len(v["path"]), -(v.get("ts") or 0)))
+                        rec.update(path=best["path"], ts=best.get("ts") or 0, by=by,
+                                   ans=max(int(v.get("ts") or 0) for v in by.values()))
+                        traces[target] = rec
+                    else:
+                        traces.pop(target, None)
+                        drop = True
+                else:
+                    traces.pop(target, None)
+                    drop = True
     save_trace_fails()
     if drop:
         save_traces()
@@ -1746,7 +1778,7 @@ def trace_loop():
             # стаггером и ждём ОДНО окно на всех. Было send→wait×K (такт до 315 с),
             # стало K отправок + одно окно (замер: p50 ответа 1 с, p95 15 с).
             # Перекрытие проб к РАЗНЫМ целям на успех не влияет (χ², p=0.91).
-            started, sent = int(time.time()), []
+            started, sent = int(time.time()), {}   # цель → своя нода, с которой слали
             for target in targets:
                 _survey_last[target] = now
                 sender = best_sender_for(target)
@@ -1763,10 +1795,10 @@ def trace_loop():
                 log(f"🧭 trace [{kind}]: {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
                 try:
                     send_trace(ent, target, CFG.get("traceHops", 0))
-                    sent.append(target)
+                    sent[target] = ent.get("id")
                 except Exception as e:
                     log(f"🧭 trace {target}: {e!r}")
-                    note_trace_result(target, False)
+                    note_trace_result(target, False, src=ent.get("id"))
                     with lock:
                         pending_traces.discard(target)
                 if len(targets) > 1:
@@ -1774,11 +1806,11 @@ def trace_loop():
             if sent:
                 deadline = time.time() + CFG.get("traceWaitS", 15)
                 while time.time() < deadline and any(
-                        (traces.get(t) or {}).get("ts", 0) < started for t in sent):
+                        not trace_answered(t, started) for t in sent):
                     time.sleep(1)
-                for target in sent:
-                    ok = (traces.get(target) or {}).get("ts", 0) >= started
-                    note_trace_result(target, ok)
+                for target, src in sent.items():
+                    ok = trace_answered(target, started)
+                    note_trace_result(target, ok, src=src)
                     with lock:
                         pending_traces.discard(target)
         except Exception as e:
@@ -2585,7 +2617,11 @@ class Handler(SimpleHTTPRequestHandler):
                 with lock:
                     pending_traces.add(to)
                     manual_pending.add(to)   # метка «запрошена из интерфейса»
-                    traces.pop(to, None)     # путь строим заново, старый не показываем
+                    # Запись НЕ стираем. Раньше стирали («путь строим заново»), и в
+                    # режиме «все по очереди» каждая следующая нода сносила улики
+                    # предыдущих: на время пробы узел оставался вовсе без трасс и
+                    # мигал на карте. Ответ этой ноды заменит её же путь при мерже,
+                    # пути остальных останутся на месте.
                 try:
                     send_trace(ent, to, 7)   # ручная — ищем ПОЛНЫЙ путь, лимит 7
                 except Exception as e:
@@ -2596,7 +2632,7 @@ class Handler(SimpleHTTPRequestHandler):
                 # неответ на РУЧНУЮ пробу — тоже доказательство: снимаем соседство
                 # (иначе узел висел бы «соседом» по старой трассе, а рестарт хаба
                 # поднимал бы её с диска)
-                note_trace_result(to, answered)
+                note_trace_result(to, answered, src=ent.get("id"))
             threading.Thread(target=_trace, daemon=True).start()
             self._json({"ok": True})
         else:
