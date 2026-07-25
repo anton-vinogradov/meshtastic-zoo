@@ -1415,7 +1415,9 @@
       // т.к. traces[to] чистится на каждый POST) → путь, или null (не вернулась)
       const oneTrace = async (ownerId) => {
         try { await fetch("/api/trace", { method: "POST", body: JSON.stringify({ node: ownerId, to: id }) }); } catch { }
-        for (let k = 0; k < 9; k++) {
+        // ждём дольше серверного traceWaitS: раньше 16с истекали раньше ответа,
+        // и панель показывала «нет ответа» у ноды, которая на самом деле отвечает
+        for (let k = 0; k < 30; k++) {
           await new Promise(r => setTimeout(r, 1800));
           if (openId !== id) return "abort";
           let d = null;

@@ -52,5 +52,6 @@
   "directWindowH": 24,
   "formerWindowH": 1,
   "renderEveryS": 60,
-  "pruneEveryS": 300
+  "pruneEveryS": 300,
+  "traceWaitS": 45
 }

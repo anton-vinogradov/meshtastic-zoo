@@ -46,6 +46,7 @@ OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 OUT_FAV = ROOT.parent / "data" / "favorites.json"   # id избранных — их НЕ прунит кеш
 OUT_TIERS = ROOT.parent / "data" / "tiers.json"     # готовая разбивка узлов по тирам (воркер prep)
 OUT_KEYASK = ROOT.parent / "data" / "keyasks.json"  # id → сколько раз просили ключ и когда
+OUT_TRFAIL = ROOT.parent / "data" / "tracefail.json"  # id → {n, ts}: трасса не дошла (отрицательное доказательство)
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
@@ -1260,8 +1261,54 @@ def paced_sleep(base_s):
     return cu
 
 
+def send_trace(ent, to, hops):
+    """Отправить traceroute БЕЗ библиотечного ожидания. Штатный sendTraceRoute
+    внутри зовёт waitForTraceRoute (waitFactor × responseTimeoutSecs — до 20 минут!):
+    воркер вставал на минуты, а ручная проба успевала «не ответить» задолго до
+    настоящего ответа. Ответ ловит on_receive, вердикт выносим своим таймаутом."""
+    from meshtastic import mesh_pb2, portnums_pb2
+    ent["iface"].sendData(mesh_pb2.RouteDiscovery(), destinationId=to,
+                          portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                          wantResponse=True, hopLimit=hops)
+
+
+def await_trace(to, started):
+    """Дождаться ответа на пробу (traceWaitS) — True, если пришёл СВЕЖИЙ путь."""
+    deadline = time.time() + CFG.get("traceWaitS", 45)
+    while time.time() < deadline:
+        with lock:
+            e = traces.get(to)
+            if e and (e.get("ts") or 0) >= started:
+                return True
+        time.sleep(1)
+    return False
+
+
 _survey_last = {}   # id -> ts последней фоновой трассировки
-_trace_fails = {}   # id -> сколько проб ПОДРЯД осталось без ответа
+_trace_fails = {}   # id -> {n, ts}: сколько проб ПОДРЯД без ответа и когда последняя
+
+
+def load_trace_fails():
+    global _trace_fails
+    try:
+        d = json.loads(OUT_TRFAIL.read_text())
+        _trace_fails = {k: v for k, v in d.items() if isinstance(v, dict)}
+    except Exception:
+        _trace_fails = {}
+
+
+def save_trace_fails():
+    """Отрицательные доказательства ОБЯЗАНЫ переживать рестарт: иначе после
+    перезапуска узел снова считается подтверждённым, хотя трасса до него не дошла."""
+    try:
+        with lock:
+            d = dict(sorted(_trace_fails.items(),
+                            key=lambda kv: -(kv[1].get("ts") or 0))[:2000])
+            _trace_fails.clear()
+            _trace_fails.update(d)
+        atomic_write(OUT_TRFAIL, json.dumps(d, ensure_ascii=False))
+    except Exception as e:
+        log(f"tracefail: {e!r}")
 
 
 def note_trace_result(target, ok):
@@ -1270,15 +1317,18 @@ def note_trace_result(target, ok):
     с диска. Иначе старая успешная трасса держит узел «соседом» до перепроверки
     (сутки), а рестарт хаба ещё и восстанавливает её из traces.json — узел не
     уходит с карты, сколько ни трассируй."""
-    drop = False
+    drop, n = False, 0
     with lock:
         if ok:
-            _trace_fails.pop(target, None)
-            return False
-        n = _trace_fails[target] = _trace_fails.get(target, 0) + 1
-        if n >= CFG.get("traceFailDrop", 2):
-            traces.pop(target, None)
-            drop = True
+            _trace_fails.pop(target, None)   # ответила — отрицательные улики снимаем
+        else:
+            e = _trace_fails.setdefault(target, {"n": 0, "ts": 0})
+            n = e["n"] = int(e.get("n") or 0) + 1
+            e["ts"] = int(time.time())
+            if n >= CFG.get("traceFailDrop", 2):
+                traces.pop(target, None)
+                drop = True
+    save_trace_fails()
     if drop:
         save_traces()
         log(f"🧭 соседство не подтверждено: {target} не ответил {n} раз(а) — снял")
@@ -1348,15 +1398,16 @@ def trace_loop():
                 beat("trace", f"осталось {n_todo} · трассирую {target}"
                               + (f" (пачка {len(targets)})" if len(targets) > 1 else ""))
                 log(f"🧭 trace: трассирую {target} с {ent.get('id')} (осталось {n_todo}, chUtil {cu})")
+                started = int(time.time())
                 try:
-                    # для подтверждения СОСЕДСТВА хватает пары хопов, а ждать ответа
-                    # с hopLimit=7 можно минутами (вызов блокирующий) — потому у
-                    # опроса свой, короткий лимит; ручная трасса ищет полный путь
-                    ent["iface"].sendTraceRoute(target, CFG.get("traceHops", 3))
-                    note_trace_result(target, True)
+                    # соседство подтверждает путь длиной 1 хоп, дальние нам тут не
+                    # нужны — короткий лимит быстрее отсекает «не сосед»
+                    send_trace(ent, target, CFG.get("traceHops", 3))
                 except Exception as e:
                     log(f"🧭 trace {target}: {e!r}")
                     note_trace_result(target, False)
+                else:
+                    note_trace_result(target, await_trace(target, started))
                 with lock:
                     pending_traces.discard(target)
         except Exception as e:
@@ -2148,19 +2199,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             def _trace():
+                started = int(time.time())
                 with lock:
                     pending_traces.add(to)
-                    manual_pending.add(to)   # результат этой пробы не персистим
-                    traces.pop(to, None)
+                    manual_pending.add(to)   # метка «запрошена из интерфейса»
+                    traces.pop(to, None)     # путь строим заново, старый не показываем
                 try:
-                    ent["iface"].sendTraceRoute(to, 7)  # блокируется до ответа/таймаута
+                    send_trace(ent, to, 7)   # ручная — ищем ПОЛНЫЙ путь, лимит 7
                 except Exception as e:
                     log(f"🧭 trace {to}: {e!r}")
-                # ответ ловит on_receive; если не пришёл — снимаем ожидание по таймауту
-                time.sleep(2)
+                answered = await_trace(to, started)
                 with lock:
                     pending_traces.discard(to)
-                    answered = to in traces
                 # неответ на РУЧНУЮ пробу — тоже доказательство: снимаем соседство
                 # (иначе узел висел бы «соседом» по старой трассе, а рестарт хаба
                 # поднимал бы её с диска)
@@ -2177,6 +2227,7 @@ def main():
     load_tgmap()
     load_favorites()
     load_key_asks()
+    load_trace_fails()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):

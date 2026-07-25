@@ -586,26 +586,40 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             if (e.get("user") or {}).get("publicKey"):
                 keys_by.setdefault(oid, set()).add(nid)
     own = set(stat)
+    # СВОЙ ПАРК из конфига (known/mobile/names): это наше железо. Когда такая нода
+    # временно не на связи по TCP (мобильный Cardputer уехал с WiFi), она НЕ должна
+    # превращаться в чужого соседа и судиться трассировкой — иначе своя же нода то
+    # исчезает из соседей, то возвращается по случайным уликам.
+    own_cfg = (set(CFG.get("mobile") or []) | set((CFG.get("known") or {}).values())
+               | set((CFG.get("names") or {}).keys())) - own
     # ПОДТВЕРЖДЁННЫЕ ТРАССИРОВКОЙ прямые соседи: узел, стоящий В МАРШРУТЕ РЯДОМ
     # со своей нодой (1 хоп) — наземная правда топологии, в отличие от «слышим»
     # по nodeDB (переизлучённые копии её сбивают).
-    trace_nbrs = set()
-    # ПУТЬ ПО ТРАССЕ — авторитет о том, как узел достигается: 1 хоп = прямой сосед,
-    # больше = через ретрансляторы (даже если nodeDB считает его прямым: её путают
-    # переизлучённые копии). Берём кратчайший из свежих путей и его источник —
-    # свою ноду, от которой трасса шла.
-    trace_hops, trace_src = {}, {}
+    # УЛИКИ ТРАССИРОВКИ — три РАЗНЫХ факта, которые нельзя смешивать:
+    #  traceNbr   — НАША СВЕЖАЯ трасса ДОШЛА до узла за 1 хоп: он сосед, доказано;
+    #  trace_hops — дошла за h хопов: узел достижим, но соседом не является;
+    #  traceRelay — узел стоял рядом с нашей нодой ВНУТРИ нашей свежей трассы, то
+    #               есть нёс наш трафик. Честный RF-факт, но тира не даёт: мы до
+    #               него не достучались (и в очереди трассировки он идёт первым).
+    # Чужие трассы (path[0] — не наша нода) и просроченные уликами НЕ считаются:
+    # именно 95-часовая чужая трасса держала FADV «соседом» вопреки пробам.
+    trace_nbrs, trace_relay, trace_hops, trace_src = set(), set(), {}, {}
     trust = now - CFG.get("traceRecheckH", 24) * 3600
     for tr in (traces or {}).values():
         path = [p.get("id") for p in (tr.get("path") or [])]
-        for j, nid in enumerate(path):
-            if (j > 0 and path[j - 1] in own) or (j + 1 < len(path) and path[j + 1] in own):
-                trace_nbrs.add(nid)
-        if len(path) >= 2 and path[0] in own and (tr.get("ts") or 0) >= trust:
-            tgt, h = path[-1], len(path) - 1
-            if tgt not in own and h < trace_hops.get(tgt, 99):
+        if len(path) < 2 or path[0] not in own or (tr.get("ts") or 0) < trust:
+            continue
+        tgt, h = path[-1], len(path) - 1
+        if tgt not in own:
+            if h == 1:
+                trace_nbrs.add(tgt)
+            if h < trace_hops.get(tgt, 99):
                 trace_hops[tgt], trace_src[tgt] = h, path[0]
+        for j in range(1, len(path) - 1):
+            if path[j - 1] in own or path[j + 1] in own:
+                trace_relay.add(path[j])
     trace_nbrs -= own
+    trace_relay -= own | trace_nbrs
 
     def src_of(n):  # поля, которые читает node_info()
         s = dict(long=n.get("name"), role=n.get("role"), mqtt=n.get("mqtt"),
@@ -777,8 +791,14 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             node["hop"] = c["hops"]
         if c.get("silent"):
             node["silent"] = True
-        if c["id"] in trace_nbrs:            # подтверждён трассировкой как прямой сосед
+        if c["id"] in trace_nbrs:            # наша свежая трасса дошла до него за 1 хоп
             node["traceNbr"] = True
+        elif c["id"] in trace_relay:         # нёс наш трафик в маршруте, но сам не пробован
+            node["traceRelay"] = True
+        if c["id"] in own_cfg:
+            # своё железо, временно не на связи по TCP: показываем своей карточкой,
+            # а не «чужим соседом» — трассировкой его не судим
+            node["own"], node["online"] = True, False
         if c.get("hw"):
             node["hw"] = c["hw"]
         if node_info(c):

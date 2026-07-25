@@ -19,3 +19,4 @@ collector/config.json
 # python bytecode
 __pycache__/
 *.pyc
+data/tracefail.json
