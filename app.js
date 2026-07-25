@@ -19,6 +19,11 @@
   // наземная правда против слухов nodeDB, где переизлучённые копии выглядят как
   // прямой приём. Неподтверждённые не теряются: они уходят в тир «слышали».
   let traceNbrOnly = localStorage.getItem("mzTraceNbrOnly") !== "0";
+  // ОДНО определение правды на весь клиент: кто сосед, а кто «слышим, но трасса
+  // не дошла». Раньше счётчик в легенде считал соседями всё не-своё — и не менялся
+  // от подтверждений вовсе.
+  const isNbr = (n) => !n.own && n.hop == null && (!traceNbrOnly || !!n.traceNbr);
+  const heardOnly = (n) => !n.own && n.hop == null && traceNbrOnly && !n.traceNbr;
   const showAt = (n) => n.own || (n.traceNbr && mapLevel >= 1)
     || (n.hop == null && mapLevel >= (traceNbrOnly && !n.traceNbr ? 3 : 2))
     || (n.hop != null && mapLevel >= 3);
@@ -174,6 +179,8 @@
       geoAddr: "geocoded from name", geoAddrTip: "nodes whose name is a street address, placed via OSM geocoding (solid = GPS-verified, dashed = unverified)",
       geoOrientLbl: "geo-oriented", geoOrientTip: "rotate the map so your nodes match their real geography (distances stay SNR-honest); place 2+ own nodes on the geo map first",
       critLbl: "single points of failure", critTip: "highlight relay nodes whose failure would cut other nodes off from your fleet",
+      heardOnlyCount: "heard-only {0}", heardOnlyTip: "heard directly, but no traceroute reached them — not counted as neighbours",
+      traceNotReached: "heard directly · trace did not reach it", traceRelayLbl: "carried our traffic in a route",
       traceNbrLbl: "neighbours only when a trace reached them",
       traceNbrTip: "A node counts as a neighbour only once a traceroute confirmed it next to one of ours. Nodes that merely look direct in the nodeDB (relayed copies fool it) move to the +heard tier instead of vanishing.",
       mapSettings: "Weighted map", mapCliHint: "display options — this browser only",
@@ -278,6 +285,8 @@
       geoAddr: "геокод по имени", geoAddrTip: "ноды, чьё имя — адрес улицы; ставятся геокодингом OSM (сплошной = сверено по GPS, пунктир — не сверено)",
       geoOrientLbl: "по географии", geoOrientTip: "повернуть карту так, чтобы свои ноды совпали с реальной географией (дистанции остаются честными по SNR); сначала размести 2+ своих на гео-карте",
       critLbl: "единые точки отказа", critTip: "подсветить ноды-ретрансляторы, чей отказ отрежет другие ноды от твоего флота",
+      heardOnlyCount: "слышим {0}", heardOnlyTip: "слышим напрямую, но трасса до них не дошла — соседями не считаем",
+      traceNotReached: "слышим напрямую · трасса не дошла", traceRelayLbl: "нёс наш трафик в маршруте",
       traceNbrLbl: "соседи только по трассе",
       traceNbrTip: "Соседом считается узел, до которого дошла трассировка и который в маршруте стоит рядом с нашей нодой. Те, что лишь выглядят прямыми в nodeDB (её путают переизлучённые копии), уезжают в тир «+слышим», а не исчезают.",
       mapSettings: "Карта весов", mapCliHint: "настройки отображения — только этот браузер",
@@ -473,8 +482,10 @@
         const t = ownIds.has(l.to) ? l.from : ownIds.has(l.from) ? l.to : null;
         if (t) bestSnr[t] = Math.max(bestSnr[t] ?? -1e3, l.snr);
       }
-      const keep = new Set(D.nodes.filter(n => n.own || n.hop != null).map(n => n.id));
-      D.nodes.filter(n => !n.own && n.hop == null)
+      // подтверждённых трассой не режем: иначе лимит выбрасывал именно тех,
+      // ради кого включён строгий режим (отбор шёл чисто по SNR)
+      const keep = new Set(D.nodes.filter(n => n.own || n.hop != null || n.traceNbr).map(n => n.id));
+      D.nodes.filter(n => !n.own && n.hop == null && !n.traceNbr)
         .sort((a, b) => (bestSnr[b.id] ?? -1e3) - (bestSnr[a.id] ?? -1e3))
         .slice(0, nodeCap).forEach(n => keep.add(n.id));
       D = { ...D, nodes: D.nodes.filter(n => keep.has(n.id)),
@@ -995,7 +1006,7 @@
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0,
-          nn.hw || "", nn.key ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
+          nn.hw || "", nn.key ? 1 : 0, nn.traceNbr ? 1 : 0, nn.traceRelay ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
           unread[id] || 0, nn.fav ? 1 : 0];   // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
       }),
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
@@ -1138,7 +1149,14 @@
       // для чужих нод: как далеко в меше, через MQTT ли, лицензия; и позиция
       const hopsAway = n.own ? null : (n.hop != null ? n.hop : 0);
       const secMesh = n.own ? "" : section(t("secMesh"), [
-        [t("cHopsAway"), hopsAway == null ? null : (hopsAway === 0 ? t("direct") : hopsAway)],
+        // порядок важен: ретранслятор тоже «без подтверждения», но про него есть
+        // что сказать точнее, чем «трасса не дошла»
+        [t("cHopsAway"), hopsAway == null ? null
+          : hopsAway !== 0 ? hopsAway
+          : n.traceNbr ? t("direct")
+          : n.traceRelay ? t("traceRelayLbl")
+          : heardOnly(n) ? t("traceNotReached")
+          : t("direct")],
         [t("cViaMqtt"), i.mqtt ? "✓" : null],
         [t("cLicensed"), i.licensed ? "✓" : null],
       ]);
@@ -1655,7 +1673,12 @@
       ${mapLevel >= 3 ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
       ${chItem}
       <span class="item">${t("nodeCount", D.nodes.length,
-        D.nodes.filter(n => n.own).length, D.nodes.filter(n => !n.own).length)}${
+        D.nodes.filter(n => n.own).length, D.nodes.filter(isNbr).length)}${
+        // «слышим напрямую, но трасса не дошла» — отдельным числом: иначе счётчик
+        // соседей врал (считал ВСЁ не-своё, включая многохоповых и неподтверждённых)
+        D.nodes.filter(heardOnly).length
+          ? ` <span title="${esc(t("heardOnlyTip"))}">· ${t("heardOnlyCount",
+              D.nodes.filter(heardOnly).length)}</span>` : ""}${
         nodeCap > 0 && D.meta.neighTotal > D.nodes.filter(n => !n.own).length
           ? ` <b style="color:#e0a03c" title="${esc(t("capTip"))}">· ${t("capOf", D.meta.neighTotal)}</b>` : ""}</span>
       <span class="item">${t("scan")} · ${esc(scanLocal)}
