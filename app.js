@@ -398,7 +398,9 @@
       D = { ...D, nodes: D.nodes.filter(n => keep.has(n.id)),
         links: D.links.filter(l => keep.has(l.from) && keep.has(l.to)) };
     }
-    const crit = computeCriticality(D.nodes, D.links);  // единые точки отказа (Фаза 4)
+    // единые точки отказа (Фаза 4) — O(n·(n+e)) BFS на узел, поэтому считаем ТОЛЬКО
+    // когда оверлей включён (по умолчанию выкл): иначе это ~сотня мс впустую/рендер
+    const crit = showCrit ? computeCriticality(D.nodes, D.links) : {};
     // Холст подстраивается под пропорции окна — свободного места не остаётся
     const box = document.getElementById("map").getBoundingClientRect();
     const H = 1150;

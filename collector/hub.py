@@ -12,6 +12,7 @@
 Запуск: python3 collector/hub.py       # сайт и API на :8814
 """
 import asyncio
+import gzip
 import ipaddress
 import json
 import os
@@ -1489,9 +1490,15 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
+        gz = code == 200 and len(body) > 512 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+        if gz:
+            body = gzip.compress(body, 6)
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -1548,6 +1555,23 @@ class Handler(SimpleHTTPRequestHandler):
                                 pk=len(u.get("publicKey") or ""), role=u.get("role"), hw=u.get("hwModel"))
                 out[c["id"]] = info
             self._json({"id": tid, "seenBy": out})
+        elif (urlparse(self.path).path.endswith(".json")
+              and "gzip" in (self.headers.get("Accept-Encoding") or "")):
+            # крупная статика (data/live.json ~300КБ, тянется каждые 60с) — gzip'ом.
+            # ?ts= уже cache-bust'ит её, поэтому 304 тут и так не работал.
+            try:
+                raw = open(self.translate_path(self.path), "rb").read()
+            except OSError:
+                super().do_GET()
+                return
+            body = gzip.compress(raw, 6)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()   # добавит Cache-Control для не-/api/
+            self.wfile.write(body)
         else:
             super().do_GET()
 
