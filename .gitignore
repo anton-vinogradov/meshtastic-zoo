@@ -1,5 +1,7 @@
 .DS_Store
 data/live.json
+data/tiers.json
+data/*.gz
 data/messages.json
 data/channel.json
 data/traces.json

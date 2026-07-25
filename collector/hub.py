@@ -44,6 +44,7 @@ OUT_CHAN = ROOT.parent / "data" / "channel.json"
 OUT_TRACES = ROOT.parent / "data" / "traces.json"   # последняя трассировка на узел (персист)
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 OUT_FAV = ROOT.parent / "data" / "favorites.json"   # id избранных — их НЕ прунит кеш
+OUT_TIERS = ROOT.parent / "data" / "tiers.json"     # готовая разбивка узлов по тирам (воркер prep)
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
@@ -87,6 +88,16 @@ def atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def atomic_write_bytes(path, data):
+    """То же, что atomic_write, но для бинарных файлов (предсжатые .gz-срезы)."""
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        f.write(data)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
@@ -1459,6 +1470,57 @@ def reader_loop():
         time.sleep(CFG.get("renderEveryS", 60))
 
 
+def node_tier(n):
+    """Тир узла — та же классификация, по которой карта показывает уровни:
+    own (своя) · nbr (слышим напрямую) · trace (подтверждён трассировкой) · former
+    (бывший прямой, теперь через хопы). est — не тир, а признак «позиция оценена»."""
+    if n.get("own"):
+        return "own"
+    if n.get("hop") is None:
+        return "nbr"
+    return "trace" if n.get("traceNbr") else "former"
+
+
+def prep_loop():
+    """Воркер №4 (ПОДГОТОВКА): как только reader обновил live.json — заранее
+    раскладывает узлы по тирам (data/tiers.json) и кладёт рядом ПРЕДСЖАТЫЕ .gz
+    для live.json/tiers.json. Клиенту и статусу не нужно ничего вычислять на
+    запросе: _static отдаёт готовый .gz, а разбивка «свои/соседи/бывшие» уже
+    посчитана. Работает по mtime — лишний раз не пересчитывает."""
+    last_mtime = 0
+    while True:
+        try:
+            try:
+                mtime = OUT_LIVE.stat().st_mtime
+            except OSError:
+                mtime = 0
+            if mtime and mtime != last_mtime:
+                raw = OUT_LIVE.read_bytes()
+                data = json.loads(raw)
+                nodes = data.get("nodes", []) or []
+                tier = {n["id"]: node_tier(n) for n in nodes if n.get("id")}
+                cnt = {t: sum(1 for v in tier.values() if v == t)
+                       for t in ("own", "nbr", "trace", "former")}
+                cnt["est"] = sum(1 for n in nodes if n.get("est"))
+                out = {"updated": (data.get("meta") or {}).get("updated"),
+                       "counts": cnt, "tier": tier}
+                body = json.dumps(out, ensure_ascii=False)
+                atomic_write(OUT_TIERS, body)
+                # предсжатие: запросы больше не тратят CPU на gzip каждого ответа
+                atomic_write_bytes(OUT_LIVE.with_name(OUT_LIVE.name + ".gz"),
+                                   gzip.compress(raw, 6))
+                atomic_write_bytes(OUT_TIERS.with_name(OUT_TIERS.name + ".gz"),
+                                   gzip.compress(body.encode(), 6))
+                last_mtime = mtime
+                beat("prep", f"свои {cnt['own']} · соседи {cnt['nbr']} · "
+                             f"трасс {cnt['trace']} · бывшие {cnt['former']} · est {cnt['est']}")
+            else:
+                beat("prep", "актуально")
+        except Exception as e:
+            log(f"prep: {e!r}")
+        time.sleep(CFG.get("prepEveryS", 15))
+
+
 def pruner_loop():
     """Воркер №3 (ПРУНЕР): удаляет узлы, вышедшие за все лимиты (кроме своих и избранных)."""
     global _pruned_total
@@ -1532,11 +1594,30 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("ETag", etag)
             self.end_headers()
             return True
+        want_gz = "gzip" in (self.headers.get("Accept-Encoding") or "")
+        # Готовый .gz рядом с файлом (его пишет воркер prep для live.json/tiers.json)
+        # свежее самого файла → отдаём как есть, не тратя CPU на сжатие в запросе.
+        if want_gz:
+            try:
+                sc = os.stat(fs + ".gz")
+                if sc.st_mtime >= st.st_mtime:
+                    body = open(fs + ".gz", "rb").read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("ETag", etag)
+                    self.send_header("Content-Encoding", "gzip")
+                    self.send_header("Vary", "Accept-Encoding")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return True
+            except OSError:
+                pass
         try:
             raw = open(fs, "rb").read()
         except OSError:
             return False
-        gz = len(raw) > 512 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+        gz = len(raw) > 512 and want_gz
         body = gzip.compress(raw, 6) if gz else raw
         self.send_response(200)
         self.send_header("Content-Type", ctype)
@@ -1905,6 +1986,7 @@ def main():
     threading.Thread(target=writer_loop, daemon=True).start()   # №1 опрос → кеш
     threading.Thread(target=reader_loop, daemon=True).start()   # №2 кеш → live.json
     threading.Thread(target=pruner_loop, daemon=True).start()   # №3 чистка кеша
+    threading.Thread(target=prep_loop, daemon=True).start()     # №4 тиры + предсжатие
     threading.Thread(target=tg_poll_loop, daemon=True).start()  # Telegram→меш ответы
     threading.Thread(target=trace_loop, daemon=True).start()    # отдельный воркер трассировки (темп по каналу)
     threading.Thread(target=own_trace_loop, daemon=True).start()# свежесть канала меж своими (own↔own traceroute)
