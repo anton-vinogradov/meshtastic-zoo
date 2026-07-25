@@ -24,6 +24,34 @@
   let nodeCap = parseInt(localStorage.getItem("mzNodeCap"), 10);  // лимит соседей (0/NaN = все)
   if (!(nodeCap >= 0)) nodeCap = 120;                          // дефолт: топ-120 по силе
 
+  // МГНОВЕННАЯ ПЕРЕЗАГРУЗКА: последний нарисованный SVG карты держим в localStorage и
+  // вставляем ДО первого запроса к серверу — карта видна сразу, свежие данные догоняют
+  // в фоне. Это чистый визуал: обработчики навешивает первый настоящий render, он же
+  // заменяет разметку (сигнатура карты после перезагрузки всегда «изменилась»).
+  const MAP_CACHE_KEY = "mzMapCache";
+  const mapCacheCtx = () =>
+    [mapLevel, nodeCap, geoOrient ? 1 : 0, showCrit ? 1 : 0, lang].join("|");
+
+  function saveMapCache(svg) {
+    if (!svg || svg.length > 3e6) return;          // не забиваем квоту гигантской картой
+    try {
+      localStorage.setItem(MAP_CACHE_KEY, JSON.stringify({ v: 1, ctx: mapCacheCtx(), svg }));
+    } catch {
+      try { localStorage.removeItem(MAP_CACHE_KEY); } catch { }
+    }
+  }
+
+  function paintCachedMap() {
+    try {
+      const c = JSON.parse(localStorage.getItem(MAP_CACHE_KEY) || "null");
+      // настройки, влияющие на состав/вид карты, должны совпадать; размер окна не
+      // важен — у svg есть viewBox, он масштабируется под контейнер
+      if (!c || c.v !== 1 || c.ctx !== mapCacheCtx() || !String(c.svg).startsWith("<svg")) return;
+      const el = document.getElementById("map");
+      if (el && !el.querySelector("svg")) el.innerHTML = c.svg;
+    } catch { }
+  }
+
   // Лимит текста Meshtastic (payload ~200 байт), Enter-отправка, авто-обрезка.
   const MAX_MSG_BYTES = 200;
   const byteLen = (s) => new TextEncoder().encode(s).length;
@@ -940,6 +968,7 @@
       lastMapSig = mapSig;
       const _sl = _map.scrollLeft, _st = _map.scrollTop;         // скролл снимаем ДО замены
       _map.innerHTML = svgHTML;
+      setTimeout(() => saveMapCache(svgHTML));   // после paint: запись в localStorage синхронная
       // Зум: увеличиваем РАЗМЕР холста (svg крупнее контейнера → скроллится, ноды
       // разъезжаются), скролл восстанавливаем, чтобы карта не прыгала.
       const _svg = _map.querySelector("svg");
@@ -2389,7 +2418,9 @@
     await refreshMsgs();
     const live = await loadLive();
     if (!live) {
-      if (lastStamp !== "empty") {
+      // Карта с прошлого раза (из кеша) полезнее пустого экрана: сборщик мог просто
+      // перезапускаться. Заглушку рисуем только если на экране и так нечего смотреть.
+      if (lastStamp !== "empty" && !document.querySelector("#map svg")) {
         lastStamp = "empty";
         document.getElementById("map").innerHTML =
           `<p class="empty">${t("noDataYet")} <code>python3 collector/hub.py</code></p>`;
@@ -2415,6 +2446,7 @@
     await refreshChan();
   }
 
+  paintCachedMap();   // карта с прошлого раза — ДО сети, чтобы экран не был пустым
   tick();
   refreshChan();
   // геопривязки нужны и карте связности (ориентация по географии) — грузим сразу
