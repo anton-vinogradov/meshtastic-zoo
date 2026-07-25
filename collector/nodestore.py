@@ -34,6 +34,10 @@ CREATE INDEX IF NOT EXISTS ix_ns_heard ON node_state(last_heard);
 
 _lock = threading.Lock()
 _conn = None
+# Сила улики о плече: наш собственный приём > жатва relay-байта > пересказ nodeDB.
+# Внутри SAME_EVENT_S два источника считаем свидетелями ОДНОГО события.
+_RANK = {"rx": 3, "relay": 2, "db": 1}
+SAME_EVENT_S = 60
 
 # колонки, которые перезаписываем «свежайшим ненулевым» при upsert
 _MERGE = ("name", "hw", "role", "snr", "hops", "lat", "lon", "alt", "pos_ts",
@@ -89,7 +93,6 @@ def note_leg(nid, own_id, snr, hops, ts=None, own_node=False, src=None):
     опрошенной ноды — её слова, не наш замер). Разные источники стоят разного
     доверия, а раньше все три писались в одно поле неотличимо."""
     ts = int(ts or time.time())
-    direct = hops == 0
     with _lock:
         c = _db()
         cur = _row(c, nid)
@@ -100,10 +103,27 @@ def note_leg(nid, own_id, snr, hops, ts=None, own_node=False, src=None):
                 hb = json.loads(data["heard_by"])
             except Exception:
                 hb = {}
+        # ОДНО СОБЫТИЕ — ДВА СВИДЕТЕЛЯ. Приём пакета и скан nodeDB (раз в 30 с)
+        # описывают один и тот же факт, но скан идёт последним и затирал запись
+        # приёма: атрибуция съезжала на «база ноды», а hopsAway=None из базы
+        # стирал ДОКАЗАННЫЙ hops=0 — узел на ровном месте переставал быть прямым.
+        # Правило: улику не понижаем — ни в источнике, ни в точности.
+        prev = hb.get(own_id) if isinstance(hb.get(own_id), dict) else None
+        if prev and 0 <= ts - int(prev.get("ts") or 0) <= SAME_EVENT_S:
+            if _RANK.get(prev.get("src"), 0) > _RANK.get(src, 0):
+                # сильнейший свидетель описывает событие ЦЕЛИКОМ: иначе ярлык
+                # «мы приняли сами» стоял бы над замером, взятым из чужой базы
+                src, snr, hops = prev.get("src"), prev.get("snr"), prev.get("hops")
+            else:
+                if hops is None:
+                    hops = prev.get("hops")
+                if snr is None:
+                    snr = prev.get("snr")
         # None сохраняем как None: «сколько хопов — неизвестно», а не «ноль»
         hb[own_id] = {"snr": snr, "hops": None if hops is None else int(hops), "ts": ts}
         if src:
             hb[own_id]["src"] = src
+        direct = hops == 0
         data["heard_by"] = json.dumps(hb)
         data["last_heard"] = max(data.get("last_heard") or 0, ts)
         if direct:
