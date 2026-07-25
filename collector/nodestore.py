@@ -78,10 +78,13 @@ def upsert(nid, ts=None, own=False, **fields):
 
 
 def note_leg(nid, own_id, snr, hops, ts=None, own_node=False):
-    """Зафиксировать, что СВОЯ нода own_id услышала узел nid (hops=0 = прямой).
-    Обновляет heard_by[own_id] и last_direct/last_relay + last_heard."""
+    """Зафиксировать, что СВОЯ нода own_id услышала узел nid.
+    hops=0 — ПРЯМОЙ приём (доказано), hops>0 — через ретрансляторы,
+    hops=None — НЕИЗВЕСТНО. Раньше None трактовался как прямой (`not hops`) и
+    писался в базу как 0 — отсюда фантомные «прямые» плечи: в proto3 hop_limit=0
+    не сериализуется, приходит None, и «неизвестно» превращалось в «сосед»."""
     ts = int(ts or time.time())
-    direct = not hops
+    direct = hops == 0
     with _lock:
         c = _db()
         cur = _row(c, nid)
@@ -92,7 +95,8 @@ def note_leg(nid, own_id, snr, hops, ts=None, own_node=False):
                 hb = json.loads(data["heard_by"])
             except Exception:
                 hb = {}
-        hb[own_id] = {"snr": snr, "hops": hops or 0, "ts": ts}
+        # None сохраняем как None: «сколько хопов — неизвестно», а не «ноль»
+        hb[own_id] = {"snr": snr, "hops": None if hops is None else int(hops), "ts": ts}
         data["heard_by"] = json.dumps(hb)
         data["last_heard"] = max(data.get("last_heard") or 0, ts)
         if direct:
@@ -100,7 +104,7 @@ def note_leg(nid, own_id, snr, hops, ts=None, own_node=False):
             if snr is not None:
                 data["snr"] = snr
             data["hops"] = 0
-        else:
+        elif hops is not None:
             data["last_relay"] = max(data.get("last_relay") or 0, ts)
             if not data.get("last_direct") or data["last_direct"] < ts - 1:
                 data["hops"] = hops

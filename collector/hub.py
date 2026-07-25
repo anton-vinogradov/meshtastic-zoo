@@ -1158,7 +1158,9 @@ def feed_store(found):
         for did, e in (info.get("db") or {}).items():
             if did == oid or not isinstance(e, dict):
                 continue
-            hops = e.get("hopsAway", 0) or 0
+            # hopsAway в mesh.proto — optional: прошивка выставляет поле только
+            # когда знает дистанцию. Отсутствие = НЕИЗВЕСТНО, а не «прямой приём»
+            hops = e.get("hopsAway")
             heard = int(e.get("lastHeard") or 0) or now
             nodestore.note_leg(did, oid, e.get("snr"), hops, ts=heard)
             u = e.get("user") or {}

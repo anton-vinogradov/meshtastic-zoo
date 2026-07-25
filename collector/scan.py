@@ -643,8 +643,12 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             seed_pos[nid] = (n["x"], n["y"])
         ld = n.get("last_direct") or 0
         hb = n.get("heard_by") or {}
+        # ПРЯМОЕ плечо — только доказанный ноль хопов (None = неизвестно, не прямой)
+        # и только СВЕЖЕЕ: раньше возраст гейтился лишь общим last_direct, поэтому
+        # один свежий приём воскрешал плечи возрастом десятки часов
         dlegs = [(o, e) for o, e in hb.items()
-                 if o in own and not e.get("hops") and e.get("snr") is not None]
+                 if o in own and e.get("hops") == 0 and e.get("snr") is not None
+                 and now - (e.get("ts") or 0) < directW]
         th, tsrc = trace_hops.get(nid), trace_src.get(nid)
         if th == 1 or (th is None and ld and now - ld < directW and dlegs):  # ЧЁРНАЯ (прямой сосед)
             direct_seen[nid] = int(ld or now)
@@ -692,7 +696,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         for oid, e in n["db"].items():
             if oid == nid or not isinstance(e, dict) or oid not in own:
                 continue
-            if not (e.get("hopsAway") or 0) and e.get("snr") is not None:
+            if e.get("hopsAway") == 0 and e.get("snr") is not None:
                 rf.append(dict(frm=oid, to=nid, snr=e["snr"],
                                heard=int(e.get("lastHeard") or now)))
     for nid in own:
