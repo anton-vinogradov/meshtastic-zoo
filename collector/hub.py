@@ -171,6 +171,35 @@ def save_traces():
         atomic_write(OUT_TRACES, json.dumps(persist, ensure_ascii=False))
 
 
+def merge_trace(tgt, path, src, is_manual):
+    """Влить результат трассы ОТ КОНКРЕТНОЙ своей ноды в запись узла.
+
+    Запись ключуется целью, а трассировать цель можно с любой своей ноды — и
+    режим «все по очереди» гнал их одну за другой, каждая затирала предыдущую.
+    Итог парадоксальный: ноду трассируешь ЧТОБЫ подтвердить соседство, а она с
+    карты соседей пропадает — потому что последней ответила дальняя нода (3
+    хопа) и перезаписала ответ ближней (1 хоп, тот самый сосед).
+
+    Теперь пути живут по источникам в `by`, а наружу (`path`/`ts`, их читают
+    scan.py и очередь) отдаётся ЛУЧШИЙ СВЕЖИЙ: кратчайший, при равенстве —
+    новейший. Свежесть та же, что у соседства (traceRecheckH), поэтому
+    устаревший короткий путь уступает место актуальному длинному, а не
+    замораживает «сосед» навсегда. Вызывать под lock."""
+    now = int(time.time())
+    rec = traces.get(tgt) or {}
+    by = dict(rec.get("by") or {})
+    if not by and rec.get("path"):
+        by[(rec["path"][0] or {}).get("id") or "?"] = {
+            "path": rec["path"], "ts": rec.get("ts") or 0,
+            **({"manual": True} if rec.get("manual") else {})}
+    by[src] = {"path": path, "ts": now, **({"manual": True} if is_manual else {})}
+    cut = now - CFG.get("traceRecheckH", 24) * 3600
+    fresh = [v for v in by.values() if (v.get("ts") or 0) >= cut and v.get("path")]
+    best = min(fresh, key=lambda v: (len(v["path"]), -(v.get("ts") or 0))) if fresh else by[src]
+    traces[tgt] = {"path": best["path"], "ts": best.get("ts") or now, "by": by,
+                   **({"manual": True} if best.get("manual") else {})}
+
+
 def load_tgmap():
     global tgmap
     try:
@@ -402,8 +431,7 @@ def on_receive(packet=None, interface=None):
                 pending_traces.discard(frm)
                 is_manual = frm in manual_pending   # запрошена из интерфейса?
                 manual_pending.discard(frm)
-                traces[frm] = {"path": path, "ts": int(time.time()),
-                               **({"manual": True} if is_manual else {})}
+                merge_trace(frm, path, path[0]["id"] if path else "?", is_manual)
             # персистим и РУЧНЫЕ: путь до узла теперь строится по трассе, и после
             # рестарта он должен остаться таким же (а неудачи его снимают, см.
             # note_trace_result — иначе рестарт возвращал бы устаревшее «сосед»)
