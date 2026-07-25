@@ -484,23 +484,44 @@
       const MINX = 114, MINY = 96;
       const clX = (v) => Math.max(70, Math.min(CW - 70, v));
       const clY = (v) => Math.max(48, Math.min(CH - 48, v));
-      for (let r = 0; r < 600; r++) {
+      // Пары дальше MINX×MINY не пересекаются, поэтому вместо O(n²) на итерацию
+      // бакетим позиции по сетке ячейками MINX×MINY: узел сравниваем лишь с его и
+      // 8 соседними ячейками (только там возможно перекрытие). При сотнях узлов
+      // это срезает ~31 млн проверок/рендер до ~O(n). Сетку пересобираем каждую
+      // итерацию (позиции сдвигаются), это дёшево — O(n).
+      const sgk = (gx, gy) => (gx + 4096) * 1e7 + (gy + 4096);
+      for (let r = 0; r < 300; r++) {
+        const cells = new Map();
+        for (let i = 0; i < ids.length; i++) {
+          const p = px[ids[i]];
+          const k = sgk(Math.floor(p[0] / MINX), Math.floor(p[1] / MINY));
+          let arr = cells.get(k); if (!arr) cells.set(k, arr = []); arr.push(i);
+        }
         let moved = false;
-        for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
-          const a = px[ids[i]], b = px[ids[j]];
-          let dx = b[0] - a[0], dy = b[1] - a[1];
-          if (Math.abs(dx) >= MINX || Math.abs(dy) >= MINY) continue;
-          // точное совпадение (co-located ноды) — детерминированно по диагонали
-          if (dx === 0 && dy === 0) { dx = (i - j) || 1; dy = (i + j) % 2 ? 1 : -1; }
-          const ox = MINX - Math.abs(dx), oy = MINY - Math.abs(dy);
-          if (oy <= ox) {                       // разносим по вертикали (дешевле)
-            const s = (dy >= 0 ? 1 : -1) * oy / 2;
-            a[1] -= s; b[1] += s;
-          } else {                              // по горизонтали
-            const s = (dx >= 0 ? 1 : -1) * ox / 2;
-            a[0] -= s; b[0] += s;
+        for (let i = 0; i < ids.length; i++) {
+          const a = px[ids[i]];
+          const gx = Math.floor(a[0] / MINX), gy = Math.floor(a[1] / MINY);
+          for (let dcx = -1; dcx <= 1; dcx++) for (let dcy = -1; dcy <= 1; dcy++) {
+            const arr = cells.get(sgk(gx + dcx, gy + dcy));
+            if (!arr) continue;
+            for (const j of arr) {
+              if (j <= i) continue;
+              const b = px[ids[j]];
+              let dx = b[0] - a[0], dy = b[1] - a[1];
+              if (Math.abs(dx) >= MINX || Math.abs(dy) >= MINY) continue;
+              // точное совпадение (co-located ноды) — детерминированно по диагонали
+              if (dx === 0 && dy === 0) { dx = (i - j) || 1; dy = (i + j) % 2 ? 1 : -1; }
+              const ox = MINX - Math.abs(dx), oy = MINY - Math.abs(dy);
+              if (oy <= ox) {                     // разносим по вертикали (дешевле)
+                const s = (dy >= 0 ? 1 : -1) * oy / 2;
+                a[1] -= s; b[1] += s;
+              } else {                            // по горизонтали
+                const s = (dx >= 0 ? 1 : -1) * ox / 2;
+                a[0] -= s; b[0] += s;
+              }
+              moved = true;
+            }
           }
-          moved = true;
         }
         for (const id of ids) { const p = px[id]; p[0] = clX(p[0]); p[1] = clY(p[1]); }
         if (!moved) break;
@@ -661,9 +682,25 @@
       id: o.id, x0: o.cx - o.w / 2 - PADX, x1: o.cx + o.w / 2 + PADX,
       y0: o.cy - o.h / 2 - PADY, y1: o.cy + o.h / 2 + PADY,
     }));
+    // Пространственная сетка карточек: penAt раньше сканировал ВСЕ rects на каждый
+    // семпл (O(nodes)); при сотнях узлов × сотнях связей × 8 дуг × 20 семплов это
+    // десятки млн проверок за рендер. Бакетим rects по ячейкам GC — точка проверяет
+    // лишь свою ячейку; результат идентичен (тот же containment-тест внутри).
+    const GC = 48, penGrid = new Map();
+    const gkey = (gx, gy) => (gx + 4096) * 1e7 + (gy + 4096);
+    for (const r of rects)
+      for (let gx = Math.floor(r.x0 / GC); gx <= Math.floor(r.x1 / GC); gx++)
+        for (let gy = Math.floor(r.y0 / GC); gy <= Math.floor(r.y1 / GC); gy++) {
+          const k = gkey(gx, gy);
+          let arr = penGrid.get(k);
+          if (!arr) penGrid.set(k, arr = []);
+          arr.push(r);
+        }
     const penAt = (x, y, exF, exT) => {
+      const arr = penGrid.get(gkey(Math.floor(x / GC), Math.floor(y / GC)));
+      if (!arr) return 0;
       let s = 0;
-      for (const r of rects) {
+      for (const r of arr) {
         if (r.id === exF || r.id === exT) continue;
         if (x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1)
           s += Math.min(x - r.x0, r.x1 - x, y - r.y0, r.y1 - y);
