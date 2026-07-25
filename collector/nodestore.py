@@ -77,12 +77,17 @@ def upsert(nid, ts=None, own=False, **fields):
         _write(c, data)
 
 
-def note_leg(nid, own_id, snr, hops, ts=None, own_node=False):
+def note_leg(nid, own_id, snr, hops, ts=None, own_node=False, src=None):
     """Зафиксировать, что СВОЯ нода own_id услышала узел nid.
     hops=0 — ПРЯМОЙ приём (доказано), hops>0 — через ретрансляторы,
     hops=None — НЕИЗВЕСТНО. Раньше None трактовался как прямой (`not hops`) и
     писался в базу как 0 — отсюда фантомные «прямые» плечи: в proto3 hop_limit=0
-    не сериализуется, приходит None, и «неизвестно» превращалось в «сосед»."""
+    не сериализуется, приходит None, и «неизвестно» превращалось в «сосед».
+
+    src — ОТКУДА улика: "rx" (сами приняли пакет), "relay" (жатва relay-байта:
+    узел переизлучил чужой пакет, а мы поймали его напрямую), "db" (nodeDB
+    опрошенной ноды — её слова, не наш замер). Разные источники стоят разного
+    доверия, а раньше все три писались в одно поле неотличимо."""
     ts = int(ts or time.time())
     direct = hops == 0
     with _lock:
@@ -97,6 +102,8 @@ def note_leg(nid, own_id, snr, hops, ts=None, own_node=False):
                 hb = {}
         # None сохраняем как None: «сколько хопов — неизвестно», а не «ноль»
         hb[own_id] = {"snr": snr, "hops": None if hops is None else int(hops), "ts": ts}
+        if src:
+            hb[own_id]["src"] = src
         data["heard_by"] = json.dumps(hb)
         data["last_heard"] = max(data.get("last_heard") or 0, ts)
         if direct:

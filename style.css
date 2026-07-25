@@ -584,6 +584,8 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .pcls-C { background: #6b2f26; } #panel .pcls-D { background: #4a4433; }
 #panel .pcls-E { background: #45355c; } #panel .pcls-F { background: #3a3a3f; }
 #panel .leg .age { color: var(--muted); font-size: 11.5px; flex: none; }
+/* значок происхождения улики: приглушён, расшифровка — в title */
+#panel .leg .lsrc { flex: none; font-size: 11px; opacity: .65; cursor: help; }
 #panel .singles .leg { margin-bottom: 5px; }
 
 /* графики истории (Фаза 1) */

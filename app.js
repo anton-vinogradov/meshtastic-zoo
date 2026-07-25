@@ -19,6 +19,10 @@
   // наземная правда против слухов nodeDB, где переизлучённые копии выглядят как
   // прямой приём. Неподтверждённые не теряются: они уходят в тир «слышали».
   let traceNbrOnly = localStorage.getItem("mzTraceNbrOnly") !== "0";
+  // Возраст прямо на подписи стрелки. По умолчанию выключено: подписей до 500,
+  // и «3.5 dB · 12 мин» на каждой превращает карту в кашу. В тултипе возраст есть
+  // всегда, тумблер — для разбора «насколько свежа картинка вообще».
+  let showAge = localStorage.getItem("mzShowAge") === "1";
   // ОДНО определение правды на весь клиент: кто сосед, а кто «слышим, но трасса
   // не дошла». Раньше счётчик в легенде считал соседями всё не-своё — и не менялся
   // от подтверждений вовсе.
@@ -170,6 +174,11 @@
       asymTip: "asymmetric link: we hear {0} dB, they hear {1} dB",
       relayProof: "it relayed our packet — hears us directly",
       viaLeg: "link between other nodes", viaTr: "seen in a traceroute", viaNi: "from NeighborInfo",
+      srcLbl: "source", srcUnknown: "unknown (leg predates source tracking)",
+      src_rx: "we received its packet", src_relay: "relay harvest (it rebroadcast someone else's packet)",
+      src_db: "the polled node's nodeDB", src_tr: "traceroute", src_ni: "NeighborInfo",
+      src_mirror: "drawn for symmetry — nobody measured it",
+      showAgeLbl: "age on the arrows", showAgeTip: "Append the age of the measurement to each arrow's label. Off by default: with hundreds of links the labels collide. The age is always in the arrow's tooltip.",
       viaTip: "{0} → {1}: {2} hears {3} at {4} dB — we do not hear this link ourselves ({5})",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
@@ -278,6 +287,11 @@
       asymTip: "асимметрия: мы слышим {0} дБ, нас слышат {1} дБ",
       relayProof: "переизлучил наш пакет — слышит нас напрямую",
       viaLeg: "канал между чужими узлами", viaTr: "видно в трассировке", viaNi: "из NeighborInfo",
+      srcLbl: "источник", srcUnknown: "неизвестен (плечо записано до учёта источников)",
+      src_rx: "мы сами приняли её пакет", src_relay: "жатва relay-байта (переизлучила чужой пакет)",
+      src_db: "база опрошенной ноды", src_tr: "трассировка", src_ni: "NeighborInfo",
+      src_mirror: "дорисовано для симметрии — замера нет ни у кого",
+      showAgeLbl: "возраст на стрелках", showAgeTip: "Дописывать к подписи каждой стрелки возраст замера. По умолчанию выключено: подписей сотни, они сливаются. В тултипе стрелки возраст есть всегда.",
       viaTip: "{0} → {1}: {2} слышит {3} на {4} дБ — сами мы этот канал не слышим ({5})",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
@@ -657,6 +671,13 @@
       Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor))) * 100);
     const hue = (pct) => pct * 1.4;
     const colorOf = (l) => l.snr == null ? "#8a8a90" : `hsl(${hue(pctOf(l.snr))}, 62%, 55%)`;
+    // ЧЕМ добыто плечо. Улики разного веса раньше выглядели одинаково: наш
+    // собственный приём и пересказ чужой nodeDB рисовались одной стрелкой.
+    const SRC = { rx: "📡", relay: "♻", db: "🗒", tr: "🧭", ni: "👥", mirror: "∅" };
+    const srcOf = (l) => {
+      const k = l.src && SRC[l.src] ? l.src : null;
+      return { icon: k ? SRC[k] : "·", name: t(k ? "src_" + k : "srcUnknown") };
+    };
     const fmtSnr = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
     const fmtAge = (ts) => {
       const s = Math.max(0, Date.now() / 1e3 - ts);
@@ -857,8 +878,9 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      const label = l.hops ? t("hop", l.hops)
-        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
+      const label = (l.hops ? t("hop", l.hops)
+        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr))
+        + (showAge && l.heard ? ` · ${fmtAge(l.heard)}` : "");
       const tip = (l.via
         // канал между ЧУЖИМИ узлами: сами не слышим, узнали из трассы/NeighborInfo
         ? t("viaTip", l.from, l.to, lbl2(l.to), lbl2(l.from), fmtSnr(l.snr),
@@ -870,7 +892,8 @@
           : l.snr == null
             ? t("noDataTip", l.from, l.to, lbl2(l.to), lbl2(l.from))
             : `${l.from} → ${l.to}: SNR ${fmtSnr(l.snr)} dB · ${pctOf(l.snr)}% ${t("ofIdeal")}`)
-        + (l.heard ? ` · ${t("heard", fmtAgo(l.heard))}` : "");
+        + (l.heard ? ` · ${t("heard", fmtAgo(l.heard))}` : "")
+        + ` · ${t("srcLbl")}: ${srcOf(l).name}`;
 
       // Плечи внешних нод — приглушённые, чтобы не забивали картину
       const dim = a.world || b.world ? " dim" : "";
@@ -1016,8 +1039,9 @@
           nn.hw || "", nn.key ? 1 : 0, nn.traceNbr ? 1 : 0, nn.traceRelay ? 1 : 0, nn.relayNbr ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
           unread[id] || 0, nn.fav ? 1 : 0];   // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
       }),
+      showAge ? 1 : 0,
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
-        l.outLeg ? 1 : 0]).sort()]);   // outLeg (встречное плечо) — тоже в сигнатуру
+        l.outLeg ? 1 : 0, l.src || "", showAge ? ageBk(l.heard) : 0]).sort()]);   // outLeg, источник, возраст — в сигнатуру
     const svgHTML = `<svg viewBox="0 0 ${CW} ${CH}" xmlns="http://www.w3.org/2000/svg" role="img"
         aria-label="${t("mapAria")}"><defs>${rfMarkers.join("")}
         <clipPath id="ph"><rect width="36" height="36" rx="6"/></clipPath></defs>${out.join("\n")}</svg>`;
@@ -1244,6 +1268,7 @@
           <span class="who"${ttl ? ` title="${esc(ttl)}"` : ""}>${who}</span>
           <span style="color:${col}">${val}</span>
           ${l.heard ? `<span class="age">${fmtAge(l.heard)}</span>` : ""}
+          <span class="lsrc" title="${esc(t("srcLbl") + ": " + srcOf(l).name)}">${srcOf(l).icon}</span>
           ${l.snr != null && !l.outLeg ? `<span class="legspark" data-src="${esc(l.from)}" data-dst="${esc(l.to)}" data-col="${col}"></span>` : ""}</div>`;
       };
       // встречное плечо (из трассы) = r.in.outLeg → ясные подписи «мы слышим» (r.out)
@@ -2017,6 +2042,9 @@
     } else if (e.target.id === "traceNbrToggle") {
       traceNbrOnly = e.target.checked;
       localStorage.setItem("mzTraceNbrOnly", traceNbrOnly ? "1" : "0");
+    } else if (e.target.id === "showAgeToggle") {
+      showAge = e.target.checked;
+      localStorage.setItem("mzShowAge", showAge ? "1" : "0");
     } else if (e.target.id === "nodeCapIn") {
       nodeCap = Math.max(0, Math.min(999, parseInt(e.target.value, 10) || 0));
       localStorage.setItem("mzNodeCap", String(nodeCap));
@@ -2102,6 +2130,9 @@
       <label class="srow stog" title="${esc(t("traceNbrTip"))}">
         <span>🧭 ${t("traceNbrLbl")}</span>
         <input type="checkbox" id="traceNbrToggle" ${traceNbrOnly ? "checked" : ""}></label>
+      <label class="srow stog" title="${esc(t("showAgeTip"))}">
+        <span>🕐 ${t("showAgeLbl")}</span>
+        <input type="checkbox" id="showAgeToggle" ${showAge ? "checked" : ""}></label>
       <label class="srow stog" title="${esc(t("capTip"))}">
         <span>${t("capLbl")}</span>
         <input type="number" id="nodeCapIn" min="0" max="999" step="10" value="${nodeCap}"

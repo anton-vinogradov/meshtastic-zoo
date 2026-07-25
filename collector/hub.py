@@ -460,7 +460,7 @@ def on_receive(packet=None, interface=None):
             mhops = hs2 - hl2 if isinstance(hs2, int) and isinstance(hl2, int) and hs2 >= hl2 else None
             now_ts = int(time.time())
             nodestore.upsert(frm, ts=now_ts, name=(frm_name if frm_name != frm else None))
-            nodestore.note_leg(frm, ent["id"], packet.get("rxSnr"), mhops, ts=now_ts)
+            nodestore.note_leg(frm, ent["id"], packet.get("rxSnr"), mhops, ts=now_ts, src="rx")
 
         # РЕАКЦИЯ (тапбэк): emoji=1 + reply_id → привязать к целевому сообщению
         if dec.get("emoji") and reply_id:
@@ -770,7 +770,7 @@ def note_relay(packet, ent, hs, hl, snr, frm_num):
         return
     _relay_stats["resolved"] += 1
     if relayed and snr is not None:
-        nodestore.note_leg(rid, ent["id"], float(snr), 0, ts=int(time.time()))
+        nodestore.note_leg(rid, ent["id"], float(snr), 0, ts=int(time.time()), src="relay")
         _relay_stats["leg"] += 1
     if relayed and hs - hl == 1 and isinstance(frm_num, int) \
             and f"!{frm_num:08x}" in own_ids():
@@ -1271,7 +1271,7 @@ def feed_store(found):
             # когда знает дистанцию. Отсутствие = НЕИЗВЕСТНО, а не «прямой приём»
             hops = e.get("hopsAway")
             heard = int(e.get("lastHeard") or 0) or now
-            nodestore.note_leg(did, oid, e.get("snr"), hops, ts=heard)
+            nodestore.note_leg(did, oid, e.get("snr"), hops, ts=heard, src="db")
             u = e.get("user") or {}
             f = {}
             if u.get("longName") or u.get("shortName"):
@@ -1799,7 +1799,7 @@ def writer_loop():
                 with rx_lock:
                     dlive = dict(direct_live)
                 for did, dv in dlive.items():       # точные прямые из потока (батч)
-                    nodestore.note_leg(did, dv[2] or "?", dv[1], 0, ts=int(dv[0]))
+                    nodestore.note_leg(did, dv[2] or "?", dv[1], 0, ts=int(dv[0]), src="rx")
                 rx_flush()
                 beat("writer", f"опрос {len(found)} нод")
         except Exception as e:

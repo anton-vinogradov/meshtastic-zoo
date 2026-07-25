@@ -542,7 +542,8 @@ def trace_legs(xlinks, node_ids, own, hours):
             continue
         seen.add((a, b))
         out.append(dict(frm=a, to=b, snr=float(snr), heard=int(p.get("last") or 0),
-                        via=p.get("via") or "tr"))
+                        via=p.get("via") or "tr",
+                        src=("ni" if p.get("via") == "ni" else "tr")))
     return out
 
 
@@ -674,11 +675,12 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                      named=bool(n.get("name")))
             world.append(c)
             for o, e in dlegs:
-                rf.append(dict(frm=nid, to=o, snr=e["snr"], heard=int(e.get("ts") or ld)))
+                rf.append(dict(frm=nid, to=o, snr=e["snr"], heard=int(e.get("ts") or ld),
+                               src=e.get("src")))
             if not dlegs and tsrc:
                 # трасса подтвердила соседство, а прямого плеча в nodeDB нет —
                 # рисуем плечо к той своей ноде, от которой шла трасса
-                rf.append(dict(frm=nid, to=tsrc, snr=None,
+                rf.append(dict(frm=nid, to=tsrc, snr=None, src="tr",
                                heard=int(n.get("last_heard") or ld or now)))
         elif th and th > 1:                                # ТРАССА: через ретрансляторы
             direct_seen[nid] = int(ld or now)
@@ -688,7 +690,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                      named=bool(n.get("name")))
             hops_nodes.append(c)
             if tsrc:
-                rf.append(dict(frm=nid, to=tsrc, snr=None, hops=th,
+                rf.append(dict(frm=nid, to=tsrc, snr=None, hops=th, src="tr",
                                heard=int(n.get("last_heard") or ld or now)))
         elif ld and now - ld < directW + formerW:          # СЕРАЯ (бывший 0)
             direct_seen[nid] = int(ld)
@@ -703,6 +705,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             hops_nodes.append(c)
             if via:
                 rf.append(dict(frm=nid, to=via, snr=None, hops=hops,
+                               src=(best[1].get("src") if best else None),
                                heard=int(n.get("last_heard") or ld)))
         # иначе — за окном, пропускаем (прунер удалит ключ)
 
@@ -712,7 +715,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             if oid == nid or not isinstance(e, dict) or oid not in own:
                 continue
             if e.get("hopsAway") == 0 and e.get("snr") is not None:
-                rf.append(dict(frm=oid, to=nid, snr=e["snr"],
+                rf.append(dict(frm=oid, to=nid, snr=e["snr"], src="db",
                                heard=int(e.get("lastHeard") or now)))
     for nid in own:
         direct_seen[nid] = int(now)
@@ -723,7 +726,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             fwd, rev = (a, b) in have, (b, a) in have
             if fwd != rev:
                 frm, to = ((b, a) if fwd else (a, b))
-                rf.append(dict(frm=frm, to=to, snr=None, heard=None))
+                rf.append(dict(frm=frm, to=to, snr=None, heard=None, src="mirror"))
 
     node_ids = own | {c["id"] for c in world} | {c["id"] for c in hops_nodes}
     names.update({nid: (n.get("long") or n["short"]) for nid, n in stat.items()})
@@ -889,6 +892,8 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             d["via"] = l["via"]   # плечо не наше: узнали из трассы/NeighborInfo
         if l.get("stale"):
             d["stale"] = True     # замер просрочен: рисуем пунктиром, без SNR
+        if l.get("src"):
+            d["src"] = l["src"]   # чем добыто плечо: rx / relay / db / tr / ni / mirror
         out_links.append(d)
         # прямое плечо сосед→своя + есть замер «как своя долетела до соседа» →
         # встречное плечо своя→сосед («нас слышат»)
@@ -899,7 +904,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             if rev and rev[0] is not None and key not in seen_rev:
                 seen_rev.add(key)
                 e = {"from": l["to"], "to": l["frm"], "type": "rf",
-                     "snr": round(rev[0], 2), "outLeg": True}
+                     "snr": round(rev[0], 2), "outLeg": True, "src": "tr"}
                 if rev[1]:
                     e["heard"] = int(rev[1])
                 extra.append(e)
