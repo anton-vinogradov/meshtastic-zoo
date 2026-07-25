@@ -126,20 +126,35 @@ def layout(ids, des, wts=None, seed=None):
             if den > 0:
                 pos[i][0] = nx / den
                 pos[i][1] = ny / den
-        # лёгкое расталкивание несвязанных — только против наложения,
-        # реже и слабее, чтобы не искажать связанные дистанции
-        for i in range(len(idl)):
-            for j in range(i + 1, len(idl)):
-                a, b = idl[i], idl[j]
-                if (a, b) in des or (b, a) in des:
-                    continue
-                dx = pos[b][0] - pos[a][0]
-                dy = pos[b][1] - pos[a][1]
-                dist = math.hypot(dx, dy) or 1e-6
-                if dist < 0.28:
-                    mv = (0.28 - dist) / dist * 0.06
-                    pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
-                    pos[b][0] += dx * mv; pos[b][1] += dy * mv
+        # лёгкое расталкивание несвязанных — только против наложения, слабо,
+        # чтобы не искажать связанные дистанции. Пара дальше RAD не отталкивается,
+        # поэтому вместо O(n²) по всем парам раскладываем узлы в пространственную
+        # сетку с ячейкой RAD: кандидаты в отталкивание — лишь узлы своей и 8
+        # соседних ячеек (только они могут оказаться ближе RAD). Каждую пару берём
+        # один раз (индекс j>i), связанные пропускаем — как в исходном O(n²).
+        RAD = 0.28
+        cells = {}
+        for k in range(len(idl)):
+            p = pos[idl[k]]
+            cells.setdefault((int(p[0] // RAD), int(p[1] // RAD)), []).append(k)
+        for (gx, gy), members in cells.items():
+            cand = [k for dcx in (-1, 0, 1) for dcy in (-1, 0, 1)
+                    for k in cells.get((gx + dcx, gy + dcy), ())]
+            for i in members:
+                a = idl[i]
+                for j in cand:
+                    if j <= i:
+                        continue
+                    b = idl[j]
+                    if (a, b) in des or (b, a) in des:
+                        continue
+                    dx = pos[b][0] - pos[a][0]
+                    dy = pos[b][1] - pos[a][1]
+                    dist = math.hypot(dx, dy) or 1e-6
+                    if dist < RAD:
+                        mv = (RAD - dist) / dist * 0.06
+                        pos[a][0] -= dx * mv; pos[a][1] -= dy * mv
+                        pos[b][0] += dx * mv; pos[b][1] += dy * mv
     return {nid: (round(p[0], 4), round(p[1], 4)) for nid, p in pos.items()}
 
 
