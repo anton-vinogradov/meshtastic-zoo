@@ -1089,8 +1089,12 @@
         const gx = Math.max(60, Math.min(CW - 60, gx0 + vx / vl * 95));
         const gy = Math.max(40, Math.min(CH - 40, gy0 + vy / vl * 95));
         const nm = String(g.name || g.id.slice(-4));
-        const posTxt = g.src === "gps" ? t("ghostPosGps")
-          : t("ghostPosEst", g.by, (g.unc ?? 0).toFixed(1));
+        // Возраст позиции — ОТДЕЛЬНЫЕ часы от присутствия: узел бывает в эфире
+        // прямо сейчас, а координаты у него недельной давности. Точность ±150 м
+        // при такой метке — ложь, поэтому возраст пишем рядом, а не прячем.
+        const posTxt = (g.src === "gps" ? t("ghostPosGps")
+          : t("ghostPosEst", g.by, (g.unc ?? 0).toFixed(1)))
+          + (g.posTs ? ` (${fmtAgo(g.posTs)})` : "");
         const tip = [nm, t("ghostCard"), t("ghostSeen", fmtAgo(g.seen)),
           t("ghostPos", posTxt)].join(" · ");
         for (const pn of prt) {
