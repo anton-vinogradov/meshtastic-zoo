@@ -25,6 +25,53 @@
   // вовсе. Тумблер оставлен, чтобы вычистить карту на глубоких уровнях, где
   // плечей сотни.
   let showAge = localStorage.getItem("mzShowAge") !== "0";
+  // Поиск по имени. Не трогает ни данные, ни раскладку: гасит НЕнайденное прямо
+  // в готовом SVG классами (у карточек class="node n-<id>", у рёбер "edge
+  // e-<from> e-<to>"), поэтому набор текста не вызывает перерисовку карты.
+  let searchQ = "";
+
+  function applySearch() {
+    const svg = document.querySelector("#map svg");
+    const cnt = document.getElementById("searchcnt");
+    if (!svg) return;
+    const q = searchQ.trim().toLowerCase();
+    svg.classList.toggle("searching", !!q);
+    if (!q) {
+      svg.querySelectorAll(".hit").forEach(g => g.classList.remove("hit"));
+      if (cnt) { cnt.textContent = ""; cnt.classList.remove("none"); }
+      return;
+    }
+    const all = (lastLive && lastLive.nodes) || [];
+    const ids = new Set(all.filter(n =>
+      `${n.label || ""} ${n.short || ""} ${n.id}`.toLowerCase().includes(q)).map(n => n.id));
+    let shown = 0;
+    svg.querySelectorAll("g.node").forEach(g => {
+      const on = ids.has(g.dataset.id);
+      g.classList.toggle("hit", on);
+      if (on) shown++;
+    });
+    svg.querySelectorAll("g.edge").forEach(g => {
+      let on = false;
+      for (const id of ids) if (g.classList.contains("e-" + id)) { on = true; break; }
+      g.classList.toggle("hit", on);
+    });
+    if (cnt) {
+      // Найденное, которого на карте нет, — не «не найдено», а «отфильтровано
+      // уровнем детализации»: без этой оговорки поиск выглядит сломанным.
+      const hidden = ids.size - shown;
+      cnt.textContent = !ids.size ? t("srchNone")
+        : hidden ? t("srchSome", shown, hidden) : String(shown);
+      cnt.classList.toggle("none", !ids.size);
+    }
+    return ids;
+  }
+
+  function searchJump() {
+    const ids = applySearch();
+    if (!ids || !ids.size) return;
+    const first = ((lastLive && lastLive.nodes) || []).find(n => ids.has(n.id));
+    if (first) openPanel(first.id, true);
+  }
   // ОДНО определение правды на весь клиент: кто сосед, а кто «слышим, но трасса
   // не дошла». Раньше счётчик в легенде считал соседями всё не-своё — и не менялся
   // от подтверждений вовсе.
@@ -177,6 +224,9 @@
       relayProof: "it relayed our packet — hears us directly",
       viaLeg: "link between other nodes", viaTr: "seen in a traceroute", viaNi: "from NeighborInfo",
       uMin: "m", uH: "h", uD: "d",
+      srchPh: "node by name…", srchNone: "nothing",
+      srchSome: "{0} · {1} filtered out by level",
+      srchTip: "Search by name, callsign or id. Matches stay lit, everything else dims. Enter — open the first match, Esc — clear. Press / to focus.",
       srcLbl: "source", srcUnknown: "unknown (leg predates source tracking)",
       src_rx: "we received its packet", src_relay: "relay harvest (it rebroadcast someone else's packet)",
       src_db: "the polled node's nodeDB", src_tr: "traceroute", src_ni: "NeighborInfo",
@@ -291,6 +341,9 @@
       relayProof: "переизлучил наш пакет — слышит нас напрямую",
       viaLeg: "канал между чужими узлами", viaTr: "видно в трассировке", viaNi: "из NeighborInfo",
       uMin: "м", uH: "ч", uD: "д",
+      srchPh: "узел по имени…", srchNone: "ничего",
+      srchSome: "{0} · {1} скрыто уровнем",
+      srchTip: "Поиск по имени, позывному или id. Найденное остаётся ярким, остальное гаснет. Enter — открыть первое, Esc — сбросить. Фокус по клавише /.",
       srcLbl: "источник", srcUnknown: "неизвестен (плечо записано до учёта источников)",
       src_rx: "мы сами приняли её пакет", src_relay: "жатва relay-байта (переизлучила чужой пакет)",
       src_db: "база опрошенной ноды", src_tr: "трассировка", src_ni: "NeighborInfo",
@@ -1065,6 +1118,7 @@
       lastMapSig = mapSig;
       const _sl = _map.scrollLeft, _st = _map.scrollTop;         // скролл снимаем ДО замены
       _map.innerHTML = svgHTML;
+      applySearch();          // карта пересобрана — вернуть подсветку поиска
       setTimeout(() => saveMapCache(svgHTML));   // после paint: запись в localStorage синхронная
       // Зум: увеличиваем РАЗМЕР холста (svg крупнее контейнера → скроллится, ноды
       // разъезжаются), скролл восстанавливаем, чтобы карта не прыгала.
@@ -2233,6 +2287,7 @@
       lang = e.target.value;
       localStorage.setItem("mzLang", lang);
       document.getElementById("gear").title = t("settings");
+      searchLabels();
       if (lastLive) render(lastLive);
       openSettings(); // перестроить настройки на новом языке
     };
@@ -2622,6 +2677,33 @@
     if (sig !== msgSig && lastLive) { msgSig = sig; forcePanel = true; render(lastLive); }
     await refreshChan();
   }
+
+  const searchIn = document.getElementById("searchin");
+  const searchLabels = () => {
+    if (!searchIn) return;
+    searchIn.placeholder = t("srchPh");
+    document.getElementById("searchbox").title = t("srchTip");
+  };
+  searchLabels();
+  if (searchIn) {
+    searchIn.addEventListener("input", () => { searchQ = searchIn.value; applySearch(); });
+    searchIn.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        searchIn.value = ""; searchQ = ""; applySearch(); searchIn.blur();
+      } else if (e.key === "Enter") {
+        searchJump();
+      }
+    });
+  }
+  // «/» — фокус в поиск (но не когда пользователь и так печатает)
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+        || (e.target && e.target.isContentEditable)) return;
+    e.preventDefault();
+    if (searchIn) searchIn.focus();
+  });
 
   paintCachedMap();   // карта с прошлого раза — ДО сети, чтобы экран не был пустым
   tick();

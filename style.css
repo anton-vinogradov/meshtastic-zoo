@@ -158,11 +158,11 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #channel .chcompose input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 5px 8px; font-size: 13px; }
 #channel .chcompose button { background: rgba(255, 255, 255, .08); border: none; color: var(--text); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
 
-/* Общий маркер непрочитанной почты */
+/* Общий маркер непрочитанной почты (правее поиска, чтобы не наложиться) */
 #mail {
   position: fixed;
   top: 14px;
-  left: 14px;
+  left: 262px;
   z-index: 6;
   background: #e0a03c;
   color: #141416;
@@ -303,6 +303,31 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 #panel .pcompose button:disabled { opacity: .4; cursor: default; }
 
 /* Настройки (⚙) */
+/* Поиск по имени: слот сверху слева (справа занят кнопками, снизу слева — зумом) */
+#searchbox {
+  position: fixed; top: 14px; left: 14px; z-index: 7;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 10px; height: 38px;
+  border: 1px solid var(--zone-stroke); border-radius: 19px;
+  background: var(--zone-bg);
+}
+#searchbox .sicon { font-size: 13px; opacity: .6; }
+#searchbox input {
+  width: 150px; border: 0; outline: 0; background: transparent;
+  color: var(--text); font: inherit; font-size: 13px;
+}
+#searchbox input::placeholder { color: var(--muted); }
+#searchbox #searchcnt { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+#searchbox #searchcnt.none { color: #e0a03c; }
+body.geo-on #searchbox { display: none; }
+/* Затемнение непопавших: карта остаётся целой (связи видно), но глаз держит
+   найденное. Переход мягкий, чтобы набор текста не мигал. */
+#map svg.searching .node,
+#map svg.searching .edge { opacity: .1; transition: opacity .12s ease; }
+#map svg.searching .node.hit { opacity: 1; }
+#map svg.searching .edge.hit { opacity: .8; }
+#map svg.searching .node.hit > rect:first-of-type { stroke: #8fce6a; stroke-width: 2.5; }
+
 #gear {
   position: fixed;
   top: 14px;
