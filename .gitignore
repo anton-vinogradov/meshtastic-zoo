@@ -15,3 +15,7 @@ data/geo_cache.json
 # рантайм-конфиг (копируется из config.example.json при установке)
 collector/config.json
 .venv/
+
+# python bytecode
+__pycache__/
+*.pyc
