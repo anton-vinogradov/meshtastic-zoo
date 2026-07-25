@@ -95,8 +95,13 @@
   const proven = (n) => !!(n.traceNbr || n.relayNbr);
   const isNbr = (n) => !n.own && n.hop == null && (!traceNbrOnly || proven(n));
   const heardOnly = (n) => !n.own && n.hop == null && traceNbrOnly && !proven(n);
+  // Ступени слайдера — тиры, и строгий режим их НЕ двигает: он решает, кого
+  // считать соседом (счётчик, легенда, тир «nbr»), а не на каком уровне узел
+  // появляется. Раньше при строгом режиме неподтверждённые уезжали на уровень 3,
+  // и «+слышим» показывал ровно то же, что «+трасса ✓» — ступень была мёртвой,
+  // а всё сваливалось в «+бывшие».
   const showAt = (n) => n.own || (proven(n) && mapLevel >= 1)
-    || (n.hop == null && mapLevel >= (traceNbrOnly && !proven(n) ? 3 : 2))
+    || (n.hop == null && mapLevel >= 2)
     || (n.hop != null && mapLevel >= 3);
   let geoOrient = localStorage.getItem("mzGeoOrient") !== "0"; // ориентация связности по гео (действует при ≥2 размещённых своих)
   let showCrit = localStorage.getItem("mzShowCrit") === "1";   // подсветка единых точек отказа
