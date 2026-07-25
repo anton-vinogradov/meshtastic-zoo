@@ -106,6 +106,14 @@
       chUtil: "Channel util", ownTx: "Own TX", lastSeen: "Last seen",
       online: "online (answers over TCP)", conversation: "Conversation",
       keyLabel: "Key", keyYes: "received", keyNo: "not received (can't DM)",
+      keyNoPki: "node publishes no PKI key (can't DM)",
+      keyNoPkiTip: "Its NodeInfo reached us (we know the name and model) but carries no public key — old firmware or PKC off. Asking again will not help.",
+      keyUnknown: "waiting for its NodeInfo (can't DM)",
+      keyUnknownTip: "We hear its packets but never got a NodeInfo — the key arrives in that very packet. Worth asking.",
+      keyAsk: "request key", keyAsking: "requesting…",
+      keyAsked: "asked {0}× · last {1}", keyAskedNever: "not asked yet",
+      keyAskSent: "requested via {0} — the answer comes on air",
+      keyAskFail: "could not request: {0}", keyAskHave: "the key is already here",
       secFw: "Firmware", secRadio: "Radio", secDevice: "Device",
       fwVer: "Version", fwLatest: "Latest", fwCurrent: "✓ up to date", fwUpdate: "update available: {0}",
       cHops: "Hops (hop limit)", cRegion: "Region", cPreset: "Modem preset",
@@ -198,6 +206,14 @@
       chUtil: "Загрузка эфира", ownTx: "Свой TX", lastSeen: "Видели",
       online: "онлайн (отвечает по TCP)", conversation: "Переписка",
       keyLabel: "Ключ", keyYes: "получен", keyNo: "не получен (DM нельзя)",
+      keyNoPki: "нода не публикует PKI-ключ (DM нельзя)",
+      keyNoPkiTip: "Её NodeInfo до нас дошёл (знаем имя и модель), но ключа в нём нет — старая прошивка или PKC выключен. Повторные запросы не помогут.",
+      keyUnknown: "ждём её NodeInfo (DM нельзя)",
+      keyUnknownTip: "Пакеты её слышим, а NodeInfo ни разу не приходил — ключ приезжает именно в нём. Спросить имеет смысл.",
+      keyAsk: "запросить ключ", keyAsking: "запрашиваю…",
+      keyAsked: "спрашивали {0}× · последний {1}", keyAskedNever: "ещё не спрашивали",
+      keyAskSent: "запрос ушёл через {0} — ответ придёт по эфиру",
+      keyAskFail: "не удалось запросить: {0}", keyAskHave: "ключ уже есть",
       secFw: "Прошивка", secRadio: "Радио", secDevice: "Устройство",
       fwVer: "Версия", fwLatest: "Актуальная", fwCurrent: "✓ актуальна", fwUpdate: "есть обновление: {0}",
       cHops: "Прыжки (hop limit)", cRegion: "Регион", cPreset: "Пресет модема",
@@ -1060,7 +1076,11 @@
           if (n.own || n.key == null) return [[null, null]];
           const kb = n.keyBy || [];
           const ownAll = (lastLive && lastLive.nodes || []).filter(x => x.own).map(x => x.id);
-          if (!kb.length) return [[t("keyLabel"), "🔒 " + t("keyNo"), "#e0a03c"]];
+          // почему ключа нет: нода его не публикует (просить бесполезно) или мы её
+          // ещё не опознали — NodeInfo не приходил (тогда запрос имеет смысл)
+          if (!kb.length) return [[t("keyLabel"), "🔒 " + t(
+            n.keyState === "nopki" ? "keyNoPki" : n.keyState === "unknown" ? "keyUnknown" : "keyNo"),
+            "#e0a03c"]];
           if (kb.length >= ownAll.filter(x => x !== id).length || kb.length >= ownAll.length)
             return [[t("keyLabel"), "✓ " + t("keyYes"), "#35c98e"]];
           // ключ есть лишь у части нод — назвать у кого (у остальных DM упадёт)
@@ -1292,6 +1312,16 @@
           || (qTo(b2.id) - qTo(a2.id)) || (distTo(a2) - distTo(b2)));
       const replyBar = replyDM ? `<div class="replybar">↩ ${esc((replyDM.text || "").slice(0, 40))}
         <button class="rcancel">×</button></div>` : "";
+      // Ключа нет → кнопка «запросить ключ» + история запросов. Для nopki кнопку
+      // тоже даём (мало ли, ноду перепрошили), но подсказка честно говорит, что
+      // ждать нечего; keyAskOut переживает пере-сборку панели через lastKeyAsk.
+      const keyBlock = (!n.own && n.key === false) ? `<div class="pkey"><div class="krow">
+        <button class="do-key"${keyAsking[id] ? " disabled" : ""}
+          title="${esc(t(n.keyState === "nopki" ? "keyNoPkiTip" : "keyUnknownTip"))}"
+          >${t(keyAsking[id] ? "keyAsking" : "keyAsk")}</button>
+        <span class="key-out">${esc(lastKeyAsk[id] || (n.keyAsks
+          ? t("keyAsked", n.keyAsks, fmtAgo(n.keyAskTs))
+          : t("keyAskedNever")))}</span></div></div>` : "";
       const composeHtml = owners.length ? `<div class="pcompose"><b>${t("compose")}</b>
         ${replyBar}<div class="crow">
           <select class="cfrom" title="${t("sendFromWhich")}">${owners.map(o =>
@@ -1312,6 +1342,7 @@
           ${n.own ? "" : `<button class="pfav${n.fav ? " on" : ""}" title="${esc(t(n.fav ? "favOn" : "favOff"))}">${n.fav ? "★" : "☆"}</button>`}</div>
         ${rows.map(([k, v, c]) => `<div class="prow"><span>${k}</span><span${c ? ` style="color:${c}"` : ""}>${esc(String(v))}</span></div>`).join("")}
         ${sections}
+        ${keyBlock}
         <div class="ptrace"><div class="trow"><button class="do-trace"${traceRunning[id] ? " disabled" : ""}>${t("traceBtn")}</button>
           ${owners.length ? `<select class="tfrom" title="${t("traceFromWhich")}">${owners.map(o =>
             `<option value="${esc(o.id)}"${lastTrace[id] && lastTrace[id][0] && lastTrace[id][0].id === o.id ? " selected" : ""}>${esc(o.short || o.label)}</option>`).join("")
@@ -1332,6 +1363,31 @@
         posSec.addEventListener("toggle", () => { if (posSec.open) drawMini(); });
         if (posSec.open) setTimeout(drawMini, 30);
       }
+      // Ручной запрос ключа: хаб шлёт наш NodeInfo с wantResponse от подходящей своей
+      // ноды. Ответ придёт по эфиру (секунды-минуты) — карта подхватит его сама.
+      const keyBtn = panel.querySelector(".do-key");
+      if (keyBtn) keyBtn.onclick = async () => {
+        const out = panel.querySelector(".key-out");
+        keyAsking[id] = true;
+        keyBtn.disabled = true;
+        keyBtn.textContent = t("keyAsking");
+        let msg;
+        try {
+          const resp = await fetch("/api/key", { method: "POST", body: JSON.stringify({ id }) });
+          const r = await resp.json().catch(() => ({}));
+          msg = r.have ? t("keyAskHave")
+            : r.ok ? t("keyAskSent", shortName(r.via))
+              : t("keyAskFail", r.error || resp.status);   // без сырых стектрейсов
+        } catch {
+          msg = t("keyAskFail", t("noData"));
+        }
+        delete keyAsking[id];
+        lastKeyAsk[id] = msg;
+        if (out) out.textContent = msg;
+        keyBtn.disabled = false;
+        keyBtn.textContent = t("keyAsk");
+        tick();                       // подтянуть счётчик запросов и, если повезло, ключ
+      };
       // Трассировка (Фаза 4, ч.3): активная проба — шлём запрос, поллим ответ с путём
       const traceBtn = panel.querySelector(".do-trace");
       // .trace-out/.do-trace перезапрашиваем каждый раз: если панель успела
@@ -1620,6 +1676,8 @@
   let lastMapSig = "";   // сигнатура визуала карты — не пересобираем DOM зря (антимигание)
   const lastTrace = {};    // id → путь последней трассировки (переживает пере-рендер панели)
   const traceRunning = {}; // id → true, пока идёт активная проба (чтобы не терять индикатор)
+  const lastKeyAsk = {};   // id → текст результата запроса ключа (переживает пере-рендер)
+  const keyAsking = {};    // id → true, пока запрос ключа в полёте
   let applySel = () => {}, hlPeer = () => {}, openPanel = () => {}; // ставятся в render
   let chan = [], chanSig = "", chanDraft = "";  // черновик канала переживает ре-рендеры
   async function refreshMsgs() {

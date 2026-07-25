@@ -45,6 +45,7 @@ OUT_TRACES = ROOT.parent / "data" / "traces.json"   # последняя тра�
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 OUT_FAV = ROOT.parent / "data" / "favorites.json"   # id избранных — их НЕ прунит кеш
 OUT_TIERS = ROOT.parent / "data" / "tiers.json"     # готовая разбивка узлов по тирам (воркер prep)
+OUT_KEYASK = ROOT.parent / "data" / "keyasks.json"  # id → сколько раз просили ключ и когда
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
@@ -632,6 +633,43 @@ def resend(m, auto=False):
 
 _solicit_last = {}  # id → ts последнего solicit_key (антидубль эфира)
 _solicit_any = 0.0  # ts ЛЮБОГО событийного запроса ключа (общий газ на эфир)
+_key_asks = {}      # id → {n, ts}: сколько раз просили ключ и когда (видно в панели)
+
+
+def load_key_asks():
+    global _key_asks
+    try:
+        d = json.loads(OUT_KEYASK.read_text())
+        _key_asks = {k: v for k, v in d.items() if isinstance(v, dict)}
+    except Exception:
+        _key_asks = {}
+
+
+def save_key_asks():
+    try:
+        with lock:
+            # держим только последние — файл не должен расти вечно
+            items = sorted(_key_asks.items(), key=lambda kv: -(kv[1].get("ts") or 0))[:2000]
+            d = dict(items)
+            _key_asks.clear()
+            _key_asks.update(d)
+        atomic_write(OUT_KEYASK, json.dumps(d, ensure_ascii=False))
+    except Exception as e:
+        log(f"keyasks: {e!r}")
+
+
+def note_key_ask(nid):
+    """Запомнить факт запроса ключа — панель показывает «спрашивали N раз»."""
+    with lock:
+        a = _key_asks.setdefault(nid, {"n": 0, "ts": 0})
+        a["n"] = int(a.get("n") or 0) + 1
+        a["ts"] = int(time.time())
+    save_key_asks()
+
+
+def any_online_ent():
+    with lock:
+        return next((c for c in conns.values() if c.get("iface")), None)
 
 
 def anyone_has_key(nid):
@@ -673,23 +711,28 @@ def maybe_solicit_key(nid, direct):
     threading.Thread(target=solicit_key, args=(nid,), daemon=True).start()
 
 
-def solicit_key(to):
-    """Запросить ключ адресата (NodeInfo) с ноды, что лучше его слышит — чтобы
-    он вскоре прислал свой NodeInfo (с ключом); его следующий пакет и станет
-    моментом доставки (см. try_deliver_waiting). Троттлится на keySolicitGapS,
-    чтобы проактивный запрос и повтор по PKI-NAK не слали два одинаковых NodeInfo."""
+def solicit_key(to, force=False):
+    """Запросить ключ адресата (NodeInfo) — он ответит своим NodeInfo (с ключом).
+    Отправитель: нода, которая лучше слышит адресата; если напрямую его не слышит
+    никто — ЛЮБАЯ своя онлайн-нода (запрос уйдёт через ретрансляторы, иначе такие
+    узлы не спросить вовсе). Троттл keySolicitGapS защищает эфир от дублей;
+    force=True — ручной запрос из панели, он игнорирует троттл.
+    Возвращает id ноды-отправителя или False."""
     now = time.time()
-    if now - _solicit_last.get(to, 0) < CFG.get("keySolicitGapS", 20):
-        return
-    ent = ent_by_id(best_sender_for(to) or "")
+    if not force and now - _solicit_last.get(to, 0) < CFG.get("keySolicitGapS", 20):
+        return False
+    ent = ent_by_id(best_sender_for(to) or "") or any_online_ent()
     if not ent:
-        return
+        return False
     try:
         request_key(ent, to)
         _solicit_last[to] = now  # занимаем троттл только если запрос реально ушёл
-        log(f"🔑 запросил ключ у {to} (через {ent['id']})")
+        note_key_ask(to)
+        log(f"🔑 запросил ключ у {to} (через {ent['id']}{', вручную' if force else ''})")
+        return ent["id"]
     except Exception as e:
         log(f"🔑 запрос ключа не удался: {e!r}")
+        return False
 
 
 def send_from(ent, m):
@@ -1330,10 +1373,11 @@ _keyfetch_last = {}   # id -> ts последнего запроса ключа
 
 
 def keyfetch_loop():
-    """Тихий фоновый ДОБОР ключей у keyless-нод в эфире: по ОДНОЙ за такт, темп по
-    загрузке канала (paced_sleep — в тишину чаще), пропуск в перегруз, приоритет
-    posSus-нарушителям, один заход на ноду не чаще keyFetchPerNodeH часов. Только
-    напрямую слышимые keyless — solicit_key шлёт наш NodeInfo с wantResponse."""
+    """Тихий фоновый ДОБОР ключей у keyless-нод: по ОДНОЙ за такт, темп по загрузке
+    канала (paced_sleep — в тишину чаще), пропуск в перегруз, одна нода не чаще
+    keyFetchPerNodeH часов. Две очереди: сначала БЛИЖАЙШИЕ (слышим напрямую, громкие
+    раньше), потом те, кого лишь СЛЫШАЛИ (через хопы) — так ключи ближайших соседей
+    приходят раньше, чем запись о них вытеснит из базы ноды."""
     time.sleep(35)   # дать первому скану наполнить live.json
     while True:
         cu = paced_sleep(CFG.get("keyFetchEveryS", 300))
@@ -1352,25 +1396,43 @@ def keyfetch_loop():
             # бьются раз в 1-3 часа), а воркер и так берёт не больше одной за такт
             fresh = CFG.get("keyFetchFreshMin", 180) * 60
             per = CFG.get("keyFetchPerNodeH", 3) * 3600
-            # кандидаты: keyless, слышимые НАПРЯМУЮ (hop=None) и недавно (в эфире),
-            # не дёрганные за per часов
+            heard2 = CFG.get("keyFetchHeardMin", 720) * 60   # окно для 2-й очереди
             keyless = [n for n in data.get("nodes", [])
-                       if not n.get("own") and not n.get("key") and n.get("hop") is None]
-            elig = [n for n in keyless
-                    if n.get("heard") and now - n["heard"] < fresh
-                    and now - _keyfetch_last.get(n["id"], 0) >= per]
-            if not elig:
+                       if not n.get("own") and not n.get("key")]
+            ready = lambda n: (n.get("heard")
+                               and now - _keyfetch_last.get(n["id"], 0) >= per)
+            # 1-я ОЧЕРЕДЬ — БЛИЖАЙШИЕ соседи: слышим напрямую, громкие раньше тихих.
+            # Их ключи нужны в первую очередь: именно им пишут DM, и именно они
+            # успеют ответить, пока запись о них не вытеснило из базы ноды.
+            t1 = sorted((n for n in keyless if n.get("hop") is None
+                         and now - n["heard"] < fresh and ready(n)),
+                        key=lambda n: (-(n["best"] if n.get("best") is not None else -999),
+                                       0 if n.get("posSus") else 1,
+                                       _keyfetch_last.get(n["id"], 0)))
+            # 2-я ОЧЕРЕДЬ — те, кого лишь СЛЫШАЛИ (сейчас доступны через хопы):
+            # запрос уйдёт через ретрансляторы, свежих спрашиваем раньше
+            t2 = sorted((n for n in keyless if n.get("hop") is not None
+                         and now - n["heard"] < heard2 and ready(n)),
+                        key=lambda n: -(n.get("heard") or 0))
+            pool, tier = (t1, "сосед") if t1 else (t2, "через хопы")
+            if not pool:
                 # видно, сколько ещё без ключа: основную работу делает событийный
                 # путь (maybe_solicit_key при приёме), этот воркер — добор в тишину
                 beat("keyfetch", f"нет подходящих · без ключа {len(keyless)}")
                 continue
-            # приоритет: сначала posSus-нарушители, затем давно не дёрганные
-            elig.sort(key=lambda n: (0 if n.get("posSus") else 1, _keyfetch_last.get(n["id"], 0)))
-            target = elig[0]["id"]
+            target = pool[0]["id"]
             _keyfetch_last[target] = now
-            beat("keyfetch", f"добор ключа {target} ({len(elig)} в очереди)")
-            log(f"🔑 добор ключа у {target} ({len(elig)} в очереди)")
+            beat("keyfetch", f"добор {tier} {target} · очередь {len(t1)}+{len(t2)}")
+            log(f"🔑 добор ключа у {target} ({tier}, очередь {len(t1)}+{len(t2)})")
             solicit_key(target)
+            # у кого ключ появился — счётчик запросов больше не нужен
+            keyed = {n["id"] for n in data.get("nodes", []) if n.get("key")}
+            with lock:
+                stale = [k for k in _key_asks if k in keyed]
+                for k in stale:
+                    _key_asks.pop(k, None)
+            if stale:
+                save_key_asks()
         except Exception as e:
             log(f"keyfetch: {e!r}")
 
@@ -1509,7 +1571,10 @@ def reader_loop():
         try:
             if last_found:
                 store = nodestore.load(_store_keep_s())
+                with lock:
+                    asks_snap = {k: dict(v) for k, v in _key_asks.items()}
                 data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
+                                             asks=asks_snap,
                                              traces=dict(traces), favorites=set(favorites))
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
@@ -1943,6 +2008,22 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": repr(e)}, 500)
+        elif self.path == "/api/key":
+            # ручной запрос ключа из панели: сбрасываем кулдаун и шлём сразу
+            nid = (body.get("id") or "").strip()
+            if not nid:
+                self._json({"ok": False, "error": "нужен id"}, 400)
+                return
+            if anyone_has_key(nid):
+                self._json({"ok": True, "have": True})
+                return
+            with lock:
+                _keyfetch_last.pop(nid, None)
+            via = solicit_key(nid, force=True)
+            with lock:
+                asks = int((_key_asks.get(nid) or {}).get("n") or 0)
+            self._json({"ok": bool(via), "via": via or None, "asks": asks,
+                        **({} if via else {"error": "нет своей ноды на связи"})})
         elif self.path == "/api/favorite":
             # избранное: узел не прунится из кеша (для мобильных/важных, что молчат)
             fid, on = body.get("id"), body.get("on", True)
@@ -2052,9 +2133,10 @@ def main():
     load_traces()
     load_tgmap()
     load_favorites()
+    load_key_asks()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
-    for _w in ("keeper", "writer", "reader", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):
+    for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):
         beat(_w, "запуск…")   # чтобы все воркеры сразу видны на странице статуса
     threading.Thread(target=keeper, daemon=True).start()
     threading.Thread(target=writer_loop, daemon=True).start()   # №1 опрос → кеш

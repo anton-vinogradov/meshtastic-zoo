@@ -600,8 +600,12 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .ptrace { margin-top: 10px; }
 #panel .ptrace .trow { display: flex; gap: 6px; align-items: center; }
 #panel .ptrace .tfrom { background: var(--bg); border: 1px solid var(--zone-stroke); border-radius: 7px; color: var(--text); padding: 4px 6px; font-size: 12px; max-width: 130px; }
-#panel .do-trace { background: rgba(255, 255, 255, .08); border: 0; border-radius: 7px; color: var(--text); cursor: pointer; padding: 4px 10px; font-size: 12.5px; }
-#panel .do-trace:disabled { opacity: .6; cursor: default; }
+#panel .do-trace, #panel .do-key { background: rgba(255, 255, 255, .08); border: 0; border-radius: 7px; color: var(--text); cursor: pointer; padding: 4px 10px; font-size: 12.5px; }
+#panel .do-trace:disabled, #panel .do-key:disabled { opacity: .6; cursor: default; }
+/* ручной запрос ключа: кнопка + история запросов */
+#panel .pkey { margin-top: 8px; }
+#panel .pkey .krow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#panel .pkey .key-out { color: var(--muted); font-size: 12px; }
 #panel .trace-out { margin-top: 6px; font-size: 12px; }
 #panel .trace-out .tpath { display: flex; flex-direction: column; gap: 3px; }
 #panel .trace-out .thop { display: flex; align-items: baseline; gap: 6px;

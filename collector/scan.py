@@ -546,7 +546,7 @@ def trace_legs(xlinks, node_ids, own, hours):
     return out
 
 
-def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None):
+def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None, asks=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -573,9 +573,17 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                          long=i.get("long"), role=i.get("role"),
                          dm=i.get("dm") or {}, db=i.get("db") or {}, cfg=i.get("cfg") or {})
     keys_by = {}
+    # Узлы, чей NodeInfo мы вообще получали: в nodeDB запись появляется только с
+    # user-частью, поэтому «есть в базе» = «представился». Различие важное: без
+    # ключа НО с NodeInfo → у ноды нет PKI-ключа (старая прошивка/PKC выкл), просить
+    # бесполезно; нет и NodeInfo → мы её ещё не опознали, запрос имеет смысл.
+    seen_user = set()
     for nid, n in stat.items():
         for oid, e in n["db"].items():
-            if isinstance(e, dict) and (e.get("user") or {}).get("publicKey"):
+            if not isinstance(e, dict):
+                continue
+            seen_user.add(oid)
+            if (e.get("user") or {}).get("publicKey"):
                 keys_by.setdefault(oid, set()).add(nid)
     own = set(stat)
     # ПОДТВЕРЖДЁННЫЕ ТРАССИРОВКОЙ прямые соседи: узел, стоящий В МАРШРУТЕ РЯДОМ
@@ -717,6 +725,19 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         node = dict(id=c["id"], label=c.get("long") or c["short"], sub=c["id"], short=c["short"],
                     x=round(x, 4), y=round(y, 4), heard=c.get("heard") or None,
                     key=bool(keys_by.get(c["id"])), keyBy=sorted(keys_by.get(c["id"], ())))
+        if c.get("best") is not None:
+            # лучший прямой SNR: по нему приоритезируют и добор ключей, и трассировку
+            # («ближайшие раньше»). Раньше поле считалось, но в карточку не попадало,
+            # поэтому оба приоритета молча работали как «в произвольном порядке».
+            node["best"] = round(c["best"], 2)
+        if not node["key"]:
+            # почему ключа нет: nopki = представилась, но ключа не публикует;
+            # unknown = NodeInfo от неё мы ещё не получали (есть смысл спросить)
+            node["keyState"] = "nopki" if c["id"] in seen_user else "unknown"
+            a = (asks or {}).get(c["id"])
+            if a:
+                node["keyAsks"] = int(a.get("n") or 0)
+                node["keyAskTs"] = int(a.get("ts") or 0)
         if c.get("hops"):
             node["hop"] = c["hops"]
         if c.get("silent"):
