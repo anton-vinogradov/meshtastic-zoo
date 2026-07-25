@@ -110,6 +110,8 @@
       keyNoPkiTip: "Its NodeInfo reached us (we know the name and model) but carries no public key — old firmware or PKC off. Asking again will not help.",
       keyUnknown: "waiting for its NodeInfo (can't DM)",
       keyUnknownTip: "We hear its packets but never got a NodeInfo — the key arrives in that very packet. Worth asking.",
+      keyEvicted: "evicted from our node's database (can't DM)",
+      keyEvictedTip: "We know this node (our cache remembers its NodeInfo), but our radio dropped its record — and the key with it — because the database is full. A request brings both back.",
       keyAsk: "request key", keyAsking: "requesting…",
       keyAsked: "asked {0}× · last {1}", keyAskedNever: "not asked yet",
       keyAskSent: "requested via {0} — the answer comes on air",
@@ -210,6 +212,8 @@
       keyNoPkiTip: "Её NodeInfo до нас дошёл (знаем имя и модель), но ключа в нём нет — старая прошивка или PKC выключен. Повторные запросы не помогут.",
       keyUnknown: "ждём её NodeInfo (DM нельзя)",
       keyUnknownTip: "Пакеты её слышим, а NodeInfo ни разу не приходил — ключ приезжает именно в нём. Спросить имеет смысл.",
+      keyEvicted: "вытеснена из базы нашей ноды (DM нельзя)",
+      keyEvictedTip: "Ноду мы знаем (наш кеш помнит её NodeInfo), но рация выбросила запись — а с ней и ключ — потому что база переполнена. Запрос вернёт и запись, и ключ.",
       keyAsk: "запросить ключ", keyAsking: "запрашиваю…",
       keyAsked: "спрашивали {0}× · последний {1}", keyAskedNever: "ещё не спрашивали",
       keyAskSent: "запрос ушёл через {0} — ответ придёт по эфиру",
@@ -1079,7 +1083,8 @@
           // почему ключа нет: нода его не публикует (просить бесполезно) или мы её
           // ещё не опознали — NodeInfo не приходил (тогда запрос имеет смысл)
           if (!kb.length) return [[t("keyLabel"), "🔒 " + t(
-            n.keyState === "nopki" ? "keyNoPki" : n.keyState === "unknown" ? "keyUnknown" : "keyNo"),
+            n.keyState === "nopki" ? "keyNoPki" : n.keyState === "evicted" ? "keyEvicted"
+              : n.keyState === "unknown" ? "keyUnknown" : "keyNo"),
             "#e0a03c"]];
           if (kb.length >= ownAll.filter(x => x !== id).length || kb.length >= ownAll.length)
             return [[t("keyLabel"), "✓ " + t("keyYes"), "#35c98e"]];
@@ -1317,7 +1322,8 @@
       // ждать нечего; keyAskOut переживает пере-сборку панели через lastKeyAsk.
       const keyBlock = (!n.own && n.key === false) ? `<div class="pkey"><div class="krow">
         <button class="do-key"${keyAsking[id] ? " disabled" : ""}
-          title="${esc(t(n.keyState === "nopki" ? "keyNoPkiTip" : "keyUnknownTip"))}"
+          title="${esc(t(n.keyState === "nopki" ? "keyNoPkiTip"
+            : n.keyState === "evicted" ? "keyEvictedTip" : "keyUnknownTip"))}"
           >${t(keyAsking[id] ? "keyAsking" : "keyAsk")}</button>
         <span class="key-out">${esc(lastKeyAsk[id] || (n.keyAsks
           ? t("keyAsked", n.keyAsks, fmtAgo(n.keyAskTs))

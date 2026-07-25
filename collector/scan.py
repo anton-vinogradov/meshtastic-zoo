@@ -625,7 +625,8 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             direct_seen[nid] = int(ld)
             c = src_of(n)
             c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
-                     heard=int(ld), best=max(e["snr"] for _, e in dlegs))
+                     heard=int(ld), best=max(e["snr"] for _, e in dlegs),
+                     named=bool(n.get("name")))
             world.append(c)
             for o, e in dlegs:
                 rf.append(dict(frm=nid, to=o, snr=e["snr"], heard=int(e.get("ts") or ld)))
@@ -637,7 +638,8 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             via = best[0] if best else (next(iter(own), None))
             c = src_of(n)
             c.update(id=nid, short=n.get("name") or nid[-4:], hw=n.get("hw"),
-                     hops=hops, heard=int(n.get("last_heard") or ld), silent=not best)
+                     hops=hops, heard=int(n.get("last_heard") or ld), silent=not best,
+                     named=bool(n.get("name")))
             hops_nodes.append(c)
             if via:
                 rf.append(dict(frm=nid, to=via, snr=None, hops=hops,
@@ -731,9 +733,15 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             # поэтому оба приоритета молча работали как «в произвольном порядке».
             node["best"] = round(c["best"], 2)
         if not node["key"]:
-            # почему ключа нет: nopki = представилась, но ключа не публикует;
-            # unknown = NodeInfo от неё мы ещё не получали (есть смысл спросить)
-            node["keyState"] = "nopki" if c["id"] in seen_user else "unknown"
+            # Почему ключа нет — три разных случая, и лечатся они по-разному:
+            #  nopki   — запись есть в базе ноды, но ключа в ней нет: нода его не
+            #            публикует (старая прошивка/PKC выкл) → просить бесполезно;
+            #  evicted — мы знаем её имя (наш кеш помнит NodeInfo), но из базы ноды
+            #            запись вытеснило по LRU вместе с ключом → запрос вернёт её;
+            #  unknown — не знаем о ней вообще ничего, NodeInfo не приходил.
+            node["keyState"] = ("nopki" if c["id"] in seen_user
+                                else "evicted" if (c.get("named") or c.get("hw"))
+                                else "unknown")
             a = (asks or {}).get(c["id"])
             if a:
                 node["keyAsks"] = int(a.get("n") or 0)
