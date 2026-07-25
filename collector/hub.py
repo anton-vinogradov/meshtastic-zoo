@@ -1488,8 +1488,15 @@ def trace_loop():
                 n = int((_trace_fails.get(i) or {}).get("n") or 0)
                 need = min(gap * (2 ** n), 24 * 3600) if n else gap
                 return now - last < need
-            todo = [(n["id"], n.get("best")) for n in data.get("nodes", [])
-                    if not n.get("own") and n.get("hop") is None and not n.get("traceNbr")
+            # КАНДИДАТЫ по СВЕЖЕСТИ ПРИЁМА, а не по nodeDB-SNR: этот SNR принадлежит
+            # громкому реле, а не узлу, поэтому сортировка по нему детерминированно
+            # выбирала недостижимые фантомы (29 из топ-30). Свежесть же честна: кого
+            # слышали минуту назад, тот сейчас в эфире и может ответить.
+            cand_win = CFG.get("traceCandMin", 180) * 60
+            todo = [(n["id"], n.get("heard") or 0) for n in data.get("nodes", [])
+                    if not n.get("own") and n.get("hop") is None
+                    and not (n.get("traceNbr") or n.get("relayNbr"))
+                    and n.get("heard") and now - n["heard"] < cand_win
                     and n["id"] not in traces and not fresh(n["id"])]
             amb = [(n["id"], n.get("best")) for n in data.get("nodes", [])
                    if n.get("est") and not n["est"].get("side") and not n.get("own")
