@@ -19,10 +19,12 @@
   // наземная правда против слухов nodeDB, где переизлучённые копии выглядят как
   // прямой приём. Неподтверждённые не теряются: они уходят в тир «слышали».
   let traceNbrOnly = localStorage.getItem("mzTraceNbrOnly") !== "0";
-  // Возраст прямо на подписи стрелки. По умолчанию выключено: подписей до 500,
-  // и «3.5 dB · 12 мин» на каждой превращает карту в кашу. В тултипе возраст есть
-  // всегда, тумблер — для разбора «насколько свежа картинка вообще».
-  let showAge = localStorage.getItem("mzShowAge") === "1";
+  // Возраст и происхождение прямо на подписи стрелки — мелким и приглушённым,
+  // чтобы не спорить с главной цифрой (SNR). По умолчанию ВКЛЮЧЕНО: «когда и чем
+  // добыто» — половина смысла плеча, и прятать её в тултип значит не показать
+  // вовсе. Тумблер оставлен, чтобы вычистить карту на глубоких уровнях, где
+  // плечей сотни.
+  let showAge = localStorage.getItem("mzShowAge") !== "0";
   // ОДНО определение правды на весь клиент: кто сосед, а кто «слышим, но трасса
   // не дошла». Раньше счётчик в легенде считал соседями всё не-своё — и не менялся
   // от подтверждений вовсе.
@@ -174,11 +176,12 @@
       asymTip: "asymmetric link: we hear {0} dB, they hear {1} dB",
       relayProof: "it relayed our packet — hears us directly",
       viaLeg: "link between other nodes", viaTr: "seen in a traceroute", viaNi: "from NeighborInfo",
+      uMin: "m", uH: "h", uD: "d",
       srcLbl: "source", srcUnknown: "unknown (leg predates source tracking)",
       src_rx: "we received its packet", src_relay: "relay harvest (it rebroadcast someone else's packet)",
       src_db: "the polled node's nodeDB", src_tr: "traceroute", src_ni: "NeighborInfo",
       src_mirror: "drawn for symmetry — nobody measured it",
-      showAgeLbl: "age on the arrows", showAgeTip: "Append the age of the measurement to each arrow's label. Off by default: with hundreds of links the labels collide. The age is always in the arrow's tooltip.",
+      showAgeLbl: "age and source on the arrows", showAgeTip: "Show, right on each arrow, how old the measurement is and what produced it: 📡 we received its packet · ♻ relay harvest · 🗒 the polled node's nodeDB · 🧭 traceroute · 👥 NeighborInfo · ∅ drawn for symmetry. Turn off to declutter the deeper map levels; the full wording stays in the arrow's tooltip.",
       viaTip: "{0} → {1}: {2} hears {3} at {4} dB — we do not hear this link ourselves ({5})",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
@@ -287,11 +290,12 @@
       asymTip: "асимметрия: мы слышим {0} дБ, нас слышат {1} дБ",
       relayProof: "переизлучил наш пакет — слышит нас напрямую",
       viaLeg: "канал между чужими узлами", viaTr: "видно в трассировке", viaNi: "из NeighborInfo",
+      uMin: "м", uH: "ч", uD: "д",
       srcLbl: "источник", srcUnknown: "неизвестен (плечо записано до учёта источников)",
       src_rx: "мы сами приняли её пакет", src_relay: "жатва relay-байта (переизлучила чужой пакет)",
       src_db: "база опрошенной ноды", src_tr: "трассировка", src_ni: "NeighborInfo",
       src_mirror: "дорисовано для симметрии — замера нет ни у кого",
-      showAgeLbl: "возраст на стрелках", showAgeTip: "Дописывать к подписи каждой стрелки возраст замера. По умолчанию выключено: подписей сотни, они сливаются. В тултипе стрелки возраст есть всегда.",
+      showAgeLbl: "возраст и источник на стрелках", showAgeTip: "Показывать прямо на стрелке, насколько замер свежий и чем добыт: 📡 приняли её пакет сами · ♻ жатва relay-байта · 🗒 база опрошенной ноды · 🧭 трассировка · 👥 NeighborInfo · ∅ дорисовано для симметрии. Выключить — чтобы разгрузить глубокие уровни карты; расшифровка остаётся в тултипе стрелки.",
       viaTip: "{0} → {1}: {2} слышит {3} на {4} дБ — сами мы этот канал не слышим ({5})",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
@@ -676,7 +680,7 @@
     const SRC = { rx: "📡", relay: "♻", db: "🗒", tr: "🧭", ni: "👥", mirror: "∅" };
     const srcOf = (l) => {
       const k = l.src && SRC[l.src] ? l.src : null;
-      return { icon: k ? SRC[k] : "·", name: t(k ? "src_" + k : "srcUnknown") };
+      return { icon: k ? SRC[k] : "·", known: !!k, name: t(k ? "src_" + k : "srcUnknown") };
     };
     const fmtSnr = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
     const fmtAge = (ts) => {
@@ -685,6 +689,12 @@
         : s < 86400 ? Math.round(s / 3600) + " " + t("unitH") : Math.round(s / 86400) + " " + t("unitD");
     };
     const fmtAgo = (ts) => { const a = fmtAge(ts); return a === t("justNow") ? a : t("ago", a); };
+    // компактный возраст для подписи на линии: «12м», «3ч», «2д»
+    const fmtAgeS = (ts) => {
+      const s2 = Math.max(0, Date.now() / 1e3 - ts);
+      return s2 < 3600 ? Math.max(1, Math.round(s2 / 60)) + t("uMin")
+        : s2 < 86400 ? Math.round(s2 / 3600) + t("uH") : Math.round(s2 / 86400) + t("uD");
+    };
 
     // Изображения девайсов (официальные рендеры из Meshtastic web-flasher)
     // Порядок важен: специфичные модели — до общих
@@ -878,9 +888,13 @@
         markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker>`);
 
       const k = [l.from, l.to].sort().join("|");
-      const label = (l.hops ? t("hop", l.hops)
-        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr))
-        + (showAge && l.heard ? ` · ${fmtAge(l.heard)}` : "");
+      const label = l.hops ? t("hop", l.hops)
+        : l.snr == null ? (l.note || t("noData")) : fmtSnr(l.snr);
+      // «когда и чем» — вторым планом на той же пилюле. У плеч, записанных до
+      // учёта источников, значка нет: пустое место честнее выдуманного.
+      const si = srcOf(l);
+      const sp = [l.heard ? fmtAgeS(l.heard) : null, si.known ? si.icon : null].filter(Boolean);
+      const sfx = showAge && sp.length ? " · " + sp.join(" ") : "";
       const tip = (l.via
         // канал между ЧУЖИМИ узлами: сами не слышим, узнали из трассы/NeighborInfo
         ? t("viaTip", l.from, l.to, lbl2(l.to), lbl2(l.from), fmtSnr(l.snr),
@@ -962,14 +976,15 @@
       const ly = bend ? qp(lt, y1, qcy, y2) : y1 + (y2 - y1) * lt;
       const ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
       const rot = (ang > 90 || ang < -90) ? ang + 180 : ang;
-      const tw = label.length * 7.6 + 16;
+      const tw = label.length * 7.6 + sfx.length * 6.1 + 16;
       edgeSvg.push(`<g class="${cls}${dim}"><title>${esc(tip)}</title>
         ${geom}
         <g transform="translate(${lx.toFixed(1)}, ${ly.toFixed(1)}) rotate(${rot.toFixed(1)})">
           <rect x="${-tw / 2}" y="-10" width="${tw}" height="20" rx="10"
             fill="var(--bg)" fill-opacity="0.92" stroke="${col}" stroke-opacity="0.65"/>
           <text y="4.5" text-anchor="middle" fill="${col}" font-size="13"
-            font-weight="700">${esc(label)}</text>
+            font-weight="700">${esc(label)}${sfx
+              ? `<tspan font-size="10.5" font-weight="500" fill-opacity="0.72">${esc(sfx)}</tspan>` : ""}</text>
         </g></g>`);
     }
     out.push(...edgeSvg);
