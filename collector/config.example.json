@@ -59,6 +59,7 @@
   "relayResolveMin": 30,
   "bidirProofH": 24,
   "proofSilentH": 6,
+  "ghostWindowH": 24,
   "traceStaggerS": 4,
   "traceCandMin": 180
 }

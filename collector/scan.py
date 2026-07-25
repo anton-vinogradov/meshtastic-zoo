@@ -237,8 +237,9 @@ def estimate_positions(nodes, links, geo, xlinks=None):
     for p in (xlinks or []):
         a, b = p.get("a"), p.get("b")
         if a and b and a != b:
-            xl_by.setdefault(a, []).append((b, p.get("snr")))
-            xl_by.setdefault(b, []).append((a, p.get("snr")))
+            # третьим — возраст улики: по нему судят, жив ли призрак
+            xl_by.setdefault(a, []).append((b, p.get("snr"), p.get("last") or 0))
+            xl_by.setdefault(b, []).append((a, p.get("snr"), p.get("last") or 0))
     # типичная дальность слышимости меша = медианная длина звена между двумя
     # позиционированными концами; это честный ПОЛ неопределённости размещения
     dd = sorted(_hav_km(pool[p["a"]][:2], pool[p["b"]][:2]) for p in (xlinks or [])
@@ -277,7 +278,7 @@ def estimate_positions(nodes, links, geo, xlinks=None):
         for a, s in heard.get(nid, []):
             la, lo = anchors[a]
             pts.append((la, lo, max(0.1, s + 21.0)))
-        for pr, s in xl_by.get(nid, []):
+        for pr, s, _lt in xl_by.get(nid, []):
             pp = pool.get(pr)
             if not pp or pr == nid:
                 continue
@@ -307,13 +308,19 @@ def estimate_positions(nodes, links, geo, xlinks=None):
                 continue
             pts = [(pool[pr][0], pool[pr][1],
                     pool[pr][2] * max(0.1, (s if s is not None else -10.0) + 21.0))
-                   for pr, s in prts if pr in pool and pr != nid]
+                   for pr, s, _lt in prts if pr in pool and pr != nid]
             got = _place(pts)
             if not got:
                 continue
             la, lo, unc = got
+            # partsOn — партнёры, которые ЕСТЬ на карте: только к ним можно
+            # нарисовать плечо, и они же объясняют, откуда взялась позиция.
+            # evTs — свежайшая улика: одна половина ответа «жив ли он».
+            parts = sorted({pr for pr, _s, _lt in prts if pr in onmap and pr != nid})
+            ev = max((lt or 0) for _pr, _s, lt in prts) if prts else 0
             out.append(dict(id=nid, lat=round(la, 6), lon=round(lo, 6),
-                            unc=round(unc, 2), by=len(pts)))
+                            unc=round(unc, 2), by=len(pts),
+                            parts=parts[:12], evTs=int(ev)))
         return out
 
     def apply_coarse():
@@ -401,7 +408,7 @@ def estimate_positions(nodes, links, geo, xlinks=None):
         if len(cands) < 2:
             return cands[0], None
         v = [0.0, 0.0]; resolver = None; rw = 0.0
-        for R, snr in xl_by.get(nid, []):
+        for R, snr, _lt in xl_by.get(nid, []):
             pr = posref.get(R)
             if not pr or R == nid:
                 continue
@@ -548,7 +555,7 @@ def trace_legs(xlinks, node_ids, own, hours):
 
 
 def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None, asks=None,
-                     hears_us=None):
+                     hears_us=None, known=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -941,16 +948,46 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         geocal = estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
     except Exception as e:
         log(f"estimate: {e!r}")
-    # призраки — узлы вне карты, размещённые по xlink-партнёрам; имена из кеша
+    # ПРИЗРАКИ — узлы вне карты, размещённые по xlink-партнёрам.
+    #
+    # У призрака ДВЕ независимые улики, и путать их нельзя:
+    #  присутствие — «он ещё в эфире»: максимум из нашего приёма (last_heard, пусть
+    #                и через реле) и свежайшей xlink-улики. По нему и решаем, жив ли;
+    #  позиция     — «он вот здесь»: его собственный GPS либо оценка по партнёрам.
+    #                Она стареет ОТДЕЛЬНО и узел не прячет — только подписывается.
+    # Считать окно от возраста xlink-улики было бы ошибкой: половина призраков
+    # слышна нам прямо сейчас (xlink-улике при этом неделя) — они в призраках не
+    # потому, что пропали, а потому что слышны только через реле и не попали ни в
+    # один тир. Замер по 7 суткам истории: после суток молчания шанс возврата
+    # падает ниже 50% — отсюда дефолт окна.
     ghosts = (geocal or {}).pop("ghosts", []) if isinstance(geocal, dict) else []
     if ghosts:
-        byrow = {r.get("id"): r for r in store}
+        byrow = {r.get("id"): r for r in (known or store)}
+        gwin = CFG.get("ghostWindowH", 24) * 3600
+        alive = []
         for g in ghosts:
             r0 = byrow.get(g["id"]) or {}
             if r0.get("name"):
                 g["name"] = r0["name"]
             if r0.get("hw"):
                 g["hw"] = r0["hw"]
+            seen = max(int(r0.get("last_heard") or 0), int(g.get("evTs") or 0))
+            if not seen or now - seen >= gwin:
+                continue                      # присутствия нет — не рисуем вовсе
+            g["seen"] = seen
+            # СВОЙ GPS ПОБЕЖДАЕТ ОЦЕНКУ: узел сам сказал, где стоит, а центроид
+            # партнёров всегда лежит ВНУТРИ их выпуклой оболочки — узел за
+            # пределами облака нод туда попасть не может в принципе (замер: до
+            # 64 км мимо при заявленных ±6.5).
+            if r0.get("lat") is not None:
+                g.update(lat=round(float(r0["lat"]), 6), lon=round(float(r0["lon"] or 0), 6),
+                         unc=0.15, src="gps")
+                if r0.get("pos_ts"):
+                    g["posTs"] = int(r0["pos_ts"])
+            else:
+                g["src"] = "est"
+            alive.append(g)
+        ghosts = alive
     # класс доверия позиции (см. docs/truth.ru.md): A размещено/подтверждено,
     # B заявленный GPS не опровергнут, C опровергнут физикой (posSus),
     # D адрес из имени, E оценка по графу/сигналу, F позиции нет

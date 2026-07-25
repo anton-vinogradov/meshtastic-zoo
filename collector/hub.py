@@ -1947,9 +1947,14 @@ def reader_loop():
                 with lock:
                     asks_snap = {k: dict(v) for k, v in _key_asks.items()}
                     hears_snap = {k: dict(v) for k, v in _hears_us.items()}
+                # призракам нужен ШИРОКИЙ снимок: store грузится окном карты
+                # (25 ч), а узел из чужой трассы может быть слышан нами куда
+                # реже — без него призрак остаётся безымянным и без своего GPS
+                known = nodestore.load(CFG.get("xlinkHours", 336) * 3600)
                 data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
                                              asks=asks_snap, hears_us=hears_snap,
-                                             traces=dict(traces), favorites=set(favorites))
+                                             traces=dict(traces), favorites=set(favorites),
+                                             known=known)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
