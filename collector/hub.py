@@ -1475,6 +1475,15 @@ def pruner_loop():
 # ---------- HTTP: статика + API ----------
 
 class Handler(SimpleHTTPRequestHandler):
+    # HTTP/1.1 + keep-alive: браузер тянет страницу (html, app.js, css, live.json,
+    # /api/*) по ОДНОМУ соединению вместо нового на каждый файл. Важно не столько
+    # для сервера, сколько для сети: установка нового TCP к этому хосту у части
+    # клиентов залипает на секунды, и десяток соединений превращался в десяток
+    # залипаний. Все ответы ставят Content-Length (_json/_static/штатный
+    # обработчик), поэтому кадрирование корректно; timeout закрывает простаивающие.
+    protocol_version = "HTTP/1.1"
+    timeout = 30
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(ROOT.parent), **kw)
 
