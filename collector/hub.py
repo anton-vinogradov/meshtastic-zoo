@@ -536,7 +536,8 @@ def on_receive(packet=None, interface=None):
             log(f"👍 {frm_name} {text} → pkt {reply_id}")
             if react_q is not None and (CFG.get("alerts") or {}).get("chanReact", True):
                 threading.Thread(target=mirror_chan_reply, daemon=True,
-                                 args=(ent["id"], frm_name, "", react_q, text)).start()
+                                 args=(ent["id"], frm_name, "", react_q, text),
+                                 kwargs={"pid": None}).start()
             return
 
         if to in (0xFFFFFFFF, 4294967295, "^all", "!ffffffff"):
@@ -577,7 +578,8 @@ def on_receive(packet=None, interface=None):
             log(f"📡 канал: {frm_name} → всем (принял {ent['id']}): {text[:50]!r}")
             if reply_q is not None and (CFG.get("alerts") or {}).get("chanReply", True):
                 threading.Thread(target=mirror_chan_reply, daemon=True,
-                                 args=(ent["id"], frm_name, text, reply_q)).start()
+                                 args=(ent["id"], frm_name, text, reply_q),
+                                 kwargs={"pid": pid}).start()
             return
 
         if to != ent.get("num"):
@@ -1308,12 +1310,15 @@ def tg_send_batch(notes):
         threading.Thread(target=lambda: [tg_send(t) for t in notes], daemon=True).start()
 
 
-def mirror_chan_reply(node, frm_name, text, quoted, react=None):
+def mirror_chan_reply(node, frm_name, text, quoted, react=None, pid=None):
     """Ответ в ОБЩЕМ канале на наше сообщение → в Telegram.
 
     Личку зеркалим давно, а канал молчал: ответ на нашу же реплику видно было
     только в интерфейсе. Шлём не весь канал (он шумный), а именно ответы нам —
-    то же правило, по которому интерфейс красит сообщение «вам ответили»."""
+    то же правило, по которому интерфейс красит сообщение «вам ответили».
+
+    Регистрируем msg_id в tgmap с меткой chan — чтобы ответ-цитата из Telegram
+    ушёл ОБРАТНО В КАНАЛ (без этого он падал в «без связки с DM» и терялся)."""
     global _tg_relayed
     own = (CFG.get("names") or {}).get(node, node)
     q = (quoted or "").replace("\n", " ")[:60]
@@ -1323,6 +1328,11 @@ def mirror_chan_reply(node, frm_name, text, quoted, react=None):
     ids = tg_send(head + who + (f"\n\n↩ на наше: «{q}»" if q else ""))
     if ids:
         _tg_relayed += 1
+        with lock:
+            for mid in ids:
+                tgmap["map"][str(mid)] = dict(node=node, chan=True, pid=pid,
+                                              peerName=frm_name)
+        save_tgmap()
 
 
 def mirror_dm(node, peer, peer_name, pid, text):
@@ -1338,11 +1348,39 @@ def mirror_dm(node, peer, peer_name, pid, text):
         save_tgmap()
 
 
+def tg_to_chan(m, text):
+    """Ответ-цитата из Telegram на КАНАЛЬНОЕ уведомление → broadcast в общий канал
+    (тем же путём, что и композер на сайте: iface.sendText). Broadcast без ACK,
+    поэтому подтверждаем отправку в Telegram сразу."""
+    global _tg_relayed
+    text = clip_bytes(text, 200)
+    node = m.get("node")
+    ent = ent_by_id(node)
+    if not ent:                       # исходная нода оффлайн — шлём с любой живой
+        with lock:
+            ent = next((c for c in conns.values() if c.get("iface")), None)
+    if not ent:
+        tg_send("⚠️ не отправил в общий канал: нет ноды на связи")
+        return
+    try:
+        ent["iface"].sendText(text, replyId=m.get("pid") or None)
+    except Exception as e:
+        log(f"📩→📡 канал: {e!r}")
+        tg_send(f"⚠️ не отправил в общий канал: {e}")
+        return
+    _tg_relayed += 1
+    own = (CFG.get("names") or {}).get(ent["id"], ent["id"])
+    log(f"📩→📡 Telegram → общий канал ({ent['id']}): {text[:40]!r}")
+    tg_send(f"📡 ушло в общий канал от {own}")
+
+
 def tg_to_mesh(m, text):
     """Ответ-цитата из Telegram → в меш, с гарантией ключа и статусом доставки.
     Отправитель: своя онлайн-нода, у которой ЕСТЬ ключ адресата (иначе PKI-сбой);
     если ключа нет ни у кого — заранее его запрашиваем и уведомляем чат. Дальнейший
     статус (доставлено/без ACK/не доставлено) зеркалится через tg-контекст."""
+    if m.get("chan"):                 # уведомление из общего канала → отвечаем в канал
+        return tg_to_chan(m, text)
     node, peer = m.get("node"), m.get("peer")
     peer_name = m.get("peerName") or peer
     text = clip_bytes(text, 200)
@@ -1414,8 +1452,8 @@ def tg_poll_loop():
                 if text and m:
                     threading.Thread(target=tg_to_mesh, args=(m, text), daemon=True).start()
                 elif text and rt:
-                    log("tg_poll: ответ в Telegram без связки с DM "
-                        "(отвечай именно на сообщение «📡 Meshtastic DM»)")
+                    log("tg_poll: ответ в Telegram не привязан к сообщению моста "
+                        "(отвечай на «📡 Meshtastic DM» или «💬 …в общем канале»)")
             if dirty:
                 save_tgmap()
         except Exception as e:
