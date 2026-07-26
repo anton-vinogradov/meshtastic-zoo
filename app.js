@@ -278,10 +278,12 @@
       viaTip: "{0} → {1}: {2} hears {3} at {4} dB — we do not hear this link ourselves ({5})",
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
+      geoBySubnet: "· site {0} (by subnet)", geoAutoSrc: "site by subnet", cSubnet: "subnet",
+      geoAutoNote: "roaming node: placed at the site it is currently connected from, from the placed nodes of that subnet",
       posClsLbl: "trust class",
       clsA: "manually placed / verified", clsB: "claimed GPS, unrefuted",
       clsC: "claimed GPS refuted by physics", clsD: "address from name (soft)",
-      clsE: "graph/signal estimate", clsF: "no position",
+      clsE: "graph/signal estimate", clsS: "site by subnet (roaming)", clsF: "no position",
       geoXa: "city anchors among them",
       geoEst: "estimated positions (from signal)", geoEstTip: "place 3+ of your nodes to triangulate GPS-less ones",
       geoEstNone: "no estimates right now — SNR shows no distance gradient (r≈0); needs spread-out anchor nodes",
@@ -398,10 +400,12 @@
       viaTip: "{0} → {1}: {2} слышит {3} на {4} дБ — сами мы этот канал не слышим ({5})",
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
+      geoBySubnet: "· площадка {0} (по подсети)", geoAutoSrc: "площадка по подсети", cSubnet: "подсеть",
+      geoAutoNote: "кочующая нода: показана там, откуда сейчас подключена — по размещённым нодам этой подсети",
       posClsLbl: "класс доверия",
       clsA: "размещено вручную / подтверждено", clsB: "заявленный GPS, не опровергнут",
       clsC: "заявленный GPS опровергнут физикой", clsD: "адрес из имени (мягкий)",
-      clsE: "оценка по графу/сигналу", clsF: "позиции нет",
+      clsE: "оценка по графу/сигналу", clsS: "площадка по подсети (кочует)", clsF: "позиции нет",
       geoXa: "из них городских якорей",
       geoEst: "оценённые позиции (по сигналу)", geoEstTip: "размести 3+ своих нод — GPS-less триангулируются",
       geoEstNone: "оценок сейчас нет — SNR не даёт градиента дальности (r≈0); нужны разнесённые опорные ноды",
@@ -650,11 +654,12 @@
       // меняет только ориентацию. Иначе — прежний PCA-выбор из 4 кандидатов.
       let P = null;
       if (geoOrient) {
-        const own = D.nodes.filter(n => n.own && geoCfg[n.id] && geoCfg[n.id].lat != null);
+        const gE = geoEff();   // с учётом кочующих: где нода сейчас, а не где стояла
+        const own = D.nodes.filter(n => n.own && gE[n.id] && gE[n.id].lat != null);
         if (own.length >= 2) {
-          const la0 = own.reduce((s, n) => s + geoCfg[n.id].lat, 0) / own.length;
+          const la0 = own.reduce((s, n) => s + gE[n.id].lat, 0) / own.length;
           const kmlat = 111.32, kmlon = 111.32 * Math.cos(la0 * Math.PI / 180);
-          const q = own.map(n => [geoCfg[n.id].lon * kmlon, -geoCfg[n.id].lat * kmlat]);
+          const q = own.map(n => [gE[n.id].lon * kmlon, -gE[n.id].lat * kmlat]);
           const qmx = q.reduce((s, p) => s + p[0], 0) / q.length;
           const qmy = q.reduce((s, p) => s + p[1], 0) / q.length;
           let best = null;
@@ -1390,6 +1395,14 @@
           + `${a.q ? `<div class="prow"><span>${esc(t("geoQuery"))}</span><span>${esc(a.q)}</span></div>` : ""}`
           + `<div class="prow"><span>${esc(t("geoVerif"))}</span><span>${esc(a.verified ? t("geoVerified") : t("geoSoft"))}</span></div>`
           + `${offGps(a.lat, a.lon)}</div>`;
+      }
+      // кочующая нода: позиция выведена из подсети, откуда она сейчас подключена
+      if (n.geoAuto) {
+        const ga = n.geoAuto;
+        geoBody += `<div class="geosrc"><b>📶 ${esc(t("geoAutoSrc"))}</b>${llRow(ga.lat, ga.lon)}`
+          + `<div class="prow"><span>${esc(t("cSubnet"))}</span><span>${esc(ga.sub || "")}</span></div>`
+          + `<div class="prow"><span>${esc(t("geoByAnchors"))}</span><span>${esc((ga.by || []).map(lbl).join(", "))}</span></div>`
+          + `<div class="shint">${esc(t("geoAutoNote"))}</div></div>`;
       }
       // класс доверия позиции (A–F, см. docs/truth.ru.md) — первой строкой секции
       const clsRow = n.posCls ? `<div class="prow poscls"><span>${esc(t("posClsLbl"))}</span>
@@ -2450,6 +2463,11 @@
   let geoEst = localStorage.getItem("mzGeoEst") !== "0";  // показывать оценённые позиции
   let geoAddr = localStorage.getItem("mzGeoAddr") !== "0";  // геокод адресных имён (Фаза 6-В)
   let lmap = null, geoLayer = null, geoCfg = {}, placing = null, geoFitted = false;
+  // Позиции своих для ОТРИСОВКИ: ручные + выведенные по подсети подключения
+  // (кочующая нода стоит там, откуда подключена). Авто перекрывает ручную —
+  // бэкенд отдаёт его только там, где ручная устарела. Редактор настроек
+  // работает с сырым geoCfg, чтобы не записать выведенное в конфиг.
+  const geoEff = () => ({ ...geoCfg, ...(((lastLive || {}).meta || {}).geoAuto || {}) });
   const GEO_R = 2500;  // радиус визуализации покрытия антенны, м
   async function loadGeoCfg() {
     try { geoCfg = (await (await fetch("/api/geo", { cache: "no-store" })).json()).geo || {}; } catch { }
@@ -2526,7 +2544,7 @@
       return (i && i.lat != null) ? [i.lat, i.lon] : null;
     };
     // покрытие антенн своих нод — в самом низу
-    Object.entries(geoCfg).forEach(([id, g]) => { if (g.lat != null) coverage(g).addTo(geoLayer); });
+    Object.entries(geoEff()).forEach(([id, g]) => { if (g.lat != null) coverage(g).addTo(geoLayer); });
     // RF-плечи между размещёнными нодами (неориентированные пары) с км
     const pairs = {};
     glinks.forEach(l => {
@@ -2604,11 +2622,16 @@
         .bindTooltip(esc(lbl), { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl" + (sus ? " sus" : ""), offset: [0, 3] })
         .on("click", () => openPanel(n.id, true)).addTo(geoLayer);
     });
-    Object.entries(geoCfg).forEach(([id, g]) => {
+    Object.entries(geoEff()).forEach(([id, g]) => {
       if (g.lat == null) return;
       pts.push([g.lat, g.lon]);
-      L.circleMarker([g.lat, g.lon], { radius: 9, color: "#0b0b0d", weight: 2, fillColor: "#6ea8ff", fillOpacity: 0.98 })
-        .bindTooltip(esc(String((byId[id] || {}).label || id)), { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl own", offset: [0, 4] })
+      // выведенная по подсети позиция — пунктиром: это «на этой площадке», не точка
+      L.circleMarker([g.lat, g.lon], { radius: 9, color: g.auto ? "#6ea8ff" : "#0b0b0d",
+        weight: 2, fillColor: "#6ea8ff", fillOpacity: g.auto ? 0.55 : 0.98,
+        dashArray: g.auto ? "3 3" : null })
+        .bindTooltip(esc(String((byId[id] || {}).label || id))
+          + (g.auto ? ` <span class="gl-sub">${esc(t("geoBySubnet", g.sub || ""))}</span>` : ""),
+          { permanent: true, interactive: true, direction: "bottom", className: "geo-lbl own", offset: [0, 4] })
         .on("click", () => openPanel(id, true)).addTo(geoLayer);
     });
     // вписываем ТОЛЬКО один раз при входе в гео-режим — иначе простановка ноды,

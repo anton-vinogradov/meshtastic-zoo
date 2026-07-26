@@ -968,13 +968,47 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                                  verified=bool(r.get("verified")))
     except Exception:
         pass
+    # ПЛОЩАДКА ПО ПОДСЕТИ для кочующих: своя нода без ручной точки (или помеченная
+    # mobile) стоит там, откуда ПОДКЛЮЧЕНА — позицию берём как центроид размещённых
+    # своих нод её текущей подсети. Иначе кочевник либо не на карте вовсе, либо —
+    # хуже — якорит геолокацию в месте, где его уже нет.
+    geo_cfg = CFG.get("geo") or {}
+    geo_auto = {}
     try:
-        flag_position_lies(nodes, out_links, CFG.get("geo") or {})
+        mobile = set(CFG.get("mobile") or [])
+        sub_of = lambda ip: str(ip).rsplit(".", 1)[0] if ip and "." in str(ip) else None
+        sites = {}                       # подсеть → [(lat, lon, id) размещённых своих]
+        for n in nodes:
+            g = geo_cfg.get(n["id"])
+            if n.get("own") and isinstance(g, dict) and g.get("lat") is not None:
+                s = sub_of(n.get("sub"))
+                if s:
+                    sites.setdefault(s, []).append((g["lat"], g["lon"], n["id"]))
+        for n in nodes:
+            if not n.get("own"):
+                continue
+            placed = isinstance(geo_cfg.get(n["id"]), dict) \
+                and geo_cfg[n["id"]].get("lat") is not None
+            if placed and n["id"] not in mobile:
+                continue                 # стационарная и размещена — не трогаем
+            peers = [p for p in sites.get(sub_of(n.get("sub")), ()) if p[2] != n["id"]]
+            if not peers:
+                continue                 # на этой площадке некому подсказать позицию
+            geo_auto[n["id"]] = dict(
+                lat=round(sum(p[0] for p in peers) / len(peers), 6),
+                lon=round(sum(p[1] for p in peers) / len(peers), 6),
+                auto=True, sub=sub_of(n.get("sub")), by=sorted(p[2] for p in peers))
+            n["geoAuto"] = geo_auto[n["id"]]
+    except Exception as e:
+        log(f"geoauto: {e!r}")
+    geo_eff = {**geo_cfg, **geo_auto}     # авто перекрывает устаревшую ручную у кочевника
+    try:
+        flag_position_lies(nodes, out_links, geo_eff)
     except Exception as e:
         log(f"posflag: {e!r}")
     geocal = None
     try:
-        geocal = estimate_positions(nodes, out_links, CFG.get("geo") or {}, xlinks=xlinks)
+        geocal = estimate_positions(nodes, out_links, geo_eff, xlinks=xlinks)
     except Exception as e:
         log(f"estimate: {e!r}")
     # ПРИЗРАКИ — узлы вне карты, размещённые по xlink-партнёрам.
@@ -1046,6 +1080,8 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             c = "B"
         elif n.get("addr"):
             c = "A" if n["addr"].get("verified") else "D"
+        elif n.get("geoAuto"):
+            c = "S"          # площадка по подсети: нода физически в этой локалке
         elif n.get("est"):
             c = "E"
         else:
@@ -1056,7 +1092,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
         meta=dict(title="meshtastic-zoo", snrScale=CFG["snrScale"],
                   updated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                   updatedTs=int(now * 1000), directSeen=direct_seen, names=names,
-                  geoCal=geocal),
+                  geoCal=geocal, geoAuto=geo_auto),
         nodes=nodes, links=out_links, ghosts=ghosts)
 
 
