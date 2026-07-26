@@ -29,6 +29,21 @@
   // в готовом SVG классами (у карточек class="node n-<id>", у рёбер "edge
   // e-<from> e-<to>"), поэтому набор текста не вызывает перерисовку карты.
   let searchQ = "";
+  // АНОН-РЕЖИМ для публичных скриншотов (скрытый флаг, без UI): имена соседей
+  // заменяются хвостом id, IP своих нод прячется. Включение — в консоли:
+  //   localStorage.mzAnon = "1"  (выключить: удалить ключ и перезагрузить)
+  const ANON = localStorage.getItem("mzAnon") === "1";
+  const anonMask = (live) => {
+    if (!ANON || !live) return;
+    for (const n of live.nodes || []) {
+      if (n.own) {
+        n.sub = n.id;                    // вместо IP
+      } else {
+        n.label = n.short = n.id.slice(-4);
+      }
+    }
+    for (const g of live.ghosts || []) delete g.name;
+  };
 
   // Имена узлов в этой сети — латиница (в том числе транслит улиц: Bogatyrskiy,
   // Verhne-Kamenskaya), а искать их будут кириллицей. Поэтому обе стороны
@@ -2736,6 +2751,7 @@
       return;
     }
     lastStamp = live.meta.updated;
+    anonMask(live);
     lastLive = live;
     render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
     renderChannel(); // подхватить свежие имена/качество узлов в списке «приняли»
