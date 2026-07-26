@@ -1349,6 +1349,25 @@ def mirror_dm(node, peer, peer_name, pid, text):
         save_tgmap()
 
 
+def chan_pid_from_note(note):
+    """Восстановить pid сообщения по тексту канального уведомления бота.
+
+    Уведомление выглядит как «💬 Ответ в общем канале → FCA\\nот Вася:\\nтекст…».
+    Связки в tgmap может не быть (уведомление старше моста), но автор и текст в
+    нём есть — находим ту же реплику в ленте канала и берём её pid, чтобы ответ
+    ушёл ЦИТАТОЙ, а не отдельным сообщением. None — если не нашли."""
+    mt = re.match(r"^💬[^\n]*\nот ([^\n:]+):\n(.*?)(?:\n\n↩ на наше:|$)", note or "", re.S)
+    if not mt:
+        return None                      # реакция (без текста) или чужой формат
+    name, body = mt.group(1).strip(), mt.group(2).strip()
+    with lock:
+        for c in reversed(channel):      # свежие первыми: имена в меше не уникальны
+            if (c.get("frmName") or "").strip() == name \
+                    and (c.get("text") or "").strip() == body:
+                return c.get("pid")
+    return None
+
+
 def tg_to_chan(m, text):
     """Ответ-цитата из Telegram на КАНАЛЬНОЕ уведомление → broadcast в общий канал
     (тем же путём, что и композер на сайте: iface.sendText). Broadcast без ACK,
@@ -1479,9 +1498,13 @@ def tg_poll_loop():
                     rt_txt = (rt.get("text") or "")
                     from_bot = ((rt.get("from") or {}).get("is_bot") is True)
                     if from_bot and rt_txt.startswith("💬"):
-                        log(f"tg_poll: канальное уведомление без связки → в канал: {text[:40]!r}")
+                        # связки нет, но pid цитируемого ищем по тексту уведомления —
+                        # чтобы ответ остался ОТВЕТОМ, а не отдельным сообщением
+                        qpid = chan_pid_from_note(rt_txt)
+                        log(f"tg_poll: канальное уведомление без связки → в канал "
+                            f"(цитата: {'да' if qpid else 'нет'}): {text[:40]!r}")
                         threading.Thread(target=tg_to_chan, daemon=True,
-                                         args=({"node": None}, text)).start()
+                                         args=({"node": None, "pid": qpid}, text)).start()
                     else:
                         # НЕ молчим: раньше непонятое сообщение только писалось в лог,
                         # и со стороны Telegram это выглядело как «не долетело».
