@@ -52,6 +52,13 @@ first run, set your subnets in the ⚙ panel. Logs:
 
 ## What's on the map
 
+![Where every arrow comes from: four kinds of evidence with a trust rank, each with its own shelf life, and the tier they produce on the map.](docs/evidence.en.svg)
+
+Every arrow is a claim, and the map keeps the receipts: what produced it,
+how much that source is worth, and when the claim expires. Unknown is never
+rounded to zero, a stronger witness never yields to a weaker one, and
+silence past the window drops the claim — including for your own node.
+
 - **Node tokens**: a device photo, name and address. Your own nodes are
   tinted **by subnet** — each site gets its own color, which you can
   change in settings; black ones are neighbors heard over the radio.

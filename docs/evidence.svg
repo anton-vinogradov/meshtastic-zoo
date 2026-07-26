@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="520" viewBox="0 0 1040 520"
+     font-family="Inter, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a5a62"/>
+    </marker>
+  </defs>
+  <rect width="1040" height="520" fill="#1b1b1d"/>
+
+  <text x="40" y="46" fill="#e8e8ea" font-size="22" font-weight="700">Откуда берётся каждая стрелка на карте</text>
+  <text x="40" y="72" fill="#9a9aa0" font-size="14">Карта не рисует «связь вообще» — у каждого плеча есть источник, вес и срок годности</text>
+
+  <text x="40" y="120" fill="#9a9aa0" font-size="12" font-weight="700" letter-spacing="1.2">УЛИКА</text>
+  <text x="404" y="120" fill="#9a9aa0" font-size="12" font-weight="700" letter-spacing="1.2">СКОЛЬКО ЖИВЁТ</text>
+  <text x="726" y="120" fill="#9a9aa0" font-size="12" font-weight="700" letter-spacing="1.2">ЧТО УТВЕРЖДАЕТ КАРТА</text>
+
+  <g>
+    <rect x="40" y="136" width="330" height="58" rx="10" fill="#232326" stroke="#8fce6a" stroke-width="1.5"/>
+    <text x="62" y="163" font-size="17">📡</text>
+    <text x="90" y="162" fill="#e8e8ea" font-size="15" font-weight="600">Приняли её пакет сами</text>
+    <text x="90" y="181" fill="#9a9aa0" font-size="12.5">свой замер SNR, хопы доказаны</text>
+    <rect x="316" y="150" width="40" height="20" rx="10" fill="#8fce6a" fill-opacity="0.16"/>
+    <text x="336" y="164" fill="#8fce6a" font-size="11.5" font-weight="700" text-anchor="middle">ранг 3</text>
+  </g>
+  <g>
+    <rect x="40" y="204" width="330" height="58" rx="10" fill="#232326" stroke="#39393d"/>
+    <text x="62" y="231" font-size="17">♻</text>
+    <text x="90" y="230" fill="#e8e8ea" font-size="15" font-weight="600">Переизлучила чужой пакет</text>
+    <text x="90" y="249" fill="#9a9aa0" font-size="12.5">поймали напрямую → она в радиусе</text>
+    <rect x="316" y="218" width="40" height="20" rx="10" fill="#ffffff" fill-opacity="0.07"/>
+    <text x="336" y="232" fill="#9a9aa0" font-size="11.5" font-weight="700" text-anchor="middle">ранг 2</text>
+  </g>
+  <g>
+    <rect x="40" y="272" width="330" height="58" rx="10" fill="#232326" stroke="#39393d"/>
+    <text x="62" y="299" font-size="17">🗒</text>
+    <text x="90" y="298" fill="#e8e8ea" font-size="15" font-weight="600">База опрошенной ноды</text>
+    <text x="90" y="317" fill="#9a9aa0" font-size="12.5">её слова, а не наш замер</text>
+    <rect x="316" y="286" width="40" height="20" rx="10" fill="#ffffff" fill-opacity="0.07"/>
+    <text x="336" y="300" fill="#9a9aa0" font-size="11.5" font-weight="700" text-anchor="middle">ранг 1</text>
+  </g>
+  <g>
+    <rect x="40" y="340" width="330" height="58" rx="10" fill="#232326" stroke="#7d7de8" stroke-width="1.5"/>
+    <text x="62" y="367" font-size="17">🧭</text>
+    <text x="90" y="366" fill="#e8e8ea" font-size="15" font-weight="600">Трассировка дошла</text>
+    <text x="90" y="385" fill="#9a9aa0" font-size="12.5">наземная правда: весь путь и SNR звеньев</text>
+  </g>
+
+  <path d="M370 165 H 404" stroke="#5a5a62" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M370 233 H 404" stroke="#5a5a62" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M370 301 H 404" stroke="#5a5a62" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M370 369 H 404" stroke="#5a5a62" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="418" y="136" width="252" height="262" rx="12" fill="#232326" stroke="#39393d"/>
+  <text x="544" y="168" fill="#e8e8ea" font-size="15" font-weight="700" text-anchor="middle">Окно годности</text>
+  <text x="544" y="190" fill="#9a9aa0" font-size="12.5" text-anchor="middle">у каждого факта своё, и оно</text>
+  <text x="544" y="207" fill="#9a9aa0" font-size="12.5" text-anchor="middle">короче, чем время хранения</text>
+
+  <rect x="440" y="226" width="208" height="34" rx="8" fill="#1b1b1d" stroke="#39393d"/>
+  <text x="456" y="248" fill="#e8e8ea" font-size="13">присутствие</text>
+  <text x="632" y="248" fill="#8fce6a" font-size="13" font-weight="700" text-anchor="end">6 ч</text>
+
+  <rect x="440" y="268" width="208" height="34" rx="8" fill="#1b1b1d" stroke="#39393d"/>
+  <text x="456" y="290" fill="#e8e8ea" font-size="13">прямое плечо</text>
+  <text x="632" y="290" fill="#e8e8ea" font-size="13" font-weight="700" text-anchor="end">24 ч</text>
+
+  <rect x="440" y="310" width="208" height="34" rx="8" fill="#1b1b1d" stroke="#39393d"/>
+  <text x="456" y="332" fill="#e8e8ea" font-size="13">трасса</text>
+  <text x="632" y="332" fill="#e8e8ea" font-size="13" font-weight="700" text-anchor="end">24 ч</text>
+
+  <text x="544" y="374" fill="#e0a03c" font-size="12" text-anchor="middle">срок вышел — утверждение снимаем,</text>
+  <text x="544" y="390" fill="#e0a03c" font-size="12" text-anchor="middle">а не тянем «как было»</text>
+
+  <path d="M670 267 H 704" stroke="#5a5a62" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="718" y="136" width="282" height="262" rx="12" fill="#232326" stroke="#39393d"/>
+  <text x="859" y="168" fill="#e8e8ea" font-size="15" font-weight="700" text-anchor="middle">Тир на карте</text>
+
+  <circle cx="748" cy="196" r="6" fill="#7d7de8"/>
+  <text x="766" y="201" fill="#e8e8ea" font-size="13.5" font-weight="600">свои</text>
+  <text x="984" y="201" fill="#9a9aa0" font-size="12" text-anchor="end">наше железо</text>
+
+  <circle cx="748" cy="232" r="6" fill="#8fce6a"/>
+  <text x="766" y="237" fill="#e8e8ea" font-size="13.5" font-weight="600">сосед</text>
+  <text x="984" y="237" fill="#9a9aa0" font-size="12" text-anchor="end">трасса дошла, 0 хопов</text>
+
+  <circle cx="748" cy="268" r="6" fill="#c9c9f2"/>
+  <text x="766" y="273" fill="#e8e8ea" font-size="13.5" font-weight="600">слышим</text>
+  <text x="984" y="273" fill="#9a9aa0" font-size="12" text-anchor="end">трасса не дошла</text>
+
+  <circle cx="748" cy="304" r="6" fill="#8a8a90"/>
+  <text x="766" y="309" fill="#e8e8ea" font-size="13.5" font-weight="600">бывший</text>
+  <text x="984" y="309" fill="#9a9aa0" font-size="12" text-anchor="end">ушёл за окно</text>
+
+  <circle cx="748" cy="340" r="6" fill="none" stroke="#8a8a90" stroke-dasharray="2 2"/>
+  <text x="766" y="345" fill="#e8e8ea" font-size="13.5" font-weight="600">призрак</text>
+  <text x="984" y="345" fill="#9a9aa0" font-size="12" text-anchor="end">из чужой трассы</text>
+
+  <text x="859" y="382" fill="#9a9aa0" font-size="12" text-anchor="middle">ползунок карты открывает тиры по одному</text>
+
+  <rect x="40" y="428" width="960" height="56" rx="10" fill="#232326" stroke="#39393d"/>
+  <text x="64" y="452" fill="#e8e8ea" font-size="13.5">
+    <tspan font-weight="700">Улику не повышаем и не продлеваем.</tspan>
+    <tspan fill="#9a9aa0"> «Неизвестно» — не ноль: неизвестное число хопов не делает узел соседом.</tspan>
+  </text>
+  <text x="64" y="472" fill="#9a9aa0" font-size="13.5">Свидетель посильнее не уступает место слабому, а молчание дольше окна снимает подтверждение — даже у своего узла.</text>
+</svg>
