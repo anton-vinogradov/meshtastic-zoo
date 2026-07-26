@@ -63,5 +63,9 @@
   "proofSilentH": 6,
   "ghostWindowH": 24,
   "traceStaggerS": 4,
-  "traceCandMin": 180
+  "traceCandMin": 180,
+  "pingReply": true,
+  "pingCooldownS": 600,
+  "pingGapS": 60,
+  "pingWaitS": 8
 }

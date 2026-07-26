@@ -550,9 +550,11 @@ def on_receive(packet=None, interface=None):
             # RLock, и хотя он реентрантный, порядок захвата держим простым.
             own_set = own_ids()
             reply_q = None
+            fresh_pkt = False              # карточка создана ЗДЕСЬ = пакет новый
             with lock:
                 m = next((x for x in channel if pid and x.get("pid") == pid), None)
                 if m is None:
+                    fresh_pkt = True
                     # уведомляем ОДИН раз на пакет: этот же broadcast прилетит с
                     # каждой своей ноды, но карточка канала создаётся только здесь
                     if reply_id and frm not in own_set:
@@ -581,6 +583,24 @@ def on_receive(packet=None, interface=None):
                 threading.Thread(target=mirror_chan_reply, daemon=True,
                                  args=(ent["id"], frm_name, text, reply_q),
                                  kwargs={"pid": pid}).start()
+            # АВТООТВЕТ НА PING. Только на новый пакет (иначе ответим столько раз,
+            # сколько своих нод его услышали) и только на ЧУЖОЙ — на свои нельзя,
+            # иначе два инстанса меша перепингуют друг друга до бесконечности.
+            # Кулдаун помечаем ПРИ ПЛАНИРОВАНИИ: пока ждём сбора приёмов, второй
+            # ping от того же не должен породить второй ответ.
+            if (fresh_pkt and frm not in own_set and CFG.get("pingReply", True)
+                    and is_ping(text)):
+                now_p = time.time()
+                with lock:
+                    quiet = (now_p - _ping_last.get(frm, 0) >= CFG.get("pingCooldownS", 600)
+                             and now_p - _ping_last_any >= CFG.get("pingGapS", 60))
+                    if quiet:
+                        _ping_last[frm] = now_p
+                if quiet:
+                    threading.Thread(target=ping_reply, daemon=True,
+                                     args=(pid, frm, frm_name)).start()
+                else:
+                    log(f"🏓 ping от {frm_name}: кулдаун, не отвечаем")
             return
 
         if to != ent.get("num"):
@@ -1347,6 +1367,58 @@ def mirror_dm(node, peer, peer_name, pid, text):
             for mid in ids:
                 tgmap["map"][str(mid)] = dict(node=node, peer=peer, peerName=peer_name, pid=pid)
         save_tgmap()
+
+
+_ping_last = {}           # id отправителя → ts последнего автоответа (личный кулдаун)
+_ping_last_any = 0.0      # ts любого автоответа (общий троттл на канал)
+# «ping»/«пинг» ЦЕЛИКОМ (можно со знаками/эмодзи вокруг), а не подстрокой: иначе
+# влезем в живой разговор, где слово просто упомянуто.
+_PING_RX = re.compile(r"^[\W_]*(?:ping|пинг)[\W_]*$", re.I | re.U)
+
+
+def is_ping(text):
+    return bool(_PING_RX.match((text or "").strip()))
+
+
+def ping_reply(pid, frm, frm_name):
+    """Ответ на ping в общем канале: кто из наших его слышал, с каким SNR и через
+    сколько хопов. ЭФИРА НА ПРОБУ НЕ ТРАТИМ — приёмы этого же пакета уже собраны
+    в gotBy; ответ это один broadcast. Отвечает нода, услышавшая лучше всех:
+    её вероятнее услышат в ответ."""
+    global _ping_last_any
+    time.sleep(CFG.get("pingWaitS", 8))    # дать остальным своим нодам услышать пакет
+    with lock:
+        m = next((x for x in channel if x.get("pid") == pid), None)
+        got = dict((m or {}).get("gotBy") or {})
+    if not got:
+        return
+    cu = chan_util()
+    if cu is not None and cu > CFG.get("busyChUtil", 35):
+        log(f"🏓 ping от {frm_name}: канал занят ({cu:.0f}%) — молчим")
+        return
+    def rank(item):                        # ближе по хопам, затем громче
+        v = item[1] if isinstance(item[1], dict) else {}
+        return (v.get("hops") if v.get("hops") is not None else 9,
+                -(v.get("snr") if v.get("snr") is not None else -99))
+    order = sorted(got.items(), key=rank)
+    ent = next((e for e in (ent_by_id(i) for i, _ in order) if e), None)
+    if not ent:
+        return
+    parts = []
+    for nid, v in order:
+        v = v if isinstance(v, dict) else {}
+        nm = (CFG.get("names") or {}).get(nid, nid[-4:])
+        snr = f"{v['snr']:+.1f}" if v.get("snr") is not None else "?"
+        parts.append(f"{nm} {snr}" + (f"/{v['hops']}х" if v.get("hops") is not None else ""))
+    txt = clip_bytes("🏓 " + " · ".join(parts), 200)
+    try:
+        ent["iface"].sendText(txt, replyId=pid or None)
+    except Exception as e:
+        log(f"🏓 ping-ответ: {e!r}")
+        return
+    with lock:
+        _ping_last_any = time.time()
+    log(f"🏓 ping от {frm_name} → ответили с {ent['id']}: {txt}")
 
 
 def chan_pid_from_note(note):
