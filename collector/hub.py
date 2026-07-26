@@ -16,6 +16,7 @@ import gzip
 import ipaddress
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1441,11 +1442,30 @@ def tg_poll_loop():
                 time.sleep(5)
                 continue
             dirty = False
+            # принимаем команды ТОЛЬКО из своих чатов (tgChat): message_id в Telegram
+            # нумеруются ПО ЧАТУ, поэтому ответ из чужого чата может случайно попасть
+            # в нашу связку и уйти в эфир от нашего имени
+            allow = {c for c in str(a.get("tgChat") or "").replace(",", " ").split()}
             for upd in data.get("result", []):
                 tgmap["offset"] = max(tgmap.get("offset", 0), upd.get("update_id", 0))
                 dirty = True
                 msg = upd.get("message") or {}
                 text = (msg.get("text") or "").strip()
+                chat_id = str(((msg.get("chat") or {}).get("id", "")))
+                if allow and chat_id not in allow:
+                    log(f"tg_poll: пропущено сообщение из чужого чата {chat_id}")
+                    continue
+                # /chan <текст> — написать в ОБЩИЙ КАНАЛ, не дожидаясь чужого ответа
+                # (реплай-путь работает лишь когда нам ответили; этот — всегда)
+                cm = re.match(r"^/(?:chan|c)(?:@\S+)?(?:\s+(.*))?$", text, re.S | re.I)
+                if cm:
+                    body_txt = (cm.group(1) or "").strip()
+                    if body_txt:
+                        threading.Thread(target=tg_to_chan, daemon=True,
+                                         args=({"node": None}, body_txt)).start()
+                    else:
+                        tg_send("напиши так: /chan текст сообщения")
+                    continue
                 rt = msg.get("reply_to_message") or {}
                 with lock:
                     m = tgmap["map"].get(str(rt.get("message_id")))
