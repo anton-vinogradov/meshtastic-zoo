@@ -40,6 +40,7 @@
         n.sub = n.id;                    // вместо IP
       } else {
         n.label = n.short = n.id.slice(-4);
+        if (n.info && n.info.long) n.info.long = n.label;   // панель берёт длинное имя отсюда
       }
     }
     for (const g of live.ghosts || []) delete g.name;
