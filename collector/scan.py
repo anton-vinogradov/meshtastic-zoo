@@ -883,7 +883,7 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
     xd = {}
     for p in (xlinks or []):
         if p.get("a") and p.get("b"):
-            xd[(p["a"], p["b"])] = (p.get("snr"), p.get("last"))
+            xd[(p["a"], p["b"])] = (p.get("snr"), p.get("last"), p.get("via"))
     own_set = {n["id"] for n in nodes if n.get("own")}
     # Плечи молчащей СВОЕЙ ноды — те же просроченные улики: восемь сплошных стрелок
     # с SNR делали из отвалившегося Cardputer'а самый связный узел карты. Оставляем
@@ -928,10 +928,32 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             if rev and rev[0] is not None and key not in seen_rev:
                 seen_rev.add(key)
                 e = {"from": l["to"], "to": l["frm"], "type": "rf",
-                     "snr": round(rev[0], 2), "outLeg": True, "src": "tr"}
+                     "snr": round(rev[0], 2), "outLeg": True,
+                     "src": "ni" if rev[2] == "ni" else "tr"}
                 if rev[1]:
                     e["heard"] = int(rev[1])
                 extra.append(e)
+    # ВСТРЕЧНОЕ ПЛЕЧО БЕЗ ПАРНОГО ПРЯМОГО. Выше «нас слышат» рисуется только в
+    # пару к уже нарисованному прямому плечу ТОЙ ЖЕ пары. Но двусторонность
+    # сплошь и рядом доказана ДРУГОЙ своей нодой: пакет узла приняла одна, а его
+    # ответ на трассировку слышала вторая — и улика оставалась невидимой, узел
+    # выглядел на карте односторонним, хотя тир соседа получил заслуженно.
+    # Рисуем такие замеры отдельной встречной линией: возраст и значок источника
+    # на подписи и так скажут, что это трасса, а не наш приём.
+    seen_out = {(d["from"], d["to"]) for d in out_links + extra}
+    bidir_cut = now - CFG.get("bidirProofH", 24) * 3600
+    on_map = {n["id"] for n in nodes}
+    for (a2, b2), (snr2, last2, via2) in xd.items():
+        if a2 not in own_set or b2 in own_set or b2 not in on_map:
+            continue
+        if snr2 is None or (last2 or 0) < bidir_cut:
+            continue
+        if (a2, b2) in seen_out or a2 in stale_ids or b2 in stale_ids:
+            continue
+        seen_out.add((a2, b2))
+        extra.append({"from": a2, "to": b2, "type": "rf", "snr": round(float(snr2), 2),
+                      "outLeg": True, "src": "ni" if via2 == "ni" else "tr",
+                      "heard": int(last2)})
     out_links += extra
 
     # геолокация: адрес → флаг вранья → оценка. Флаг ДО оценки, чтобы грубую
