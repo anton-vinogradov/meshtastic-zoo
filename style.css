@@ -137,7 +137,10 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
   /* под чёлкой/статус-баром — не заезжать под системную зону */
   padding-top: max(14px, env(safe-area-inset-top));
 }
-#channel .chhead button { min-width: 44px; min-height: 44px; }  /* палец, не курсор */
+/* Тач-зона 44px делается НЕВИДИМЫМ расширением, а не размером кнопки: иначе
+   кнопка распирает шапку по высоте. Палец попадает, вёрстка не меняется. */
+#channel .chhead button { position: relative; }
+#channel .chhead button::after { content: ""; position: absolute; inset: -14px -18px; }
 #channel .chhead b { font-size: 15px; }
 #channel .chhead button {
   background: none;
