@@ -1472,14 +1472,25 @@ def tg_poll_loop():
                 if text and m:
                     threading.Thread(target=tg_to_mesh, args=(m, text), daemon=True).start()
                 elif text:
-                    # НЕ молчим: раньше непонятое сообщение только писалось в лог, и со
-                    # стороны Telegram это выглядело как «не долетело». Отвечаем прямо
-                    # в чат, чтобы было видно, что бот жив и чего он ждёт.
-                    log(f"tg_poll: не распознано {text[:40]!r} (это ответ: {bool(rt)})")
-                    tg_send("не понял 🤔\n"
-                            "• в общий канал: /chan текст сообщения\n"
-                            "• в личку: ответь (reply) на «📡 Meshtastic DM»\n"
-                            "• ответ в канал: ответь (reply) на «💬 …в общем канале»")
+                    # Связки нет (уведомление старше моста или вытеснено из карты).
+                    # Но по тексту исходного сообщения БОТА видно, что это было
+                    # канальное уведомление — тогда просто шлём в канал (теряется
+                    # только цитата), вместо бесполезного «не понял».
+                    rt_txt = (rt.get("text") or "")
+                    from_bot = ((rt.get("from") or {}).get("is_bot") is True)
+                    if from_bot and rt_txt.startswith("💬"):
+                        log(f"tg_poll: канальное уведомление без связки → в канал: {text[:40]!r}")
+                        threading.Thread(target=tg_to_chan, daemon=True,
+                                         args=({"node": None}, text)).start()
+                    else:
+                        # НЕ молчим: раньше непонятое сообщение только писалось в лог,
+                        # и со стороны Telegram это выглядело как «не долетело».
+                        log(f"tg_poll: не распознано {text[:40]!r} (это ответ: {bool(rt)})")
+                        old = " (это уведомление старше моста — связки нет)" if from_bot else ""
+                        tg_send(f"не понял 🤔{old}\n"
+                                "• в общий канал: /chan текст сообщения\n"
+                                "• в личку: ответь (reply) на «📡 Meshtastic DM»\n"
+                                "• ответ в канал: ответь (reply) на «💬 …в общем канале»")
             if dirty:
                 save_tgmap()
         except Exception as e:
