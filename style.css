@@ -131,7 +131,13 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
   align-items: center;
   padding: 14px 16px;
   border-bottom: 1px solid var(--zone-stroke);
+  /* лента не имеет права сжать шапку: иначе на низком экране (iPad с панелями
+     браузера) кнопка сворачивания «‹» схлопывается и панель не закрыть */
+  flex: none;
+  /* под чёлкой/статус-баром — не заезжать под системную зону */
+  padding-top: max(14px, env(safe-area-inset-top));
 }
+#channel .chhead button { min-width: 44px; min-height: 44px; }  /* палец, не курсор */
 #channel .chhead b { font-size: 15px; }
 #channel .chhead button {
   background: none;
