@@ -1471,9 +1471,15 @@ def tg_poll_loop():
                     m = tgmap["map"].get(str(rt.get("message_id")))
                 if text and m:
                     threading.Thread(target=tg_to_mesh, args=(m, text), daemon=True).start()
-                elif text and rt:
-                    log("tg_poll: ответ в Telegram не привязан к сообщению моста "
-                        "(отвечай на «📡 Meshtastic DM» или «💬 …в общем канале»)")
+                elif text:
+                    # НЕ молчим: раньше непонятое сообщение только писалось в лог, и со
+                    # стороны Telegram это выглядело как «не долетело». Отвечаем прямо
+                    # в чат, чтобы было видно, что бот жив и чего он ждёт.
+                    log(f"tg_poll: не распознано {text[:40]!r} (это ответ: {bool(rt)})")
+                    tg_send("не понял 🤔\n"
+                            "• в общий канал: /chan текст сообщения\n"
+                            "• в личку: ответь (reply) на «📡 Meshtastic DM»\n"
+                            "• ответ в канал: ответь (reply) на «💬 …в общем канале»")
             if dirty:
                 save_tgmap()
         except Exception as e:
