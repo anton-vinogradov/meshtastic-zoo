@@ -32,7 +32,7 @@ nodes) reached through the traceroute xlink graph help.
 | **B** | claimed GPS, unrefuted               | broadcast position, no posSus     |
 | **C** | claimed GPS refuted by physics       | posSus: direct RX incompatible with claimed range |
 | **D** | address from name (soft anchor)      | Nominatim geocode, unverified     |
-| **S** | site by subnet (roaming node)        | connected from that site's LAN    |
+| **S** | site by subnet                       | connected from that site's LAN (follows moves) |
 | **E** | graph/signal estimate                | est: centroid of hearers + xlink partners, honest unc |
 | **F** | no position                          | —                                 |
 

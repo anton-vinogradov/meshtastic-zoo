@@ -968,40 +968,58 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
                                  verified=bool(r.get("verified")))
     except Exception:
         pass
-    # ПЛОЩАДКА ПО ПОДСЕТИ для кочующих: своя нода без ручной точки (или помеченная
-    # mobile) стоит там, откуда ПОДКЛЮЧЕНА — позицию берём как центроид размещённых
-    # своих нод её текущей подсети. Иначе кочевник либо не на карте вовсе, либо —
-    # хуже — якорит геолокацию в месте, где его уже нет.
+    # ГДЕ НОДА СЕЙЧАС — по подсети, из которой подключена. Никаких пометок
+    # «кочующая» не нужно: подсеть известна из скана для КАЖДОЙ своей ноды.
+    #   • подсеть → площадка: согласованные ручные точки нод, что сейчас на ней
+    #     (согласие = группа точек в пределах SITE_KM; одиночный «уехавший»
+    #     со своей старой точкой в консенсус не попадает и площадку не портит);
+    #   • нода, чья ручная точка совпала с площадкой — стоит по ручной (точнее);
+    #   • нода без точки ИЛИ с точкой от другой площадки — переехала: ставим на
+    #     площадку её текущей подсети.
+    # Так карта следует за реальностью, а устаревшая ручная точка перестаёт
+    # якорить геолокацию там, где ноды уже нет.
+    SITE_KM = 0.3                        # разброс «одной площадки»
     geo_cfg = CFG.get("geo") or {}
     geo_auto = {}
     try:
-        mobile = set(CFG.get("mobile") or [])
         sub_of = lambda ip: str(ip).rsplit(".", 1)[0] if ip and "." in str(ip) else None
-        sites = {}                       # подсеть → [(lat, lon, id) размещённых своих]
+        by_sub = {}                      # подсеть → [(lat, lon, id)] ручных точек нод на ней
         for n in nodes:
             g = geo_cfg.get(n["id"])
             if n.get("own") and isinstance(g, dict) and g.get("lat") is not None:
                 s = sub_of(n.get("sub"))
                 if s:
-                    sites.setdefault(s, []).append((g["lat"], g["lon"], n["id"]))
+                    by_sub.setdefault(s, []).append((g["lat"], g["lon"], n["id"]))
+        sites = {}                       # подсеть → (lat, lon, [id-ы согласных)
+        for s, pts in by_sub.items():
+            best = []                    # крупнейшая группа взаимно близких точек
+            for a in pts:
+                grp = [b for b in pts if _hav_km((a[0], a[1]), (b[0], b[1])) <= SITE_KM]
+                if len(grp) > len(best):
+                    best = grp
+            if best:
+                sites[s] = (sum(p[0] for p in best) / len(best),
+                            sum(p[1] for p in best) / len(best),
+                            sorted(p[2] for p in best))
         for n in nodes:
             if not n.get("own"):
                 continue
-            placed = isinstance(geo_cfg.get(n["id"]), dict) \
-                and geo_cfg[n["id"]].get("lat") is not None
-            if placed and n["id"] not in mobile:
-                continue                 # стационарная и размещена — не трогаем
-            peers = [p for p in sites.get(sub_of(n.get("sub")), ()) if p[2] != n["id"]]
+            site = sites.get(sub_of(n.get("sub")))
+            if not site:
+                continue                 # подсеть без размещённых нод — не выдумываем
+            g = geo_cfg.get(n["id"])
+            if isinstance(g, dict) and g.get("lat") is not None \
+                    and _hav_km((g["lat"], g["lon"]), (site[0], site[1])) <= SITE_KM:
+                continue                 # ручная точка на этой же площадке — она точнее
+            peers = [i for i in site[2] if i != n["id"]]
             if not peers:
-                continue                 # на этой площадке некому подсказать позицию
-            geo_auto[n["id"]] = dict(
-                lat=round(sum(p[0] for p in peers) / len(peers), 6),
-                lon=round(sum(p[1] for p in peers) / len(peers), 6),
-                auto=True, sub=sub_of(n.get("sub")), by=sorted(p[2] for p in peers))
+                continue                 # площадку задаёт только она сама — сравнивать не с чем
+            geo_auto[n["id"]] = dict(lat=round(site[0], 6), lon=round(site[1], 6),
+                                     auto=True, sub=sub_of(n.get("sub")), by=peers)
             n["geoAuto"] = geo_auto[n["id"]]
     except Exception as e:
         log(f"geoauto: {e!r}")
-    geo_eff = {**geo_cfg, **geo_auto}     # авто перекрывает устаревшую ручную у кочевника
+    geo_eff = {**geo_cfg, **geo_auto}     # площадка перекрывает устаревшую ручную точку
     try:
         flag_position_lies(nodes, out_links, geo_eff)
     except Exception as e:
