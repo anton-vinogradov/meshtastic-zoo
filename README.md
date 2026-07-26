@@ -6,9 +6,10 @@ A live map of your Meshtastic node zoo: who is on the air, who hears
 whom and how well, and which node has unread mail. Everything updates
 by itself while the page is open.
 
-![The connectivity map: own nodes tinted by site, neighbors heard over the radio, arrows colored by link quality with the SNR on each line.](docs/screenshot.png)
+![The connectivity map: own nodes tinted by site, neighbours confirmed by traceroute, every arrow labeled with SNR, measurement age and a source icon.](docs/screenshot.png)
 
-*(Own nodes' addresses and neighbors' names are redacted in this shot.)*
+*(All doc shots are taken in the built-in anonymize mode: neighbours'
+names are replaced with their id tails, own nodes' IPs are hidden.)*
 
 ## Running
 
@@ -73,24 +74,41 @@ silence past the window drops the claim — including for your own node.
   error). The key is held **per sending node**: a DM only goes through
   from one of your nodes that already has the recipient's key, so the
   panel lists exactly which of your nodes hold it. Keys arrive on their
-  own with NodeInfo; the badge disappears once every node has one.
-- **Grey squares** — a former direct (0-hop) neighbor that no longer
-  comes in directly. Direct neighbors constantly flap between 0 and a few
-  hops (normal RF), so a node only turns grey after its direct signal has
-  been gone for a few minutes straight — a momentary flap doesn't count.
-  Two things keep it grey rather than letting it vanish: it may now be
-  **reached over relays** (its leg shows the hop count — `1 hop`,
-  `3 hops`… — instead of an SNR, up to `hopMaxShow` hops), or it may have
-  **gone silent** (heard by nobody right now) yet was direct within the
-  last hour — then it stays put at its last spot so a node you just talked
-  to doesn't disappear without a trace. Either way it's drawn grey with a
-  dashed frame and held for up to an hour of no direct contact, then
-  forgotten. A **former neighbor** checkbox in the map's legend hides or
-  shows these grey nodes (your choice is remembered per browser).
+  own with NodeInfo; the badge disappears once every node has one. When a
+  key is missing, the panel says **why** — the node doesn't publish one
+  (old firmware), the entry was evicted from its 250-slot LRU database
+  (asking brings it back), or we've never seen it — and offers a
+  **request key** button; a background worker also collects keys on its
+  own, nearest neighbours first.
+- **The detail slider** (in ⚙) reveals the map tier by tier: **own** →
+  **+trace ✓** (neighbours confirmed by a traceroute that got through, or
+  by relaying our own packet) → **+heard** (direct reception exists but
+  no confirmation: relayed copies are good at posing as direct, so
+  "heard" is not yet "neighbour") → **+former** (grey with a dashed
+  frame: now reached over relays — the leg shows a hop count instead of
+  an SNR — or gone silent entirely; kept for up to an hour, then
+  forgotten) → **+ghosts**.
+- **Ghosts 👻** — nodes your fleet never hears at all: they showed up
+  inside other people's traceroutes next to nodes whose positions are
+  known. A dashed card with a presence age; legs to partners are dashed,
+  with no measurement. If the node broadcast its own GPS, that wins over
+  our guess (a centroid of partners physically cannot land outside their
+  cloud). A day of silence (`ghostWindowH`) and the ghost is gone.
+- **Presence.** "Neighbour" is a claim about now: silence longer than 6
+  hours (`proofSilentH`, counted across any evidence — reception, a
+  traceroute that got through, a relay of our packet) drops the
+  confirmation. Your own silent node keeps its own-style card, but its
+  legs collapse into a single dashed one — a trace of the last known
+  adjacency instead of eight confident arrows.
 - **Arrows** show who hears whom: the head points at the listener.
-  Color is link quality, from red (barely) to green (ideal); the label
-  on the line is the SNR in dB; the exact percentage is in the tooltip.
-  A grey "no data" arrow means that direction has never been caught.
+  Color is link quality, from red (barely) to green (ideal). The label
+  on the line is the SNR in dB, the measurement age and a **source
+  icon**: 📡 we received its packet ourselves · ♻ relay-byte harvest
+  (the node relayed someone else's packet and we caught that directly) ·
+  🗒 the polled node's own database · 🧭 traceroute · 👥 NeighborInfo ·
+  ∅ drawn for symmetry. The exact percentage and the wording are in the
+  tooltip; the suffix can be turned off in ⚙. A grey "no data" arrow
+  means that direction has never been caught.
 - **Distance = quality.** The better a pair hears each other, the
   closer their tokens; nodes with no shared links drift apart. The
   positions come from stress-majorization (weighted MDS) that lays out
@@ -99,6 +117,15 @@ silence past the window drops the claim — including for your own node.
   connectivity map, not a geographic one: SNR reflects link quality, not
   raw distance (power, antennas and terrain all bend it). Roaming nodes
   get a dashed frame. The map fits the window and re-lays out on resize.
+- **Search 🔍** (top row): matches stay lit, everything else dims — the
+  map stays whole and the links stay visible. It searches names,
+  callsigns and ids, and understands Cyrillic against transliterated
+  names («Богатыр» finds Bogatyrskiy 25). Enter opens the first match,
+  Esc clears, «/» focuses the box. The counter is honest: "6 · 8
+  filtered out by level" means there are matches the current tier
+  doesn't show.
+
+![Search: matches stay lit while the rest of the map dims; the counter separately reports what the current detail level hides.](docs/search.png)
 
 ## Hover and click
 
@@ -107,6 +134,8 @@ Clicking selects the node — it gets an orange outline, the same dimming
 stays put, and the details panel opens. Inside the panel, hovering a
 row in **Legs** outlines that neighbor in blue on the map, so you can
 tell which card a link goes to. The panel shows:
+
+![The node panel: key, position trust class with a minimap, Heard 24h, traceroute and legs with sparklines and source icons.](docs/panel.png)
 
 - device photo and model, ID, callsign, IP, "last seen";
 - collapsible detail sections. For your own nodes: **Firmware / Radio /
@@ -128,12 +157,21 @@ tell which card a link goes to. The panel shows:
   DM once a few seconds later. A reply goes on the air from the very node
   that was written to (➤), or just mark it as read (✓) — the marker
   clears right away;
+- **Heard 24h** — a day strip: at which hours the node was heard and
+  how well;
+- **traceroute** — a button plus a selector for which of your nodes to
+  probe from (or "All, in turn"). The result redraws paths and
+  neighbourhood immediately; paths from different own nodes are merged —
+  the best fresh one wins — and a non-answer only drops the silent
+  pair's path. Several non-answers in a row (`traceFailDrop`) and the
+  node loses its neighbour confirmation;
 - **Compose** — send a direct message to this node; a selector picks
   which of your nodes speaks (the closest one — that hears the recipient
   loudest — is preselected);
 - **Legs** — all the node's links: two-way ones grouped in "there and
-  back" pairs, one-way ones separately, everything sorted by quality
-  with the age of each measurement.
+  back" pairs (a Δ badge flags direction asymmetry of 6 dB and up),
+  one-way ones separately; each measurement carries its age, a source
+  icon and an SNR history sparkline.
 
 Every message (in DMs and the channel) can be **reacted to** (tapback
 emoji — ＋ opens a picker) and **replied to with a quote** (↩). Each
@@ -149,7 +187,49 @@ many hops** it took to reach each one (`0 hop` = heard directly), so you
 can see both the coverage and the path of a broadcast at a glance. You
 can also post to the channel from any of your online nodes. Drag the
 panel's right edge to resize it. It stays collapsed by default; the tab
-remembers your choice and the width.
+remembers your choice and the width. A reply or a reaction from the mesh
+to your message is mirrored to Telegram (see below).
+
+## The Telegram bridge
+
+Fill in `alerts.tgToken` and `alerts.tgChat` in the config and the hub
+starts sending to Telegram the things that need your attention — and
+only those:
+
+- **incoming DMs** to any of your nodes; replying right in the chat
+  sends the answer back into the mesh from the right node;
+- **delivery statuses** of your outgoing messages: ✅ delivered · ⏳ the
+  recipient doesn't have our key yet (the hub has already asked for it
+  and will deliver once the node shows up) · ⚠️ no ack · ❌ failed, with
+  the reason;
+- **replies and reactions from the public channel to your messages** —
+  the channel is not mirrored wholesale, only what's addressed to you,
+  by the same rule the UI uses to highlight "replied to you";
+- **low battery** on your own node (threshold and hysteresis are
+  configurable).
+
+Each item has its own switch under `alerts`: `dm`, `tgDelivery`,
+`tgReply`, `chanReply`, `chanReact`, `lowBatt`.
+
+## The status page 📟
+
+The **📟** button opens a service page: a 24-hour channel-utilization
+chart (chUtil — the input of the throttle all on-air workers obey) and,
+per worker, what it is doing right now, how long ago its last beat was,
+and a daily sparkline of its metric: connections, poll→cache,
+cache→map, tiers and precompression, pruning, tracing (background and
+own↔own), key collection, geocoding.
+
+![The status page: channel load and a 24-hour profile of every worker.](docs/status.png)
+
+## The geo map 🗺
+
+The **🗺** button switches connectivity for real geography (OSM): nodes
+with GPS as dots, GPS-less ones as signal-and-crosslink estimates with
+an honest uncertainty circle, address-like names geocoded. Every
+position carries a trust class A–F; the measured methodology lives in
+[docs/truth.md](docs/truth.md). No screenshot here on purpose: it is
+the real geography of the sites.
 
 ## Nice little things
 
@@ -163,8 +243,8 @@ remembers your choice and the width.
   hasn't been caught for a while it is drawn as a grey "no data":
   a one-way link is a suspicious link, and the map pushes such a pair
   farther apart.
-- A neighbor silent for more than 6 hours leaves the map (the threshold
-  is configurable).
+- A neighbour confirmation survives 6 hours of silence, the card a day,
+  then an hour in grey — and the node is forgotten (all configurable).
 - The last update time is in the bottom-right corner; if the data goes
   stale, a warning appears next to it.
 - Device photos are the official renders from the Meshtastic project
@@ -214,6 +294,20 @@ panel. Every field, top to bottom:
   once. The collector queries those lightly after two failed full
   attempts. An advanced knob — leave it empty unless a site keeps
   timing out.
+- **Detail level** — that tier slider: own → +trace ✓ → +heard →
+  +former → +ghosts.
+- **Orient by geography** — rotate the layout so your own nodes'
+  relative positions match reality (north up); works once at least two
+  of them are placed on the geo map.
+- **⚠ Criticality** — highlight single points of failure: each relay
+  shows how many nodes lose the fleet if it goes down.
+- **🧭 Neighbours only via trace** — the strict neighbour tier (on by
+  default): only a confirmed node counts; unconfirmed ones don't vanish,
+  they move to the "+heard" tier.
+- **🕐 Age and source on the arrows** — the "· 12m 📡" suffix on leg
+  labels; turn it off to declutter the deeper levels.
+- **Node cap** — how many "heard" nodes to draw (top by signal; own,
+  confirmed and multi-hop nodes are never trimmed); 0 — all.
 
 Changes apply on the fly and are saved to `collector/config.json`.
 A few rarely-touched keys live in that file only: `port` (the node
@@ -228,9 +322,26 @@ default on) and `keyRetryS` (how long to wait before that retry — default
 12), and `known` / `names` — fallback IP↔radio-id and name maps used when
 a node doesn't answer.
 
+The newer machinery is file-configured too, in groups: honesty windows
+(`proofSilentH`, `ghostWindowH`, `directWindowH`, `formerWindowH`,
+`bidirProofH`, `relayProofH`), tracing (`traceEnabled`, `traceEveryS`,
+`traceBatch`, `traceHops`, `traceWaitS`, `traceStaggerS`,
+`traceCandMin`, `traceFailDrop`, `traceRecheckH`, `traceLinks`,
+`traceLinkHours`), key collection (`keyFetchFreshMin`,
+`keyFetchHeardMin`, `keySolicitGapS`), the relay-byte harvest
+(`nbrFromRelay`, `relayResolveMin`) and Telegram (`alerts.*`). The
+defaults come from measurements on a live mesh — you shouldn't need to
+touch them.
+
 ## Roadmap
 
 - [x] Live map with honest distances and device photos
 - [x] Mail: unread markers, conversation history, delivery status,
       replying and sending from the right node
-- [ ] Measurement history and link quality charts
+- [x] Measurement history and charts: leg sparklines, Heard 24h, status
+- [x] Ground-truth neighbourhood: traceroutes, relay-byte harvest,
+      presence windows, provenance on every leg
+- [x] The Telegram bridge: two-way DMs, delivery statuses, channel
+      replies
+- [ ] A ghost panel: partners, history, one-click traceroute
+- [ ] Position refinement and neighbour re-checks without manual traces
