@@ -12,6 +12,7 @@
 Запуск: python3 collector/hub.py       # сайт и API на :8814
 """
 import asyncio
+import base64
 import gzip
 import ipaddress
 import json
@@ -370,9 +371,13 @@ def on_receive(packet=None, interface=None):
                         continue
                     if ok:
                         m["status"] = "delivered"
-                    elif (str(err) == "PKI_SEND_FAIL_PUBLIC_KEY" and CFG.get("autoKeyRequest", True)
+                    elif (str(err) in ("PKI_SEND_FAIL_PUBLIC_KEY", "PKI_UNKNOWN_PUBKEY")
+                          and CFG.get("autoKeyRequest", True)
                           and m.get("tries", 0) < CFG.get("keyMaxTries", 12)):
-                        # ключа пока нет — ждём появления адресата в эфире
+                        # Две РАЗНЫЕ беды, лечение одно (обмен NodeInfo):
+                        #   SEND_FAIL — у НАС нет ключа адресата, шифровать нечем;
+                        #   UNKNOWN_PUBKEY — адресат не знает НАШЕГО, расшифровать нечем.
+                        # Ждём появления адресата в эфире и повторяем.
                         m["status"] = "waiting"
                         m.pop("detail", None)
                         m.setdefault("waitSince", int(time.time()))
@@ -693,13 +698,23 @@ def has_key_for(node, peer):
 
 def request_key(ent, to):
     """Солицит ключа адресата: шлём ему наш NodeInfo с want_response — он
-    отвечает своим NodeInfo (в нём publicKey), и наша нода узнаёт его ключ."""
+    отвечает своим NodeInfo (в нём publicKey), и наша нода узнаёт его ключ.
+
+    Кладём и СВОЙ публичный ключ: при NAK PKI_UNKNOWN_PUBKEY проблема обратная —
+    это АДРЕСАТ не знает нашего ключа и потому не может расшифровать. Без
+    public_key в анонсе он бы так и не узнал его, и лечения бы не вышло."""
     import meshtastic.mesh_interface as mi
     iface = ent["iface"]
     mu = iface.getMyUser() or {}
     u = mi.mesh_pb2.User(id=mu.get("id") or ent.get("id") or "",
                          long_name=mu.get("longName") or "",
                          short_name=mu.get("shortName") or "")
+    pk = mu.get("publicKey")
+    if pk:
+        try:                       # строка приходит base64, протобуф ждёт байты
+            u.public_key = base64.b64decode(pk) if isinstance(pk, str) else pk
+        except Exception as e:
+            log(f"🔑 свой ключ в NodeInfo не вложен: {e!r}")
     iface.sendData(u, destinationId=to, wantResponse=True,
                    portNum=mi.portnums_pb2.PortNum.NODEINFO_APP)
 

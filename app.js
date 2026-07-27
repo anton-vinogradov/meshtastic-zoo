@@ -1496,7 +1496,7 @@
         BAD_REQUEST: { en: "bad request", ru: "неверный запрос" },
         NOT_AUTHORIZED: { en: "not authorized", ru: "не авторизовано" },
         PKI_FAILED: { en: "encryption failed", ru: "шифрование не удалось" },
-        PKI_UNKNOWN_PUBKEY: { en: "recipient key unknown", ru: "ключ адресата неизвестен" },
+        PKI_UNKNOWN_PUBKEY: { en: "recipient doesn't have our key", ru: "адресат не знает нашего ключа" },
         PKI_SEND_FAIL_PUBLIC_KEY: {
           en: "no recipient key — encrypted DM can't be sent",
           ru: "нет ключа адресата — шифрованный DM не отправить",
