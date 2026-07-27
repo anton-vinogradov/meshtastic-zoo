@@ -192,8 +192,9 @@ to your message is mirrored to Telegram (see below).
 
 ### Auto-reply to trigger words
 
-When someone posts exactly one of the trigger words (`ping`, `пинг`,
-`hi`, `привет` by default — the list and the on/off switch live in ⚙),
+When someone posts exactly one of the trigger words (`ping`, `пинг`, `test`,
+`тест`, `проверка`, `hi`, `привет` by default — the list and the on/off
+switch live in ⚙),
 the hub
 replies in-thread with which of your nodes heard it, at what SNR and over
 how many hops — `🏓 FCA +9.2/0х · FC1 −7.5/2х`. The node that heard it

@@ -1372,7 +1372,7 @@ def mirror_dm(node, peer, peer_name, pid, text):
 
 _ping_last = {}           # id отправителя → ts последнего автоответа (личный кулдаун)
 _ping_last_any = 0.0      # ts любого автоответа (общий троттл на канал)
-PING_WORDS = ["ping", "пинг", "hi", "привет"]   # дефолт; настраивается в ⚙
+PING_WORDS = ["ping", "пинг", "test", "тест", "проверка", "hi", "привет"]  # дефолт; правится в ⚙
 
 
 def is_ping(text):
