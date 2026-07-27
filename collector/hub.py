@@ -1453,7 +1453,7 @@ def ping_reply(pid, frm, frm_name):
     # Префикс — примерное местоположение наших нод: пингующему полезно знать,
     # ОТКУДА ему ответили (сигнал сам по себе этого не говорит). Настраивается.
     pre = str(CFG.get("pingPrefix") or "").strip()
-    txt = clip_bytes((pre + " " if pre else "") + "🏓 " + " · ".join(bits), 200)
+    txt = clip_bytes((pre + "\n" if pre else "") + "🏓 " + " · ".join(bits), 200)
     try:
         ent["iface"].sendText(txt, replyId=pid or None)
     except Exception as e:
