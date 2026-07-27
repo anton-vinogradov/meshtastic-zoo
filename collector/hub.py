@@ -1373,6 +1373,10 @@ def mirror_dm(node, peer, peer_name, pid, text):
 _ping_last = {}           # id отправителя → ts последнего автоответа (личный кулдаун)
 _ping_last_any = 0.0      # ts любого автоответа (общий троттл на канал)
 PING_WORDS = ["ping", "пинг", "test", "тест", "проверка", "hi", "привет"]  # дефолт; правится в ⚙
+# Досыпаем дефолты в CFG (в память, не в файл): иначе /api/config отдаёт null и
+# в ⚙ словарь выглядит ПУСТЫМ, хотя автоответчик работает по значениям из кода.
+CFG.setdefault("pingWords", list(PING_WORDS))
+CFG.setdefault("pingReply", True)
 
 
 def is_ping(text):
