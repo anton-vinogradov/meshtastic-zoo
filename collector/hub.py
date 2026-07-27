@@ -53,7 +53,7 @@ PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
             "topoEveryS", "renderEveryS", "rescanS", "mobile", "fragile",
-            "pingReply", "pingWords"]
+            "pingReply", "pingWords", "pingPrefix"]
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
@@ -1392,6 +1392,7 @@ PING_WORDS = ["ping", "пинг", "test", "тест", "проверка", "hi", 
 # в ⚙ словарь выглядит ПУСТЫМ, хотя автоответчик работает по значениям из кода.
 CFG.setdefault("pingWords", list(PING_WORDS))
 CFG.setdefault("pingReply", True)
+CFG.setdefault("pingPrefix", "")   # напр. «Богатырский на связи!» — откуда отвечаем
 
 
 def is_ping(text):
@@ -1449,7 +1450,10 @@ def ping_reply(pid, frm, frm_name):
         bits.append(f"через {h}🐇: " + ", ".join(relayed[h]))
     if not direct:
         bits.append("напрямую не слышим")
-    txt = clip_bytes("🏓 " + " · ".join(bits), 200)
+    # Префикс — примерное местоположение наших нод: пингующему полезно знать,
+    # ОТКУДА ему ответили (сигнал сам по себе этого не говорит). Настраивается.
+    pre = str(CFG.get("pingPrefix") or "").strip()
+    txt = clip_bytes((pre + " " if pre else "") + "🏓 " + " · ".join(bits), 200)
     try:
         ent["iface"].sendText(txt, replyId=pid or None)
     except Exception as e:
@@ -2760,6 +2764,9 @@ class Handler(SimpleHTTPRequestHandler):
                         continue
                 elif k == "pingReply":
                     if not isinstance(v, bool):
+                        continue
+                elif k == "pingPrefix":
+                    if not isinstance(v, str) or len(v.encode()) > 80:
                         continue
                 elif k == "snrScale":
                     if (not isinstance(v, dict)

@@ -74,6 +74,7 @@
     "hi",
     "привет"
   ],
+  "pingPrefix": "",
   "pingCooldownS": 600,
   "pingGapS": 60,
   "pingWaitS": 8

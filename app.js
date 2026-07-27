@@ -281,6 +281,7 @@
       geoBySubnet: "· site {0} (by subnet)", geoAutoSrc: "site by subnet", cSubnet: "subnet",
       setAuto: "Auto-reply in the channel", setAutoHint: "A message that is exactly one of these words gets an answer listing which of your nodes heard it, at what SNR and over how many hops. One word per line; matching ignores case and surrounding punctuation. Never answers your own nodes, waits out per-sender and channel cooldowns, and stays quiet while the channel is busy.",
       fPingOn: "answer trigger words", fPingWords: "trigger words",
+      fPingPrefix: "prefix — roughly where your nodes are (e.g. «Bogatyrsky here!»)",
       geoAutoNote: "placed at the site it is currently connected from — derived from the placed nodes of that subnet, so the map follows the node when it moves",
       posClsLbl: "trust class",
       clsA: "manually placed / verified", clsB: "claimed GPS, unrefuted",
@@ -405,6 +406,7 @@
       geoBySubnet: "· площадка {0} (по подсети)", geoAutoSrc: "площадка по подсети", cSubnet: "подсеть",
       setAuto: "Автоответ в канале", setAutoHint: "Сообщение, равное одному из этих слов, получает ответ: какие твои ноды его услышали, с каким SNR и за сколько хопов. По слову в строке; регистр и знаки вокруг не важны. Своим нодам никогда не отвечаем, соблюдаются паузы на отправителя и на канал, при загруженном канале молчим.",
       fPingOn: "отвечать на слова-триггеры", fPingWords: "слова-триггеры",
+      fPingPrefix: "префикс — где примерно стоят ноды (напр. «Богатырский на связи!»)",
       geoAutoNote: "показана там, откуда сейчас подключена — по размещённым нодам этой подсети; переедет нода, переедет и точка",
       posClsLbl: "класс доверия",
       clsA: "размещено вручную / подтверждено", clsB: "заявленный GPS, не опровергнут",
@@ -2286,6 +2288,7 @@
       ["worldMaxAgeH", "fKeep", "num"]] },
     { title: "setAuto", hint: "setAutoHint", fields: [
       ["pingReply", "fPingOn", "bool"],
+      ["pingPrefix", "fPingPrefix", "text"],
       ["pingWords", "fPingWords", "area"]] },
   ];
   const setEl = document.getElementById("settings");
@@ -2361,6 +2364,9 @@
           : kind === "bool"
           ? `<label class="srow stog"><span>${t(label)}</span>
               <input id="${sfId(k)}" type="checkbox"${val(k) === false ? "" : " checked"}></label>`
+          : kind === "text"
+          ? `<label class="srow scol"><span>${t(label)}</span>
+              <input id="${sfId(k)}" type="text" value="${esc(val(k) ?? "")}"></label>`
           : `<label class="srow"><span>${t(label)}</span>
               <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
         ).join("")
@@ -2445,6 +2451,7 @@
         mobile: lines(g("mobile")),
         fragile: lines(g("fragile")),
         pingReply: g("pingReply").checked,
+        pingPrefix: g("pingPrefix").value.trim(),
         pingWords: lines(g("pingWords")),
       };
       const btn = setEl.querySelector("#ssave");
