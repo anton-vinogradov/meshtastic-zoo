@@ -1413,13 +1413,28 @@ def ping_reply(pid, frm, frm_name):
     ent = next((e for e in (ent_by_id(i) for i, _ in order) if e), None)
     if not ent:
         return
-    parts = []
+    # SNR ОСМЫСЛЕН ТОЛЬКО ПРИ 0 ХОПОВ: у ретранслированной копии он описывает
+    # передатчик последнего реле, а не пингующего, — сообщать его как «вот как мы
+    # тебя слышим» значит врать. Поэтому: прямые — с цифрой, дальние — только
+    # числом хопов, свёрнутые по группам.
+    nm_of = lambda i: (CFG.get("names") or {}).get(i, i[-4:])
+    direct, relayed = [], {}
     for nid, v in order:
         v = v if isinstance(v, dict) else {}
-        nm = (CFG.get("names") or {}).get(nid, nid[-4:])
-        snr = f"{v['snr']:+.1f}" if v.get("snr") is not None else "?"
-        parts.append(f"{nm} {snr}" + (f"/{v['hops']}х" if v.get("hops") is not None else ""))
-    txt = clip_bytes("🏓 " + " · ".join(parts), 200)
+        h = v.get("hops")
+        if h == 0:
+            s = v.get("snr")
+            direct.append(f"{nm_of(nid)} {s:+.1f}" if s is not None else nm_of(nid))
+        else:
+            relayed.setdefault(h if h is not None else "?", []).append(nm_of(nid))
+    bits = []
+    if direct:
+        bits.append("напрямую: " + ", ".join(direct))
+    for h in sorted(relayed, key=lambda x: (x == "?", x)):
+        bits.append(f"через {h}х: " + ", ".join(relayed[h]))
+    if not direct:
+        bits.append("напрямую не слышим")
+    txt = clip_bytes("🏓 " + " · ".join(bits), 200)
     try:
         ent["iface"].sendText(txt, replyId=pid or None)
     except Exception as e:
