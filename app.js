@@ -279,6 +279,8 @@
       ghostTip: "beyond our hearing — placed by {0} mesh neighbors, ±{1} km",
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
       geoBySubnet: "· site {0} (by subnet)", geoAutoSrc: "site by subnet", cSubnet: "subnet",
+      setAuto: "Auto-reply in the channel", setAutoHint: "A message that is exactly one of these words gets an answer listing which of your nodes heard it, at what SNR and over how many hops. One word per line; matching ignores case and surrounding punctuation. Never answers your own nodes, waits out per-sender and channel cooldowns, and stays quiet while the channel is busy.",
+      fPingOn: "answer trigger words", fPingWords: "trigger words",
       geoAutoNote: "placed at the site it is currently connected from — derived from the placed nodes of that subnet, so the map follows the node when it moves",
       posClsLbl: "trust class",
       clsA: "manually placed / verified", clsB: "claimed GPS, unrefuted",
@@ -401,6 +403,8 @@
       ghostTip: "вне нашего слуха — размещение по {0} соседям меша, ±{1} км",
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
       geoBySubnet: "· площадка {0} (по подсети)", geoAutoSrc: "площадка по подсети", cSubnet: "подсеть",
+      setAuto: "Автоответ в канале", setAutoHint: "Сообщение, равное одному из этих слов, получает ответ: какие твои ноды его услышали, с каким SNR и за сколько хопов. По слову в строке; регистр и знаки вокруг не важны. Своим нодам никогда не отвечаем, соблюдаются паузы на отправителя и на канал, при загруженном канале молчим.",
+      fPingOn: "отвечать на слова-триггеры", fPingWords: "слова-триггеры",
       geoAutoNote: "показана там, откуда сейчас подключена — по размещённым нодам этой подсети; переедет нода, переедет и точка",
       posClsLbl: "класс доверия",
       clsA: "размещено вручную / подтверждено", clsB: "заявленный GPS, не опровергнут",
@@ -2280,6 +2284,9 @@
       ["fragile", "fFragile", "area"]] },
     { title: "setHistory", hint: "setHistoryHint", fields: [
       ["worldMaxAgeH", "fKeep", "num"]] },
+    { title: "setAuto", hint: "setAutoHint", fields: [
+      ["pingReply", "fPingOn", "bool"],
+      ["pingWords", "fPingWords", "area"]] },
   ];
   const setEl = document.getElementById("settings");
   const sfId = (k) => "sf-" + k.replace(".", "-");
@@ -2351,6 +2358,9 @@
         + sec.fields.map(([k, label, kind]) => kind === "area"
           ? `<label class="srow"><span>${t(label)}</span>
               <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
+          : kind === "bool"
+          ? `<label class="srow stog"><span>${t(label)}</span>
+              <input id="${sfId(k)}" type="checkbox"${val(k) === false ? "" : " checked"}></label>`
           : `<label class="srow"><span>${t(label)}</span>
               <input id="${sfId(k)}" type="number" step="any" value="${val(k) ?? ""}"></label>`
         ).join("")
@@ -2434,6 +2444,8 @@
         rescanS: +g("rescanS").value,
         mobile: lines(g("mobile")),
         fragile: lines(g("fragile")),
+        pingReply: g("pingReply").checked,
+        pingWords: lines(g("pingWords")),
       };
       const btn = setEl.querySelector("#ssave");
       btn.disabled = true;

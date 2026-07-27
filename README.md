@@ -190,21 +190,25 @@ panel's right edge to resize it. It stays collapsed by default; the tab
 remembers your choice and the width. A reply or a reaction from the mesh
 to your message is mirrored to Telegram (see below).
 
-### Auto-reply to `ping`
+### Auto-reply to trigger words
 
-When someone posts exactly `ping` (or `пинг`) to the channel, the hub
+When someone posts exactly one of the trigger words (`ping`, `пинг`,
+`hi`, `привет` by default — the list and the on/off switch live in ⚙),
+the hub
 replies in-thread with which of your nodes heard it, at what SNR and over
 how many hops — `🏓 FCA +9.2/0х · FC1 −7.5/2х`. The node that heard it
 best does the replying, since it is the likeliest to be heard back.
 
 This costs no extra airtime: the receptions of that very packet are
 already collected, so the reply is a single broadcast. The word has to be
-the whole message, otherwise the bot would butt into conversations.
+the whole message, otherwise the bot would butt into conversations
+("привет" is answered, "привет всем" is not); case and surrounding
+punctuation don't matter.
 Limits: `pingCooldownS` (600 s) per sender, `pingGapS` (60 s) for the
 channel as a whole, silence while channel utilisation is above
 `busyChUtil`, and never a reply to a ping from your own nodes — otherwise
-two hubs would ping-pong forever. Turn it off with `"pingReply": false`
-in `collector/config.json`.
+two hubs would ping-pong forever. Turn it off with the ⚙ switch (or
+`"pingReply": false` in `collector/config.json`).
 
 ## The Telegram bridge
 

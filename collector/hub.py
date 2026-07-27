@@ -51,7 +51,8 @@ OUT_TRFAIL = ROOT.parent / "data" / "tracefail.json"  # id → {n, ts}: трас
 PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
-            "topoEveryS", "renderEveryS", "rescanS", "mobile", "fragile"]
+            "topoEveryS", "renderEveryS", "rescanS", "mobile", "fragile",
+            "pingReply", "pingWords"]
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
@@ -1371,13 +1372,17 @@ def mirror_dm(node, peer, peer_name, pid, text):
 
 _ping_last = {}           # id отправителя → ts последнего автоответа (личный кулдаун)
 _ping_last_any = 0.0      # ts любого автоответа (общий троттл на канал)
-# «ping»/«пинг» ЦЕЛИКОМ (можно со знаками/эмодзи вокруг), а не подстрокой: иначе
-# влезем в живой разговор, где слово просто упомянуто.
-_PING_RX = re.compile(r"^[\W_]*(?:ping|пинг)[\W_]*$", re.I | re.U)
+PING_WORDS = ["ping", "пинг", "hi", "привет"]   # дефолт; настраивается в ⚙
 
 
 def is_ping(text):
-    return bool(_PING_RX.match((text or "").strip()))
+    """Слово-триггер ЦЕЛИКОМ (можно со знаками/эмодзи вокруг), а не подстрокой:
+    иначе бот влезал бы в разговор, где слово просто упомянуто."""
+    t = re.sub(r"^[\W_]+|[\W_]+$", "", (text or "").strip(), flags=re.U).casefold()
+    if not t:
+        return False
+    words = CFG.get("pingWords") or PING_WORDS
+    return any(t == str(w).strip().casefold() for w in words if str(w).strip())
 
 
 def ping_reply(pid, frm, frm_name):
@@ -2716,8 +2721,11 @@ class Handler(SimpleHTTPRequestHandler):
                 if k not in body:
                     continue
                 v = body[k]
-                if k in ("subnets", "mobile", "fragile"):
+                if k in ("subnets", "mobile", "fragile", "pingWords"):
                     if not isinstance(v, list) or not all(isinstance(s, str) for s in v):
+                        continue
+                elif k == "pingReply":
+                    if not isinstance(v, bool):
                         continue
                 elif k == "snrScale":
                     if (not isinstance(v, dict)

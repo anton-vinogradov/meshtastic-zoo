@@ -65,6 +65,12 @@
   "traceStaggerS": 4,
   "traceCandMin": 180,
   "pingReply": true,
+  "pingWords": [
+    "ping",
+    "пинг",
+    "hi",
+    "привет"
+  ],
   "pingCooldownS": 600,
   "pingGapS": 60,
   "pingWaitS": 8
