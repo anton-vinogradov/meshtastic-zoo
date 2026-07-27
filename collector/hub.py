@@ -1431,7 +1431,7 @@ def ping_reply(pid, frm, frm_name):
     if direct:
         bits.append("напрямую: " + ", ".join(direct))
     for h in sorted(relayed, key=lambda x: (x == "?", x)):
-        bits.append(f"через {h}х: " + ", ".join(relayed[h]))
+        bits.append(f"через {h}🐇: " + ", ".join(relayed[h]))
     if not direct:
         bits.append("напрямую не слышим")
     txt = clip_bytes("🏓 " + " · ".join(bits), 200)

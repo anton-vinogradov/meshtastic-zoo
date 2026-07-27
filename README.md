@@ -197,13 +197,13 @@ When someone posts exactly one of the trigger words (`ping`, `пинг`, `test`,
 switch live in ⚙),
 the hub
 replies in-thread with which of your nodes heard it and how far away —
-`🏓 напрямую: FCA +9.2, FC1 −7.5 · через 3х: FCB`. The node that heard it
+`🏓 напрямую: FCA +9.2, FC1 −7.5 · через 3🐇: FCB`. The node that heard it
 best does the replying, since it is the likeliest to be heard back.
 
 SNR is reported **only for a direct reception**. On a packet that arrived
 over relays the SNR describes the last relay's transmitter, not the
 sender, so those are collapsed into a hop count: when nothing heard the
-sender directly the reply says so — `через 4х: … · напрямую не слышим`.
+sender directly the reply says so — `через 4🐇: … · напрямую не слышим`.
 
 This costs no extra airtime: the receptions of that very packet are
 already collected, so the reply is a single broadcast. The word has to be
