@@ -251,6 +251,47 @@ def save_channel():
 
 # ---------- связь с нодами ----------
 
+def bound_tx_wait():
+    """Ограничить библиотечное ожидание места в TX-очереди рации.
+
+    `MeshInterface._sendToRadio` крутит `while not _queueHasFreeSpace(): sleep(0.5)`
+    без таймаута, а свободные слоты пополняют только QueueStatus от рации — их
+    разбирает поток-читатель. У оборвавшегося соединения читатель уже вышел, значит
+    место не появится НИКОГДА и отправитель висит вечно. Смертельно это потому, что
+    один из висяков — единственный на всю библиотеку `publishingThread`: через него
+    идут ВСЕ колбэки, включая on_receive, и приём пакетов со всех нод замирает."""
+    import meshtastic.mesh_interface as mi
+    has_space = mi.MeshInterface._queueHasFreeSpace
+
+    def bounded(self):
+        if has_space(self):
+            self._freeSince = None
+            return True
+        since = getattr(self, "_freeSince", None) or time.time()
+        self._freeSince = since
+        if time.time() - since < CFG.get("txQueueWaitS", 45):
+            return False
+        self._freeSince = None
+        self.queue.clear()   # мёртвая очередь: иначе на ней встанет и следующий вызов
+        raise TimeoutError("рация не освободила TX-очередь")
+
+    mi.MeshInterface._queueHasFreeSpace = bounded
+
+
+def close_iface(iface):
+    """Закрыть соединение, не рискуя повиснуть: `close()` шлёт рации «disconnect»,
+    а это отправка по уже мёртвому сокету (см. bound_tx_wait). noProto заставляет
+    `_sendToRadio` вернуться сразу, до очереди."""
+    try:
+        iface.noProto = True
+    except Exception:
+        pass
+    try:
+        iface.close()
+    except Exception:
+        pass
+
+
 def connect_node(ip):
     """Подключиться и держать; хрупким — два полных, потом лёгкий."""
     fragile = any(ip.startswith(p) for p in CFG.get("fragile", []))
@@ -271,8 +312,13 @@ def connect_node(ip):
         num = getattr(getattr(iface, "myInfo", None), "my_node_num", None) or my.get("num")
         nid = user.get("id") or CFG.get("known", {}).get(ip) or (num and f"!{num:08x}")
         with lock:
+            prev = conns.get(ip)
             conns[ip] = dict(iface=iface, id=nid, num=num, light=no_nodes,
                              last=time.time())
+        # предыдущее соединение по этому же IP закрываем явно: рация держит ОДНОГО
+        # клиента, брошенный сокет отнимает у нас же слот и её выбивает
+        if prev and prev.get("iface") is not iface:
+            threading.Thread(target=close_iface, args=(prev["iface"],), daemon=True).start()
         # АВТО-ДЕТЕКТ РЕФЛЭША: реальный nodeid ≠ тому, что ждёт config[known] по этому
         # IP → нода перепрошита (id сменился), config устарел. Флажим для статуса + лог.
         actual = user.get("id") or (num and f"!{num:08x}")
@@ -297,10 +343,7 @@ def drop_node(ip):
     with lock:
         ent = conns.pop(ip, None)
     if ent and ent.get("iface"):
-        try:
-            ent["iface"].close()
-        except Exception:
-            pass
+        close_iface(ent["iface"])
 
 
 def ent_by_iface(interface):
@@ -393,7 +436,9 @@ def on_receive(packet=None, interface=None):
                 log(f"{'✓ доставлено' if ok else '✗ NAK ' + str(err)} (rid={rid})")
             tg_send_batch(notes)
             if pki_fail:
-                solicit_key(pki_fail["to"])  # попросить ключ; доставим, как услышим
+                # в своём потоке: запрос уходит в эфир, а мы на publishingThread
+                threading.Thread(target=solicit_key, args=(pki_fail["to"],),
+                                 daemon=True).start()  # доставим, как услышим
             return
         if dec.get("portnum") == "TRACEROUTE_APP":
             # ответ на нашу трассировку: путь + SNR по хопам (Фаза 4, ч.3)
@@ -1103,7 +1148,9 @@ def on_lost(interface=None):
     ip, ent = ent_by_iface(interface)
     if ip:
         log(f"⛓✗ {ip}: соединение потеряно")
-        drop_node(ip)
+        # закрываем в СВОЁМ потоке: колбэк исполняется на едином publishingThread
+        # библиотеки, и любая заминка здесь останавливает приём пакетов со всех нод
+        threading.Thread(target=drop_node, args=(ip,), daemon=True).start()
 
 
 async def port_open(ip):
@@ -2884,6 +2931,7 @@ def main():
             log(f"🩹 подписано имён в истории вместо сырых id: {n}")
     except Exception as e:
         log(f"backfill_names: {e}")
+    bound_tx_wait()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
     for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):

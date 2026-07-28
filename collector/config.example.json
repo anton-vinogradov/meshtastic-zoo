@@ -5,6 +5,7 @@
   "port": 4403,
   "connectTimeoutS": 0.6,
   "queryTimeoutS": 45,
+  "txQueueWaitS": 45,
   "fragile": [],
   "worldMaxAgeH": 24,
   "autoKeyRequest": true,
