@@ -1490,17 +1490,21 @@ def ping_reply(pid, frm, frm_name):
             direct.append(f"{nm_of(nid)} {s:+.1f}" if s is not None else nm_of(nid))
         else:
             relayed.setdefault(h if h is not None else "?", []).append(nm_of(nid))
-    bits = []
-    if direct:
-        bits.append("напрямую: " + ", ".join(direct))
+    # КАЖДАЯ ГРУППА — СВОЕЙ СТРОКОЙ. Одной строкой через « · » это читалось как
+    # сплошняк, а на телефоне ещё и переносилось в произвольном месте. Заодно
+    # экономнее: перевод строки — 1 байт против 4 у разделителя, а лимит 200.
+    # «Напрямую» всегда первой строкой: это главное, что хочет знать пингующий,
+    # и «не слышим» тоже должно стоять сразу, а не в хвосте перечисления.
+    bits = ["напрямую: " + ", ".join(direct) if direct else "напрямую не слышим"]
     for h in sorted(relayed, key=lambda x: (x == "?", x)):
-        bits.append(f"через {h}🐇: " + ", ".join(relayed[h]))
-    if not direct:
-        bits.append("напрямую не слышим")
+        who = ", ".join(relayed[h])
+        bits.append(f"через реле: {who}" if h == "?" else f"через {h}🐇: {who}")
     # Префикс — примерное местоположение наших нод: пингующему полезно знать,
     # ОТКУДА ему ответили (сигнал сам по себе этого не говорит). Настраивается.
     pre = str(CFG.get("pingPrefix") or "").strip()
-    txt = clip_bytes((pre + "\n" if pre else "") + "🏓 " + " · ".join(bits), 200)
+    # Ракетка — метка ВСЕГО сообщения, поэтому стоит перед префиксом, а не перед
+    # первой строкой перечисления: строки-группы читаются ровным столбцом.
+    txt = clip_bytes("🏓 " + (pre + "\n" if pre else "") + "\n".join(bits), 200)
     try:
         ent["iface"].sendText(txt, replyId=pid or None)
     except Exception as e:
