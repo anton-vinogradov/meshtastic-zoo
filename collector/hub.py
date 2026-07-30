@@ -278,6 +278,28 @@ def bound_tx_wait():
     mi.MeshInterface._queueHasFreeSpace = bounded
 
 
+def id_twin(actual, long_name, hw, silent_h=6):
+    """Не та ли это САМАЯ железка под новым id? Признак: в кеше есть СВОЯ нода с
+    тем же именем и той же моделью, но другим id, и она уже молчит.
+
+    Ловит случай, который не видит сверка по known: нода сменила id и заодно
+    подсеть, поэтому её новый адрес в конфиге не описан и сравнивать не с чем.
+    Возвращает id прежней ноды либо None — молча гадать не будем, решение за
+    человеком (перенести ярлык, гео и mobile — его выбор)."""
+    if not (actual and long_name and hw):
+        return None
+    cut = time.time() - silent_h * 3600
+    try:
+        for r in nodestore.load(30 * 86400):
+            if (r.get("own") and r.get("id") != actual
+                    and (r.get("name") or "") == long_name and (r.get("hw") or "") == hw
+                    and (r.get("last_heard") or 0) < cut):
+                return r["id"]
+    except Exception as e:
+        log(f"id_twin: {e!r}")
+    return None
+
+
 def close_iface(iface):
     """Закрыть соединение, не рискуя повиснуть: `close()` шлёт рации «disconnect»,
     а это отправка по уже мёртвому сокету (см. bound_tx_wait). noProto заставляет
@@ -323,6 +345,10 @@ def connect_node(ip):
         # IP → нода перепрошита (id сменился), config устарел. Флажим для статуса + лог.
         actual = user.get("id") or (num and f"!{num:08x}")
         cfg_id = CFG.get("known", {}).get(ip)
+        # ключи здесь СЫРЫЕ, как их отдаёт meshtastic (longName/hwModel), а не
+        # наши сокращённые long/hw из node_info — перепутать значит замолчать
+        twin = None if cfg_id or not actual else id_twin(actual, user.get("longName"),
+                                                        user.get("hwModel"))
         with lock:
             if actual and cfg_id and actual != cfg_id:
                 nm = (CFG.get("names") or {}).get(cfg_id, cfg_id)
@@ -331,6 +357,16 @@ def connect_node(ip):
                     _mismatch_logged[ip] = actual
                     log(f"⚠ {ip}: config ждёт {cfg_id} ({nm}), а нода теперь {actual} — "
                         f"обнови names/known (рефлэш?)")
+            elif twin:
+                # СМЕНА ID БЕЗ СМЕНЫ IP-ЗАПИСИ: железка переехала на адрес, которого
+                # в known нет, поэтому сравнивать было не с чем. Узнаём её по
+                # «то же имя и модель, а id другой, и прежний замолчал».
+                nm = (CFG.get("names") or {}).get(twin, twin)
+                id_mismatch[ip] = {"known": twin, "actual": actual, "name": nm}
+                if _mismatch_logged.get(ip) != actual:
+                    _mismatch_logged[ip] = actual
+                    log(f"⚠ {ip}: {actual} выглядит как бывшая {twin} ({nm}) — "
+                        f"то же имя и модель, прежний id молчит; обнови names/known")
             else:
                 id_mismatch.pop(ip, None)
                 _mismatch_logged.pop(ip, None)
