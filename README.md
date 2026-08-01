@@ -11,6 +11,9 @@ by itself while the page is open.
 *(All doc shots are taken in the built-in anonymize mode: neighbours'
 names are replaced with their id tails, own nodes' IPs are hidden.)*
 
+Questions, ideas, or a map of your own zoo to show off —
+[Discussions](https://github.com/anton-vinogradov/meshtastic-zoo/discussions).
+
 ## Running
 
 Quick, for a look:
