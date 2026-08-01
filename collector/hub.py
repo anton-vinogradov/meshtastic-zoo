@@ -3030,7 +3030,10 @@ def gh_watch_loop():
         seen = json.loads(OUT_GHSEEN.read_text())
     except Exception:
         seen = {}
-    first = not seen
+    # «Первый проход» — это ОТСУТСТВИЕ ФАЙЛА, а не пустой словарь: у репозитория
+    # без обсуждений состояние пустое всегда, и по пустоте каждый рестарт считался
+    # бы первым запуском — то есть самое первое обсуждение проглатывалось бы молча.
+    first = not OUT_GHSEEN.exists()
     while True:
         repo = str(CFG.get("githubWatch") or "").strip()
         every = max(300, int(CFG.get("githubEveryS", 900)))
