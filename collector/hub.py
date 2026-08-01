@@ -44,6 +44,7 @@ GEO_CACHE = ROOT.parent / "data" / "geo_cache.json"  # сырой кэш Nominat
 OUT_MSGS = ROOT.parent / "data" / "messages.json"
 OUT_CHAN = ROOT.parent / "data" / "channel.json"
 OUT_TRACES = ROOT.parent / "data" / "traces.json"   # последняя трассировка на узел (персист)
+OUT_GHSEEN = ROOT.parent / "data" / "ghseen.json"   # что уже видели в дискуссиях GitHub
 OUT_TGMAP = ROOT.parent / "data" / "tgmap.json"
 OUT_FAV = ROOT.parent / "data" / "favorites.json"   # id избранных — их НЕ прунит кеш
 OUT_TIERS = ROOT.parent / "data" / "tiers.json"     # готовая разбивка узлов по тирам (воркер prep)
@@ -2990,6 +2991,81 @@ class Handler(SimpleHTTPRequestHandler):
             self._json({"ok": False, "error": "нет такого API"}, 404)
 
 
+def gh_fetch(repo):
+    """Записи ATOM-фида дискуссий: [(id, заголовок, ссылка, автор, updated)].
+
+    Фид отдаётся БЕЗ токена, поэтому на сервере не нужен PAT — и это же причина
+    следить именно им, а не GraphQL. Запись всплывает и при НОВОМ комментарии
+    (меняется <updated>), так что обсуждения видно целиком, а не только их старт."""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    url = f"https://github.com/{repo}/discussions.atom"
+    req = urllib.request.Request(url, headers={"User-Agent": "meshtastic-zoo"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        root = ET.fromstring(r.read())
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    out = []
+    for e in root.findall("a:entry", ns):
+        eid = (e.findtext("a:id", "", ns) or "").strip()
+        # ВНИМАНИЕ: Element без детей ложен в булевом контексте, поэтому никаких
+        # `find(...) or {}` — пустой <link/> подменялся бы словарём и ссылка
+        # всегда выходила пустой (фид парсился, а записей выходило ноль)
+        ln = e.find("a:link", ns)
+        link = ln.get("href") if ln is not None else None
+        title = " ".join((e.findtext("a:title", "", ns) or "").split())
+        who = e.find("a:author/a:name", ns)
+        upd = (e.findtext("a:updated", "", ns) or "").strip()
+        if eid and link:
+            out.append((eid, title, link, (who.text or "").strip() if who is not None else "?", upd))
+    return out
+
+
+def gh_watch_loop():
+    """Воркер: новые дискуссии и новые комментарии в них → Telegram.
+
+    Первый проход НИЧЕГО не шлёт, только запоминает: иначе включение фичи
+    вываливает в чат всю историю обсуждений разом."""
+    seen = {}
+    try:
+        seen = json.loads(OUT_GHSEEN.read_text())
+    except Exception:
+        seen = {}
+    first = not seen
+    while True:
+        repo = str(CFG.get("githubWatch") or "").strip()
+        every = max(300, int(CFG.get("githubEveryS", 900)))
+        if not repo:
+            beat("ghwatch", "выключено (githubWatch пуст)")
+            time.sleep(every)
+            continue
+        try:
+            entries = gh_fetch(repo)
+            notes = []
+            for eid, title, link, who, upd in entries:
+                was = seen.get(eid)
+                if was == upd:
+                    continue
+                seen[eid] = upd
+                if first:
+                    continue
+                notes.append((f"🆕 Новая дискуссия · {repo}\n«{title}»\nот {who}\n{link}"
+                              if was is None else
+                              f"💬 Ответ в дискуссии · {repo}\n«{title}»\n{link}"))
+            atomic_write(OUT_GHSEEN, json.dumps(seen, ensure_ascii=False))
+            if first:
+                log(f"🐙 дискуссии {repo}: первый проход, запомнил {len(seen)} — молчу")
+                first = False
+            for n in notes:
+                log("🐙 " + n.splitlines()[0])
+                tg_send(n)
+            beat("ghwatch", f"{len(entries)} обсуждений"
+                            + (f" · новых {len(notes)}" if notes else ""))
+        except Exception as e:
+            beat("ghwatch", f"ошибка: {e.__class__.__name__}")
+            log(f"🐙 дискуссии: {e!r}")
+        time.sleep(every)
+
+
 def main():
     load_messages()
     load_traces()
@@ -3019,7 +3095,8 @@ def main():
     bound_tx_wait()
     pub.subscribe(on_receive, "meshtastic.receive")
     pub.subscribe(on_lost, "meshtastic.connection.lost")
-    for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace", "keyfetch", "geocode"):
+    for _w in ("keeper", "writer", "reader", "prep", "pruner", "tg", "trace", "otrace",
+               "keyfetch", "geocode", "ghwatch"):
         beat(_w, "запуск…")   # чтобы все воркеры сразу видны на странице статуса
     threading.Thread(target=keeper, daemon=True).start()
     threading.Thread(target=writer_loop, daemon=True).start()   # №1 опрос → кеш
@@ -3031,6 +3108,7 @@ def main():
     threading.Thread(target=own_trace_loop, daemon=True).start()# свежесть канала меж своими (own↔own traceroute)
     threading.Thread(target=keyfetch_loop, daemon=True).start() # тихий добор ключей у keyless (темп по каналу)
     threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
+    threading.Thread(target=gh_watch_loop, daemon=True).start() # дискуссии GitHub → Telegram
     log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
 

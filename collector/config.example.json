@@ -61,6 +61,8 @@
   "relayProofH": 6,
   "relayResolveMin": 30,
   "bidirProofH": 24,
+  "githubWatch": "",
+  "githubEveryS": 900,
   "proofSilentH": 6,
   "ghostWindowH": 24,
   "traceStaggerS": 4,

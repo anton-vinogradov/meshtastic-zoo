@@ -64,11 +64,12 @@
   <div class="sub" style="margin-top:20px"><a href="index.html">← на карту</a></div>
 
   <script>
-    const WARN = { keeper:700, writer:180, reader:180, prep:90, pruner:900, trace:1200, otrace:1800, keyfetch:1800, geocode:90000, tg:120 };
-    const ORDER = ["keeper","writer","reader","prep","pruner","trace","otrace","keyfetch","geocode","tg"];
+    const WARN = { keeper:700, writer:180, reader:180, prep:90, pruner:900, trace:1200, otrace:1800, keyfetch:1800, geocode:90000, tg:120, ghwatch:2400 };
+    const ORDER = ["keeper","writer","reader","prep","pruner","trace","otrace","keyfetch","geocode","tg","ghwatch"];
     const LABEL = { keeper:"keeper · соединения", writer:"writer · опрос→кеш", reader:"reader · кеш→карта",
       prep:"prep · тиры и предсжатие", pruner:"pruner · чистка", trace:"trace · трассировка",
       otrace:"otrace · свои↔свои", keyfetch:"keyfetch · ключи", geocode:"geocode · адреса",
+      ghwatch:"ghwatch · дискуссии GitHub",
       tg:"tg · telegram" };
     // профильная метрика воркера: столбец истории + подпись + цвет. down=«полезно вниз»
     // (keyfetch добывает ключи → keyless падает), cum=накопительный счётчик,
