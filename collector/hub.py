@@ -14,9 +14,11 @@
 import asyncio
 import base64
 import gzip
+import hashlib
 import ipaddress
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -25,7 +27,7 @@ import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -1291,7 +1293,7 @@ def snapshot(ent):
 
 # ---------- Telegram-алерты (Фаза 2) ----------
 # Отправка через твой telegram.sh (ретраи/прокси/очередь). Токен и чат — в
-# config.json (alerts.tgToken/tgChat, gitignore); пусто → молчим. Отдельный бот.
+# collector/secrets.json (0600, gitignore; см. scan.SECRETS); пусто → молчим.
 ALERT_BIN = shutil.which("telegram") or "/opt/telegram.sh-repo/telegram"
 _batt_alerted = set()  # id нод, по которым уже слали «низкий заряд» (антидребезг)
 
@@ -2524,6 +2526,66 @@ def pruner_loop():
 
 # ---------- HTTP: статика + API ----------
 
+def migrate_secrets():
+    """Разово перенести токен/чат/прокси Telegram из config.json в secrets.json.
+
+    Сначала пишем секреты (0600), потом чистим конфиг: при сбое посередине
+    токен окажется в двух местах, но не потеряется. Возвращает число ключей."""
+    p = ROOT / "config.json"
+    try:
+        disk = json.loads(p.read_text())
+    except Exception:
+        return 0
+    a = disk.get("alerts") or {}
+    moved = {k: a.pop(k) for k in scan.SECRET_KEYS if a.get(k)}
+    if not moved:
+        return 0
+    try:
+        sec = json.loads(scan.SECRETS.read_text())
+    except Exception:
+        sec = {}
+    sec.setdefault("alerts", {}).update(moved)
+    tmp = scan.SECRETS.with_name(scan.SECRETS.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(sec, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, scan.SECRETS)
+    os.chmod(scan.SECRETS, 0o600)
+    atomic_write(p, json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
+    return len(moved)
+
+
+# CSP карты: страница рисует текст из эфира (имена узлов, канал, личка), и любая
+# дыра в экранировании становится исполнением чужого скрипта с правами страницы,
+# у которой API шлёт в эфир от наших нод. Инлайн-скриптов и обработчиков в
+# клиенте нет — поэтому script-src строгий. Стили инлайн нужны Leaflet.
+CSP_MAP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+           "img-src 'self' data: https://tile.openstreetmap.org; "
+           "connect-src 'self' https://api.github.com; object-src 'none'; "
+           "base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
+_csp_status = (0.0, "")
+
+
+def csp_status():
+    """CSP страницы статуса: её единственный инлайн-скрипт разрешаем по хешу,
+    посчитанному из самого файла (кэш по mtime) — правка страницы не требует
+    правки сервера, а чужой инлайн-код по-прежнему не выполнится."""
+    global _csp_status
+    f = ROOT.parent / "status.html"
+    try:
+        mt = f.stat().st_mtime
+    except OSError:
+        return "default-src 'self'"
+    if _csp_status[0] != mt:
+        hs = " ".join("'sha256-%s'" % base64.b64encode(hashlib.sha256(x.encode()).digest()).decode()
+                      for x in re.findall(r"<script>(.*?)</script>", f.read_text(), re.S))
+        _csp_status = (mt, f"default-src 'self'; script-src 'self' {hs}; "
+                           "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                           "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                           "frame-ancestors 'self'")
+    return _csp_status[1]
+
+
 class Handler(SimpleHTTPRequestHandler):
     # HTTP/1.1 + keep-alive: браузер тянет страницу (html, app.js, css, live.json,
     # /api/*) по ОДНОМУ соединению вместо нового на каждый файл. Важно не столько
@@ -2536,6 +2598,26 @@ class Handler(SimpleHTTPRequestHandler):
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(ROOT.parent), **kw)
+
+    # БЕЛЫЙ СПИСОК раздачи. Раньше отдавался ВЕСЬ каталог проекта: config.json,
+    # личная переписка, .git, база истории на 1.4 ГБ — любому, кто достаёт до
+    # порта, с листингами каталогов. Клиенту нужны только эти пути.
+    PUBLIC_FILES = {"/", "/index.html", "/status.html", "/app.js", "/style.css",
+                    "/data/live.json"}
+    PUBLIC_DIRS = ("/img/", "/vendor/")
+
+    def _public(self):
+        raw = unquote(urlparse(self.path).path) or "/"
+        p = posixpath.normpath(raw)
+        if raw.endswith("/") and p != "/":
+            return False                # листинги каталогов не отдаём
+        return p in self.PUBLIC_FILES or p.startswith(self.PUBLIC_DIRS)
+
+    def do_HEAD(self):
+        if not self._public():
+            self.send_error(404)
+            return
+        super().do_HEAD()
 
     def log_message(self, *a):
         pass
@@ -2560,6 +2642,11 @@ class Handler(SimpleHTTPRequestHandler):
         else:
             # app.js/style.css/index.html — всегда свежие (ревалидация дешёвая: ETag→304)
             self.send_header("Cache-Control", "no-cache, must-revalidate")
+        if p in ("/", "/index.html"):
+            self.send_header("Content-Security-Policy", CSP_MAP)
+        elif p == "/status.html":
+            self.send_header("Content-Security-Policy", csp_status())
+        self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
     def _static(self):
@@ -2685,6 +2772,8 @@ class Handler(SimpleHTTPRequestHandler):
                                 pk=len(u.get("publicKey") or ""), role=u.get("role"), hw=u.get("hwModel"))
                 out[c["id"]] = info
             self._json({"id": tid, "seenBy": out})
+        elif not self._public():
+            self.send_error(404)
         elif not self._static():   # текстовая статика: gzip + ETag/304
             super().do_GET()
 
@@ -3081,6 +3170,12 @@ def main():
     load_key_asks()
     load_trace_fails()
     load_hears_us()
+    try:
+        n = migrate_secrets()
+        if n:
+            log(f"🔐 секреты Telegram ({n}) перенесены из config.json в secrets.json (0600)")
+    except Exception as e:
+        log(f"migrate_secrets: {e!r}")
     try:
         n = nodestore.repair_freshness()
         if n:

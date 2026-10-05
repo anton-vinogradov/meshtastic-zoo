@@ -7,7 +7,11 @@
   // ближе (дистанции честнее пропорциональны сигналу)
   const CARD = { w: 102, h: 82, r: 10 };
   const WCARD = { w: 102, h: 82, r: 10 };
-  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  // Кавычки экранируем ОБЯЗАТЕЛЬНО: чужой текст из эфира попадает и в атрибуты
+  // (title, data-text, href), и без этого строка вида `" onmouseover="…` из
+  // общего канала становилась исполняемым обработчиком на странице владельца.
+  const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
   // Язык интерфейса выбирается в настройках, хранится локально
   let lang = localStorage.getItem("mzLang") || "en";
@@ -1989,7 +1993,7 @@
   const pendingReacts = new Map(); // `${pid}|${emoji}` -> ts
   // текст сообщения с кликабельными ссылками (экранируем всё, URL → <a>)
   const linkify = (text) => {
-    const s = text || "", re = /https?:\/\/[^\s<]+/g;
+    const s = text || "", re = /https?:\/\/[^\s<>"']+/g;
     let out = "", last = 0, m;
     while ((m = re.exec(s))) {
       let url = m[0];

@@ -142,7 +142,7 @@
         `<div class="card wcard"><span class="dot ${cls(w.age, WARN[n] || 600)}"></span>
           <div class="wmain"><div class="wtop"><span class="nm">${LABEL[n] || n}</span>
             <span class="age">${age(w.age)} назад</span></div>
-            <div class="note">${w.note || ""}</div></div>
+            <div class="note">${esc(w.note || "")}</div></div>
           ${workerGraph(n)}</div>`).join("") || '<div class="meta">нет данных</div>';
 
       // свои ноды

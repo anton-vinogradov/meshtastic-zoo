@@ -8,12 +8,31 @@
 import ipaddress
 import json
 import math
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-CFG = json.loads((ROOT / "config.json").read_text())
+_CFG_PATH = ROOT / "config.json"
+if not _CFG_PATH.exists():
+    # Запуск из свежего клона: README предлагает `python3 collector/hub.py`, а
+    # рабочий конфиг (он в .gitignore) раньше создавал только install.sh —
+    # первый же старт падал трейсбеком. Берём шаблон и говорим об этом.
+    shutil.copyfile(ROOT / "config.example.json", _CFG_PATH)
+    print("config.json не найден — создан из config.example.json; подсети задай в ⚙",
+          flush=True)
+CFG = json.loads(_CFG_PATH.read_text())
+# СЕКРЕТЫ ОТДЕЛЬНО: токен бота, чат и прокси Telegram живут в secrets.json с
+# правами 0600, а не в config.json. Его нет ни в раздаче статики, ни в /api/config,
+# и правка настроек из ⚙ (она перезаписывает config.json) его не касается.
+SECRETS = ROOT / "secrets.json"
+SECRET_KEYS = ("tgToken", "tgChat", "tgProxy")
+try:
+    _sec = (json.loads(SECRETS.read_text()).get("alerts") or {})
+    CFG.setdefault("alerts", {}).update({k: v for k, v in _sec.items() if v})
+except FileNotFoundError:
+    pass
 # дефолты для окон удержания — чтобы устаревший config.json (без ключей после
 # миграции на кеш) не давал None ни в классификации, ни в /api/config.
 CFG.setdefault("directWindowH", 24)
