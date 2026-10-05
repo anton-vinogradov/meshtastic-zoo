@@ -574,7 +574,7 @@ def trace_legs(xlinks, node_ids, own, hours):
 
 
 def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None, asks=None,
-                     hears_us=None, cache_wide=None):
+                     hears_us=None, cache_wide=None, own_links=None):
     """ЧИТАТЕЛЬ (этап 2, воркер №2): собрать live.json из персистентного кеша
     nodestore, а не из волатильного снимка. Статус чёрная/серая — по таймерам
     last_direct (directWindowH / +formerWindowH). Свои ноды/keys_by/cfg/telemetry
@@ -863,6 +863,17 @@ def build_from_store(store, found=None, xlinks=None, traces=None, favorites=None
             # своё железо, временно не на связи по TCP: показываем своей карточкой,
             # а не «чужим соседом» — статус СВОЕЙ у него не отнимаем
             node["own"], node["online"] = True, False
+            # Площадку берём по известному IP из конфига, а не по текущему sub
+            # (у отвалившейся там её id): иначе «!…» вставал первым в сортировку
+            # подсетей и перекрашивал ВСЕ площадки на карте.
+            kip = next((ip for ip, i in (CFG.get("known") or {}).items() if i == c["id"]), None)
+            if kip:
+                node["sub"] = kip
+            if c["id"] in set(CFG.get("mobile") or []):
+                node["mobile"] = True
+            since = (own_links or {}).get(c["id"])
+            if since:
+                node["tcpSince"] = int(since)
         # ПРИСУТСТВИЕ считаем по самой свежей улике ЛЮБОГО рода. Дошедшая трасса
         # и переизлучение нашего пакета доказывают, что узел был жив, не хуже
         # маяка, а по одному лишь пассивному приёму порог срезал ЖИВЫХ соседей:

@@ -56,10 +56,10 @@
   <h1>meshtastic-zoo · статус</h1>
   <div class="sub" id="head">загрузка…</div>
   <div id="mism"></div>
+  <h2>Свои ноды <span class="meta" id="fleet" style="text-transform:none;letter-spacing:0"></span></h2><div id="nodes"></div>
   <h2>Загрузка канала <span class="meta" style="text-transform:none;letter-spacing:0">· 24ч по часам · чем тише, тем чаще воркеры выходят в эфир</span></h2>
   <div id="graphs"></div>
   <h2>Воркеры <span class="meta" style="text-transform:none;letter-spacing:0">· профиль за 24ч (по часам)</span></h2><div id="workers"></div>
-  <h2>Свои ноды</h2><div id="nodes"></div>
   <h2>Данные</h2><div class="grid" id="data"></div>
   <div class="sub" style="margin-top:20px"><a href="index.html">← на карту</a></div>
 
@@ -146,18 +146,28 @@
           ${workerGraph(n)}</div>`).join("") || '<div class="meta">нет данных</div>';
 
       // свои ноды
-      el("nodes").innerHTML = (s.nodes || []).map(n => {
+      // флот целиком: отвалившиеся — не исчезают, а стоят красным с причиной
+      const fl = s.nodes || [], upN = fl.filter(n => n.connected).length;
+      el("fleet").textContent = fl.length ? `· на связи ${upN} из ${fl.length}` : "";
+      const nowS = Date.now() / 1e3;
+      el("nodes").innerHTML = fl.sort((a, b) => (b.connected - a.connected) || String(a.name).localeCompare(b.name)).map(n => {
         const parts = [];
+        if (!n.connected) {
+          parts.push(n.mobile ? "кочует, сейчас не на связи"
+            : `нет связи с хабом${n.lostSince ? " " + age(nowS - n.lostSince) : ""}`);
+          parts.push(n.heard ? `в эфире ${age(nowS - n.heard)} назад` : "в эфире не слышна");
+        }
         if (n.chUtil != null) parts.push(`канал <b>${n.chUtil.toFixed(0)}%</b>`);
         if (n.dbSize != null) parts.push(`база <b>${n.dbSize}</b>`);
-        if (n.batt != null) parts.push(`🔋 <b>${n.batt}%</b>`);
+        if (n.batt != null) parts.push(n.batt > 100 ? "⚡ сеть" : `🔋 <b>${n.batt}%</b>`);
         if (n.uptime != null) parts.push(`up <b>${up(n.uptime)}</b>`);
         if (n.silent != null) parts.push(`тишина ${age(n.silent)}`);
-        return `<div class="card nrow"><span class="dot ${n.connected ? "g" : "r"}"></span>
-          <span><span class="nm">${esc(n.name)}</span> <span class="meta">${esc(n.ip)}</span><br>
-          <span class="meta">${parts.join(" · ") || (n.connected ? "на связи" : "нет связи")}</span></span>
-          <span class="age">${n.connected ? "" : "off"}</span></div>`;
-      }).join("") || '<div class="meta">нет подключений</div>';
+        const dot = n.connected ? "g" : n.mobile ? "o" : "r";
+        return `<div class="card nrow"><span class="dot ${dot}"></span>
+          <span><span class="nm">${esc(n.name)}</span> <span class="meta">${esc(n.ip || "")}</span><br>
+          <span class="meta">${parts.join(" · ") || "на связи"}</span></span>
+          <span class="age">${n.connected ? "" : n.mobile ? "кочует" : "off"}</span></div>`;
+      }).join("") || '<div class="meta">флот не описан: добавь свои ноды в known/names конфига</div>';
 
       // данные
       const d = s.data, liveCls = d.liveAge == null ? "" : d.liveAge > 180 ? ' class="err"' : '';

@@ -33,6 +33,7 @@
   // в готовом SVG классами (у карточек class="node n-<id>", у рёбер "edge
   // e-<from> e-<to>"), поэтому набор текста не вызывает перерисовку карты.
   let searchQ = "";
+  let cfgCache = null;   // /api/config: что из настроек нужно панели (заглушённые)
   // АНОН-РЕЖИМ для публичных скриншотов (скрытый флаг, без UI): имена соседей
   // заменяются хвостом id, IP своих нод прячется. Включение — в консоли:
   //   localStorage.mzAnon = "1"  (выключить: удалить ключ и перезагрузить)
@@ -283,6 +284,13 @@
       relayProof: "it relayed our packet — hears us directly",
       viaLeg: "link between other nodes", viaTr: "seen in a traceroute", viaNi: "from NeighborInfo",
       uMin: "m", uH: "h", uD: "d",
+      ownRoaming: "roaming", ownLost: "offline {0}", ownLinkLbl: "Hub link",
+      ownLinkLost: "lost {0}", ownLinkRoam: "roaming, not connected now",
+      readAll: "read all", readAllTip: "mark every message in this conversation as read",
+      mute: "mute", unmute: "unmute",
+      muteTip: "Stop counting this sender as unread mail and stop forwarding it to Telegram. History is kept.",
+      unmuteTip: "Count and forward this sender's messages again",
+      chanRepliesTip: "replies and reactions to your messages since you last opened the channel",
       srchPh: "node by name…", srchNone: "nothing",
       srchSome: "{0} · {1} filtered out by level",
       srchTip: "Search by name, callsign or id. Matches stay lit, everything else dims. Enter — open the first match, Esc — clear. Press / to focus.",
@@ -409,6 +417,13 @@
       relayProof: "переизлучил наш пакет — слышит нас напрямую",
       viaLeg: "канал между чужими узлами", viaTr: "видно в трассировке", viaNi: "из NeighborInfo",
       uMin: "м", uH: "ч", uD: "д",
+      ownRoaming: "кочует", ownLost: "нет связи {0}", ownLinkLbl: "Связь с хабом",
+      ownLinkLost: "потеряна {0}", ownLinkRoam: "кочует, сейчас не на связи",
+      readAll: "прочитать всё", readAllTip: "отметить прочитанным всё в этой переписке",
+      mute: "заглушить", unmute: "вернуть",
+      muteTip: "Не считать сообщения этого отправителя непрочитанными и не пересылать их в Telegram. История сохраняется.",
+      unmuteTip: "Снова считать и пересылать сообщения этого отправителя",
+      chanRepliesTip: "ответы и реакции на твои сообщения с прошлого открытия канала",
       srchPh: "узел по имени…", srchNone: "ничего",
       srchSome: "{0} · {1} скрыто уровнем",
       srchTip: "Поиск по имени, позывному или id. Найденное остаётся ярким, остальное гаснет. Enter — открыть первое, Esc — сбросить. Фокус по клавише /.",
@@ -1180,8 +1195,19 @@
         <rect width="36" height="36" rx="6" fill="rgba(255,255,255,.06)"/>
         <image href="${hwImg(n.hw)}" width="36" height="36" preserveAspectRatio="xMidYMid meet"/></g>`;
       const stale = n.heard && !n.online && Date.now() / 1e3 - n.heard > 3 * 3600;
+      // Своя нода без связи с хабом. Раньше она выглядела здоровой — заливка
+      // площадки и «только что» (её слышат в эфире), и отличить её от живой можно
+      // было только по крошечной зелёной точке. Теперь: приглушена и с плашкой.
+      const ownDown = n.own && !n.online;
+      const downTxt = ownDown ? (n.mobile ? t("ownRoaming")
+        : t("ownLost", n.tcpSince ? fmtAgeS(n.tcpSince) : "?")) : "";
+      const downW = downTxt.length * 5.4 + 10;
       const badge = n.online
         ? `<circle cx="${x + n.w - 9}" cy="${y + 9}" r="3.5" fill="#35c98e"/>`
+        : ownDown ? `<g transform="translate(${x + n.w - 4 - downW}, ${y + 4})">
+            <rect width="${downW}" height="14" rx="7" fill="${n.mobile ? "#55555c" : "#e0533c"}"/>
+            <text x="${downW / 2}" y="10.5" text-anchor="middle" font-size="9" font-weight="700"
+              fill="#fff">${esc(downTxt)}</text></g>`
         : n.heard ? `<text x="${x + n.w - 5}" y="${y + 12}" text-anchor="end" font-size="9"
             fill="${stale ? "#e0a03c" : "var(--muted)"}">${fmtAge(n.heard)}</text>` : "";
       const mailBadge = unread[n.id] ? `<g transform="translate(${x + 4}, ${y + 4})">
@@ -1202,7 +1228,8 @@
       out.push(`<g class="node n-${n.id}" data-id="${n.id}">
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
         <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
-          fill="${fill}" stroke="${stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
+          fill="${fill}"${ownDown ? ' fill-opacity="0.32"' : ""}
+          stroke="${ownDown && !n.mobile ? "#e0533c" : stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
         ${critBadge}${photo}${badge}${mailBadge}${keyBadge}${favBadge}
         <text x="${n.cx}" y="${y + 55}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 10 ? 10 : 11.5}" font-weight="700">${esc(nm)}</text>
@@ -1314,6 +1341,9 @@
         ["IP", n.sub !== n.id ? n.sub : null],
         [t("model"), n.hw],
         [t("role"), i.role],
+        n.own && !n.online ? [t("ownLinkLbl"), n.mobile ? t("ownLinkRoam")
+          : t("ownLinkLost", n.tcpSince ? fmtAgo(n.tcpSince) : "?"),
+          n.mobile ? null : "#e0533c"] : [null, null],
         [t("lastSeen"), n.online ? t("online") : n.heard ? fmtAgo(n.heard) : "—",
           n.stale ? "#e0a03c" : null],
         // молчит дольше окна присутствия: подтверждения сняты, плечи — пунктиром.
@@ -1554,8 +1584,16 @@
             <button class="mok" title="${t("markRead")}">✓</button></div>` : ""}
         </div>`;
       };
+      // «Прочитать всё» и «заглушить»: раньше гасить можно было только по одному
+      // сообщению, а автоответчик-бот держал на карте «✉ 9» сутками.
+      const unreadIds = thread.filter(m => m.kind !== "out" && !m.read).map(m => m.id);
+      const mutedNow = ((cfgCache || {}).muted || []).includes(id);
+      const convTools = (unreadIds.length > 1
+          ? `<button class="mallread" title="${esc(t("readAllTip"))}">✓ ${t("readAll")}</button>` : "")
+        + (!isOwn && thread.some(m => m.kind !== "out")
+          ? `<button class="mmute" title="${esc(t(mutedNow ? "unmuteTip" : "muteTip"))}">${mutedNow ? "🔔" : "🔇"} ${t(mutedNow ? "unmute" : "mute")}</button>` : "");
       const msgHtml = thread.length
-        ? `<div class="pmsgs"><b>${t("conversation")}</b><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
+        ? `<div class="pmsgs"><div class="pmhead"><b>${t("conversation")}</b><span class="pmtools">${convTools}</span></div><div class="thread">${thread.map(rowHtml).join("")}</div></div>`
         : "";
 
       // «Написать»: этой ноде — от лица любой своей онлайн-ноды. По умолчанию
@@ -1779,6 +1817,21 @@
       });
       // после действия — обновить msgs и перерисовать (в т.ч. маркеры почты)
       const afterAction = async () => { await refreshMsgs(); forcePanel = true; render(lastLive); };
+      const allBtn = panel.querySelector(".mallread");
+      if (allBtn) allBtn.onclick = async () => {
+        const ids = msgs.filter(m => m.kind !== "out" && !m.read
+          && (n.own ? m.node === id : m.frm === id)).map(m => m.id);
+        await markRead(ids); await afterAction();
+      };
+      const muteBtn = panel.querySelector(".mmute");
+      if (muteBtn) muteBtn.onclick = async () => {
+        const on = !((cfgCache || {}).muted || []).includes(id);
+        try {
+          const r = await (await fetch("/api/mute", { method: "POST", body: JSON.stringify({ id, on }) })).json();
+          if (r.ok) cfgCache = { ...(cfgCache || {}), muted: r.muted };
+        } catch { }
+        await afterAction();
+      };
       panel.querySelectorAll(".msg .mact").forEach(row => {
         const inp = row.querySelector(".reply");
         const mid = row.dataset.mid, from = row.dataset.from, to = row.dataset.to;
@@ -1918,6 +1971,12 @@
           ? ` <b style="color:#e0a03c" title="${esc(t("capTip"))}">· ${t("capOf", D.meta.neighTotal)}</b>` : ""}</span>
       <span class="item">${t("scan")} · ${esc(scanLocal)}
         ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
+
+    // Заголовок вкладки: непрочитанное и отвалившиеся свои видны, даже когда
+    // вкладка в фоне — раньше там всегда было просто «meshtastic-zoo».
+    const downN = D.nodes.filter(x => x.own && !x.online && !x.mobile).length;
+    const tags = [unreadTotal ? `✉${unreadTotal}` : "", downN ? `⚠${downN}` : ""].filter(Boolean);
+    document.title = (tags.length ? `(${tags.join(" ")}) ` : "") + "meshtastic-zoo";
 
     // Общий маркер непрочитанной почты
     const mailEl = document.getElementById("mail");
@@ -2087,6 +2146,16 @@
       const q = findMsgByPid(m.replyTo);
       return !!(q && ownIds.has(q.frm));
     };
+    if (document.body.classList.contains("chan-collapsed")) {
+      let seen = 0, seenReact = 0;
+      try {
+        seen = +localStorage.getItem("mzChanSeen") || 0;
+        seenReact = +localStorage.getItem("mzChanSeenReact") || 0;
+      } catch { }
+      const nRep = chan.filter(m => (m.ts || 0) > seen && isReplyToMe(m)).length
+        + Math.max(0, myReactTotal() - seenReact);
+      chanBadge(seen ? nRep : 0);   // ни разу не открывал — считать не от чего
+    }
     const S = (lastLive && lastLive.meta && lastLive.meta.snrScale) || { floor: -20, ideal: 10 };
     const col = (snr) => snr == null ? "#8a8a90"
       : `hsl(${Math.round(Math.min(1, Math.max(0, (snr - S.floor) / (S.ideal - S.floor))) * 100) * 1.4}, 62%, 55%)`;
@@ -2173,6 +2242,32 @@
   function setChan(open) {
     document.body.classList.toggle("chan-collapsed", !open);
     localStorage.setItem("mzChanOpen", open ? "1" : "0");
+    if (open) {
+      try {
+        localStorage.setItem("mzChanSeen", String(Math.floor(Date.now() / 1e3)));
+        localStorage.setItem("mzChanSeenReact", String(myReactTotal()));
+      } catch { }
+      chanBadge(0);
+    }
+  }
+  // Сколько всего чужих реакций на мои сообщения в канале. Своей даты у реакции
+  // нет, поэтому «новые» считаем разницей с числом на момент прошлого открытия.
+  function myReactTotal() {
+    const own = new Set(((lastLive && lastLive.nodes) || []).filter(n => n.own).map(n => n.id));
+    let k = 0;
+    for (const m of chan) {
+      if (!m.reactions || !(own.has(m.frm) || m.kind === "out")) continue;
+      for (const who of Object.values(m.reactions)) k += who.filter(w => !own.has(w)).length;
+    }
+    return k;
+  }
+  // Ответы и реакции на мои сообщения в канале видны только внутри открытой
+  // ленты, а она по умолчанию свёрнута. Бейдж на 💬 говорит «тебе ответили».
+  function chanBadge(n) {
+    const tab = document.getElementById("chtab");
+    if (!tab) return;
+    tab.dataset.badge = n ? `↩${n}` : "";
+    tab.title = n ? t("chanRepliesTip") : "";
   }
   async function refreshChan() {
     try {
@@ -2507,6 +2602,11 @@
   // работает с сырым geoCfg, чтобы не записать выведенное в конфиг.
   const geoEff = () => ({ ...geoCfg, ...(((lastLive || {}).meta || {}).geoAuto || {}) });
   const GEO_R = 2500;  // радиус визуализации покрытия антенны, м
+  // Конфиг для панели (сейчас — список заглушённых). Тянем раз на старте и после
+  // своих правок; ⚙ продолжает читать /api/config сама.
+  async function loadCfgCache() {
+    try { cfgCache = await (await fetch("/api/config", { cache: "no-store" })).json(); } catch { }
+  }
   async function loadGeoCfg() {
     try { geoCfg = (await (await fetch("/api/geo", { cache: "no-store" })).json()).geo || {}; } catch { }
   }
@@ -2858,6 +2958,7 @@
     if (searchIn) searchIn.focus();
   });
 
+  loadCfgCache();
   paintCachedMap();   // карта с прошлого раза — ДО сети, чтобы экран не был пустым
   tick();
   refreshChan();

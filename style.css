@@ -210,6 +210,19 @@ body.chan-collapsed #channel { transform: translateX(-100%); }
 /* Переписка в панели */
 #panel .pmsgs { margin-top: 12px; }
 #panel .pmsgs > b { display: block; margin-bottom: 6px; }
+#panel .pmhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+#panel .pmtools { display: flex; gap: 6px; }
+#panel .pmtools button {
+  background: rgba(255, 255, 255, .07); border: 1px solid var(--zone-stroke); color: var(--muted);
+  border-radius: 7px; padding: 3px 8px; font-size: 11.5px; cursor: pointer;
+}
+#panel .pmtools button:hover { color: var(--text); }
+/* бейдж «тебе ответили» на свёрнутой кнопке канала */
+#chtab[data-badge]:not([data-badge=""])::after {
+  content: attr(data-badge); position: absolute; top: -8px; right: -10px;
+  background: #e0a03c; color: #141416; font-size: 10.5px; font-weight: 700;
+  border-radius: 9px; padding: 1px 6px;
+}
 #panel .thread {
   max-height: 240px;
   overflow-y: auto;

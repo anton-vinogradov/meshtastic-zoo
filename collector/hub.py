@@ -56,7 +56,7 @@ PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
             "topoEveryS", "renderEveryS", "rescanS", "mobile", "fragile",
-            "pingReply", "pingWords", "pingPrefix"]
+            "pingReply", "pingWords", "pingPrefix", "muted"]
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
@@ -695,9 +695,13 @@ def on_receive(packet=None, interface=None):
 
         if to != ent.get("num"):
             return  # чужой DM — не наш
+        # Заглушённый отправитель (автоответчики вроде «Принято: …SNR»): в историю
+        # пишем, но без «непрочитано» и без пересылки в Telegram — иначе один бот
+        # держал на карте «✉ 9» и сыпал уведомлениями.
+        muted = frm in set(CFG.get("muted") or [])
         msg = dict(id=f'{ent["id"]}·{packet.get("id")}', pid=packet.get("id"),
                    node=ent["id"], frm=frm, frmName=frm_name, text=text,
-                   ts=int(time.time()), snr=packet.get("rxSnr"), read=False)
+                   ts=int(time.time()), snr=packet.get("rxSnr"), read=muted)
         if reply_id:
             msg["replyTo"] = reply_id
         with lock:
@@ -705,8 +709,8 @@ def on_receive(packet=None, interface=None):
                 return
             messages.append(msg)
         save_messages()
-        log(f"✉ {msg['frmName']} → {ent['id']}: {msg['text'][:60]!r}")
-        if (CFG.get("alerts") or {}).get("dm", True):
+        log(f"✉ {msg['frmName']} → {ent['id']}: {msg['text'][:60]!r}" + (" [заглушён]" if muted else ""))
+        if not muted and (CFG.get("alerts") or {}).get("dm", True):
             threading.Thread(target=mirror_dm, daemon=True,
                              args=(ent["id"], frm, msg["frmName"], msg.get("pid"), text)).start()
     except Exception as e:
@@ -1230,8 +1234,10 @@ def keeper():
                 if c.get("iface") and now - c.get("last", 0) > 900:
                     log(f"⛓? {ip}: тишина >15 мин, переподключаю")
                     drop_node(ip)
+            check_own_links()
             with lock:
-                beat("keeper", f"{sum(1 for c in conns.values() if c.get('iface'))} нод на связи")
+                n_up = sum(1 for c in conns.values() if c.get("iface"))
+            beat("keeper", f"{n_up} из {len(fleet())} своих на связи")
         except Exception as e:
             log(f"keeper: {e!r}")
         time.sleep(CFG.get("rescanS", 300))
@@ -1317,6 +1323,124 @@ def alert(text):
         except Exception as e:
             log(f"alert: {e!r}")
     threading.Thread(target=_send, daemon=True).start()
+
+
+OUT_OWNDOWN = ROOT.parent / "data" / "owndown.json"
+_own_conn_ts = {}   # id → когда своя нода последний раз была на TCP
+_own_alerted = {}   # id → начало простоя, о котором уже сообщили в Telegram
+_started = time.time()
+
+
+def fmt_dur(sec):
+    sec = max(0, int(sec))
+    if sec < 3600:
+        return f"{max(1, sec // 60)} мин"
+    if sec < 86400:
+        h, m = divmod(sec // 60, 60)
+        return f"{h} ч {m} мин" if m else f"{h} ч"
+    return f"{sec // 86400} сут"
+
+
+def fleet():
+    """Свой флот по конфигу: {id: (ярлык, ip или None, кочующая?)}. Источник —
+    known/names/mobile, а не текущие соединения: иначе отвалившаяся нода просто
+    исчезала из всех списков, и узнать о потере было неоткуда."""
+    known = CFG.get("known") or {}
+    names = CFG.get("names") or {}
+    mob = set(CFG.get("mobile") or [])
+    ip_of = {}
+    for ip, i in known.items():
+        ip_of.setdefault(i, ip)
+    return {i: (names.get(i, i[-4:]), ip_of.get(i), i in mob)
+            for i in set(names) | set(known.values()) | mob}
+
+
+def load_own_down():
+    try:
+        d = json.loads(OUT_OWNDOWN.read_text())
+        _own_conn_ts.update({k: float(v) for k, v in (d.get("conn") or {}).items()})
+        _own_alerted.update({k: float(v) for k, v in (d.get("alerted") or {}).items()})
+    except Exception:
+        pass
+    # чего нет в своём файле — берём из истории срезов (первый запуск сторожа)
+    try:
+        missing = [i for i in fleet() if i not in _own_conn_ts]
+        if missing:
+            _own_conn_ts.update(history.last_online(missing))
+    except Exception as e:
+        log(f"owndown/history: {e!r}")
+
+
+def save_own_down():
+    try:
+        atomic_write(OUT_OWNDOWN, json.dumps({"conn": _own_conn_ts, "alerted": _own_alerted}))
+    except Exception as e:
+        log(f"owndown: {e!r}")
+
+
+def live_heard():
+    try:
+        return {n["id"]: n.get("heard") for n in json.loads(OUT_LIVE.read_text()).get("nodes", [])}
+    except Exception:
+        return {}
+
+
+def check_own_links():
+    """Своя нода потеряла связь с хабом дольше ownDownMin → Telegram; вернулась →
+    тоже. Раньше алерт был только на батарею, а потеря ноды оседала в логе:
+    FCA провисела без связи 7.5 ч, и узнать об этом было неоткуда.
+    Кочующие (mobile) по умолчанию не тревожат: уехать с WiFi — их штатный режим.
+    Состояние на диске, чтобы рестарт хаба не повторял уже отправленный алерт."""
+    now = time.time()
+    with lock:
+        up = {c.get("id") for c in conns.values() if c.get("iface") and c.get("id")}
+    for i in up:
+        _own_conn_ts[i] = now
+    a = CFG.get("alerts") or {}
+    after = float(a.get("ownDownMin", 15)) * 60
+    heard, notes = live_heard(), []
+    for i, (nm, _ip, mob) in fleet().items():
+        if mob and not a.get("ownDownMobile", False):
+            continue
+        if i in up:
+            since = _own_alerted.pop(i, None)
+            if since:
+                notes.append(f"✅ {nm}: снова на связи с хабом (не было {fmt_dur(now - since)})")
+            continue
+        since = _own_conn_ts.get(i, _started)
+        if now - since < after or i in _own_alerted:
+            continue
+        _own_alerted[i] = since
+        h = heard.get(i)
+        air = (f"в эфире слышна {fmt_dur(now - h)} назад" if h and now - h < 6 * 3600
+               else "в эфире тоже молчит")
+        notes.append(f"🔌 {nm}: нет связи с хабом {fmt_dur(now - since)} ({air})")
+    save_own_down()
+    for n in notes:
+        log(n)
+        if a.get("ownDown", True):
+            alert(n)
+
+
+def status_text():
+    """Ответ на /status в Telegram: строка на каждую свою ноду + почта."""
+    now = time.time()
+    with lock:
+        up = {c.get("id") for c in conns.values() if c.get("iface") and c.get("id")}
+        unread = [m for m in messages if m.get("kind") != "out" and not m.get("read")]
+    heard, lines = live_heard(), []
+    for i, (nm, _ip, mob) in sorted(fleet().items(), key=lambda kv: kv[1][0]):
+        if i in up:
+            lines.append(f"🟢 {nm} — на связи")
+            continue
+        h = heard.get(i)
+        air = f"в эфире {fmt_dur(now - h)} назад" if h else "в эфире не слышна"
+        since = _own_conn_ts.get(i)
+        lost = f"нет связи {fmt_dur(now - since)}" if since else "не подключалась"
+        lines.append(f"{'🚶' if mob else '🔌'} {nm} — {'кочует, ' if mob else ''}{lost}, {air}")
+    who = {m.get("frmName") or m.get("frm") for m in unread}
+    lines.append(f"✉ непрочитанных: {len(unread)}" + (f" (от: {', '.join(sorted(who))})" if who else ""))
+    return "📟 Свой флот\n" + "\n".join(lines)
 
 
 def check_batt(data):
@@ -1675,6 +1799,12 @@ def tg_to_mesh(m, text):
     if ok:
         global _tg_relayed
         _tg_relayed += 1
+        # ответил из Telegram — значит прочитал: иначе «✉» на карте висел вечно
+        with lock:
+            for x in messages:
+                if x.get("pid") == m.get("pid") and x.get("kind") != "out":
+                    x["read"] = True
+        save_messages()
         log(f"📩→📡 Telegram-ответ ушёл: {node} → {peer}: {text[:40]!r}")
     else:
         log(f"📩→📡 не отправлено ({err})")
@@ -1726,6 +1856,9 @@ def tg_poll_loop():
                     continue
                 # /chan <текст> — написать в ОБЩИЙ КАНАЛ, не дожидаясь чужого ответа
                 # (реплай-путь работает лишь когда нам ответили; этот — всегда)
+                if re.match(r"^/status(?:@\S+)?\s*$", text, re.I):
+                    threading.Thread(target=lambda: tg_send(status_text()), daemon=True).start()
+                    continue
                 cm = re.match(r"^/(?:chan|c)(?:@\S+)?(?:\s+(.*))?$", text, re.S | re.I)
                 if cm:
                     body_txt = (cm.group(1) or "").strip()
@@ -1761,6 +1894,7 @@ def tg_poll_loop():
                         log(f"tg_poll: не распознано {text[:40]!r} (это ответ: {bool(rt)})")
                         old = " (это уведомление старше моста — связки нет)" if from_bot else ""
                         tg_send(f"не понял 🤔{old}\n"
+                                "• как там флот: /status\n"
                                 "• в общий канал: /chan текст сообщения\n"
                                 "• в личку: ответь (reply) на «📡 Meshtastic DM»\n"
                                 "• ответ в канал: ответь (reply) на «💬 …в общем канале»")
@@ -2343,7 +2477,7 @@ def _do_geocode():
         log(f"🏠 геокодинг: +{new} имён, всего с координатами {_geocoded_count}")
 
 
-last_found = {}    # последний снимок своих нод (писатель → читатель)
+last_found = None  # последний снимок своих нод (писатель → читатель); None = ещё не было
 last_xlinks = []
 render_now = threading.Event()   # «пересобери карту сейчас» (например, пришла трассировка)
 
@@ -2363,6 +2497,12 @@ def writer_loop():
         try:
             with lock:
                 live = {ip: c for ip, c in conns.items() if c.get("iface")}
+            if not live and time.time() - _started > 120:
+                # Все свои отвалились. Раньше снимок застывал, и карта бесконечно
+                # рисовала их «на связи, только что». Пустой снимок → scan покажет
+                # свой флот из конфига офлайн-карточками. Пауза после старта —
+                # чтобы рестарт не мигал пустой картой, пока ноды подключаются.
+                last_found = {}
             if live:
                 found = {ip: snapshot(c) for ip, c in live.items()}
                 last_found = found
@@ -2411,7 +2551,7 @@ def reader_loop():
     time.sleep(4)
     while True:
         try:
-            if last_found:
+            if last_found is not None:
                 store = nodestore.load(_store_keep_s())
                 with lock:
                     asks_snap = {k: dict(v) for k, v in _key_asks.items()}
@@ -2423,7 +2563,8 @@ def reader_loop():
                 data = scan.build_from_store(store, found=last_found, xlinks=last_xlinks,
                                              asks=asks_snap, hears_us=hears_snap,
                                              traces=dict(traces), favorites=set(favorites),
-                                             cache_wide=cache_wide)
+                                             cache_wide=cache_wide,
+                                             own_links=dict(_own_conn_ts))
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
@@ -2803,6 +2944,16 @@ class Handler(SimpleHTTPRequestHandler):
                           "silent": round(now - c.get("last", 0), 0) if c.get("last") else None,
                           "dbSize": db, "chUtil": info.get("chUtil"),
                           "batt": info.get("battery"), "uptime": info.get("uptime")})
+        # Отвалившиеся ноды флота тоже в списке: раньше он строился только из
+        # соединений, и пропавшая нода просто исчезала — красная ветка «off» на
+        # странице не срабатывала никогда, а шапка честно писала «3 из 3».
+        seen = {n["id"] for n in nodes}
+        for fid, (nm, fip, mob) in fleet().items():
+            if fid in seen:
+                continue
+            ln = own_live.get(fid) or {}
+            nodes.append({"id": fid, "ip": fip, "connected": False, "name": nm, "mobile": mob,
+                          "lostSince": _own_conn_ts.get(fid), "heard": ln.get("heard")})
         ns = nodestore.stats()
         meta = live.get("meta", {})
         liveAge = round(now - int((meta.get("updatedTs") or 0) / 1000), 0) if meta.get("updatedTs") else None
@@ -2861,12 +3012,38 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/read":
             ids = set(body.get("ids") or [])
+            every = body.get("all") is True       # «прочитать всё»
+            node = body.get("node")               # …или всё на одной ноде
             with lock:
                 for m in messages:
-                    if m["id"] in ids:
+                    if m.get("kind") == "out":
+                        continue
+                    if every or m["id"] in ids or (node and m.get("node") == node):
                         m["read"] = True
             save_messages()
             self._json({"ok": True})
+        elif self.path == "/api/mute":
+            nid, on = str(body.get("id") or ""), body.get("on") is True
+            if not nid.startswith("!"):
+                self._json({"ok": False, "error": "нужен id узла"}, 400)
+                return
+            with lock:
+                cur = [x for x in (CFG.get("muted") or []) if x != nid] + ([nid] if on else [])
+                CFG["muted"] = cur
+                if on:                            # заглушил — и старое больше не висит
+                    for m in messages:
+                        if m.get("frm") == nid and m.get("kind") != "out":
+                            m["read"] = True
+                try:
+                    disk = json.loads((ROOT / "config.json").read_text())
+                except Exception:
+                    disk = {}
+                disk["muted"] = cur
+                atomic_write(ROOT / "config.json",
+                             json.dumps(disk, ensure_ascii=False, indent=2) + "\n")
+            save_messages()
+            log(f"🔇 {'заглушён' if on else 'снова слышен'}: {nid}")
+            self._json({"ok": True, "muted": cur})
         elif self.path == "/api/resend":
             with lock:
                 m = next((x for x in messages if x.get("id") == body.get("id")
@@ -3170,6 +3347,7 @@ def main():
     load_key_asks()
     load_trace_fails()
     load_hears_us()
+    load_own_down()
     try:
         n = migrate_secrets()
         if n:

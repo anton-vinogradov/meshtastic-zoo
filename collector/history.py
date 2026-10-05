@@ -162,6 +162,20 @@ def record_metrics(m, ts=None):
 _CUM_METRICS = ("traces_done", "msgs", "pruned", "tg_relayed", "own_traces")  # накопительные — не усредняем
 
 
+def last_online(ids):
+    """{id: ts} — когда узел последний раз был на связи с хабом (online=1 в срезах).
+    Нужен сторожу своих нод при старте: иначе про ноду, отвалившуюся до рестарта,
+    он считал бы простой от момента запуска и писал «15 мин» вместо «8 ч»."""
+    out = {}
+    with _lock:
+        c = _db()
+        for i in ids:
+            r = c.execute("SELECT max(ts) FROM node_hist WHERE id=? AND online=1", (i,)).fetchone()
+            if r and r[0]:
+                out[i] = float(r[0])
+    return out
+
+
 def metrics_series(hours=24, bins=24):
     """Ряд метрик за окно, агрегированный по bins корзинам (по умолчанию 24ч / 1ч).
     Уровневые метрики усредняются внутри корзины, накопительные (traces_done, msgs)
