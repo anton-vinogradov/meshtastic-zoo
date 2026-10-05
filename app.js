@@ -13,10 +13,13 @@
   const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
-  // Язык интерфейса выбирается в настройках, хранится локально
-  let lang = localStorage.getItem("mzLang") || "en";
-  const _lvl0 = localStorage.getItem("mzMapLevel");           // уровень карты (ползунок)
-  let mapLevel = _lvl0 == null ? 3 : Math.max(0, Math.min(4, +_lvl0));
+  // Язык: выбор пользователя, иначе язык браузера (аудитория в основном русская,
+  // а раньше всем по умолчанию доставался английский)
+  let lang = localStorage.getItem("mzLang")
+    || (String(navigator.language || "").toLowerCase().startsWith("ru") ? "ru" : "en");
+  const _lvl0 = localStorage.getItem("mzMapLevel");           // уровень карты
+  // первый заход — «+трасса ✓»: на «+бывших» новичок видел клубок из сотни стрелок
+  let mapLevel = _lvl0 == null ? 1 : Math.max(0, Math.min(4, +_lvl0));
   // показывать узел на текущем уровне: 0 свои · 1 +подтв.трассировкой · 2 +слышим
   // напрямую (чёрные) · 3 +слышали напрямую (серые = всё). Каждый включает предыдущий.
   // «соседом» считаем только узел, до которого ДОШЛА трассировка (traceNbr) —
@@ -336,11 +339,34 @@
       traceFail: "no response (node silent or too far)", traceNoNode: "no online node to trace from",
       unitMin: "min", unitH: "h", unitD: "d", ago: "{0} ago", upD: "d", upH: "h", upM: "m",
       mailTip: "unread direct messages — click to open the node",
-      noDataYet: "No data yet — run", heard: "heard {0}", ofIdeal: "of ideal",
+      heard: "heard {0}", ofIdeal: "of ideal",
       noDataTip: "{0} → {1}: no data — {2} has not heard {3} directly (neither in a scan nor in cache)",
       settings: "Settings", save: "Save", saved: "✓ saved", hubUnavail: "hub unavailable",
       storedHint: "stored in collector/config.json; the map picks it up on the next refresh (within a minute)",
       statusPage: "service status",
+      zoomIn: "zoom in", zoomOut: "zoom out", zoomReset: "reset zoom",
+      geoViewTip: "geographic view", connViewTip: "connectivity view",
+      loading: "Loading the map…",
+      hubDown: "The map server is not responding — retrying every {0} s",
+      hubDownShort: "server not responding, retrying",
+      noNodesYet: "The hub is running but has not found any of your nodes yet. It needs a Meshtastic node on the network (Wi‑Fi or Ethernet) with TCP port 4403 open and no other app connected to it. Subnets to scan are in ⚙.",
+      lgNodes: "Nodes", lgOwn: "own (colour = site)", lgNbr: "neighbour", lgFormer: "former",
+      lgGhost: "ghost", lgOnline: "connected", lgMail: "unread", lgLock: "no key — can't DM",
+      lgArrows: "Arrows", lgHead: "the head points at the one who hears",
+      lgSnr: "number = SNR, dB", lgHop: "«N hop» — former neighbour, now via relays",
+      lgSrcLbl: "after the number — age and source:",
+      lgSrc: "📡 we heard it · ♻ relay byte · 🗒 node's database · 🧭 traceroute · 👥 NeighborInfo",
+      onMap: "{0} on the map", cntOwn: "own {0} ({1} connected)", cntNbr: "neighbours {0}",
+      cntHeard: "heard {0}", cntFormer: "former {0}", cntHidden: "{0} more at higher «Show» levels",
+      ghostsMore: "+{0} ghosts — show", legendMore: "legend", legendMoreTip: "show or hide the legend",
+      helpTip: "what is this map", helpTitle: "What am I looking at",
+      help1: "<b>What it is.</b> A connectivity map of the mesh around your own nodes: the closer two cards are, the better they hear each other. It is not geography — that is the 🗺 button.",
+      help2: "<b>Cards.</b> Coloured — your own nodes (colour = site), dark — neighbours, grey — former neighbours. ● connected, ✉ unread messages, 🔒 no key yet, so a direct message can't be sent.",
+      help3: "<b>Arrows.</b> The head points at the node that hears; the number is SNR in dB, the colour is the share of an ideal link. The icon and age after the number say where the measurement came from and when.",
+      help4: "<b>How to look.</b> Hover or tap a node to light up its links; click it for details. «Show» at the bottom adds farther layers. 💬 — the public channel, 📟 — service status, ⚙ — settings.",
+      helpMore: "More in the README", helpLang: "Language",
+      hintText: "This is a connectivity map: closer means a better link. Hover or tap a node to see its links. Help — the «?» at the bottom.",
+      hintOk: "Got it",
       failedSend: "Failed to send:", failedSave: "Failed to save:",
       mapAria: "Mesh network map", language: "Language",
       fSubnets: "Site subnets & colors", fFloor: "0% quality at SNR, dB",
@@ -471,11 +497,34 @@
       traceFail: "нет ответа (нода молчит или далеко)", traceNoNode: "нет онлайн-ноды для запроса",
       unitMin: "мин", unitH: "ч", unitD: "дн", ago: "{0} назад", upD: "д", upH: "ч", upM: "м",
       mailTip: "непрочитанные личные сообщения — клик откроет ноду",
-      noDataYet: "Данных пока нет — запусти", heard: "слышно {0}", ofIdeal: "от идеала",
+      heard: "слышно {0}", ofIdeal: "от идеала",
       noDataTip: "{0} → {1}: нет данных — {2} не слышала {3} напрямую (ни в скане, ни в кэше)",
       settings: "Настройки", save: "Сохранить", saved: "✓ сохранено", hubUnavail: "hub недоступен",
       storedHint: "хранится в collector/config.json; карта подхватит при следующем обновлении (до минуты)",
       statusPage: "статус сервиса",
+      zoomIn: "крупнее", zoomOut: "мельче", zoomReset: "сбросить масштаб",
+      geoViewTip: "на карте местности", connViewTip: "карта связности",
+      loading: "Загружаю карту…",
+      hubDown: "Сервер карты не отвечает — пробую снова каждые {0} с",
+      hubDownShort: "сервер не отвечает, пробую снова",
+      noNodesYet: "Хаб работает, но своих нод пока не нашёл. Нужна нода Meshtastic в сети (Wi‑Fi или Ethernet) с открытым TCP-портом 4403, и к ней не должно быть подключено другое приложение. Какие подсети сканировать — в ⚙.",
+      lgNodes: "Ноды", lgOwn: "свои (цвет — площадка)", lgNbr: "сосед", lgFormer: "бывший",
+      lgGhost: "призрак", lgOnline: "на связи", lgMail: "непрочитанные", lgLock: "нет ключа — личку не отправить",
+      lgArrows: "Стрелки", lgHead: "остриё — у того, кто слышит",
+      lgSnr: "число — SNR, дБ", lgHop: "«N хоп» — бывший сосед, теперь через ретрансляторы",
+      lgSrcLbl: "после числа — возраст и источник:",
+      lgSrc: "📡 слышали сами · ♻ relay-байт · 🗒 база ноды · 🧭 трассировка · 👥 NeighborInfo",
+      onMap: "на карте {0}", cntOwn: "свои {0} ({1} на связи)", cntNbr: "соседи {0}",
+      cntHeard: "слышим {0}", cntFormer: "бывшие {0}", cntHidden: "ещё {0} на следующих уровнях «Показа»",
+      ghostsMore: "ещё {0} призраков — показать", legendMore: "легенда", legendMoreTip: "показать или скрыть легенду",
+      helpTip: "что это за карта", helpTitle: "Что я вижу",
+      help1: "<b>Что это.</b> Карта связности меша вокруг ваших нод: чем ближе карточки, тем лучше ноды слышат друг друга. Это не география, для неё есть кнопка 🗺.",
+      help2: "<b>Карточки.</b> Цветные — свои ноды (цвет — площадка), тёмные — соседи, серые — бывшие соседи. ● на связи, ✉ непрочитанные, 🔒 ключа ещё нет, личное сообщение не отправить.",
+      help3: "<b>Стрелки.</b> Остриё указывает на ноду, которая слышит; число — SNR в дБ, цвет — доля от идеального канала. Значок и возраст после числа говорят, откуда замер и когда он сделан.",
+      help4: "<b>Как смотреть.</b> Наведите или тапните ноду, чтобы подсветить её связи, по клику откроются подробности. «Показ» внизу добавляет дальние слои. 💬 — общий канал, 📟 — статус сервиса, ⚙ — настройки.",
+      helpMore: "Подробнее в README", helpLang: "Язык",
+      hintText: "Это карта связности: чем ближе, тем лучше связь. Наведите или тапните ноду, чтобы увидеть её связи. Справка — «?» внизу.",
+      hintOk: "Понятно",
       failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
       mapAria: "Карта mesh-сети", language: "Язык",
       fSubnets: "Подсети площадок и цвета", fFloor: "0% качества при SNR, дБ",
@@ -633,8 +682,10 @@
   async function _doRender(D) {
     // Уровень карты (ползунок): оставляем узлы вплоть до выбранного тира (и их
     // плечи), остальное убираем ДО раскладки — карта вписывается по видимым.
+    let hiddenByLevel = 0;   // для легенды: сколько ещё узлов на следующих ступенях
     {
       const keep = new Set(D.nodes.filter(showAt).map(n => n.id));
+      hiddenByLevel = D.nodes.length - keep.size;
       if (keep.size !== D.nodes.length) D = {
         ...D,
         nodes: D.nodes.filter(n => keep.has(n.id)),
@@ -675,6 +726,12 @@
     // CW×CH раз, позиции масштабируются ×mapZoom, размеры карточек — в user-units
     // фиксированы. svg рисуется в box×mapZoom пикселей → user→px постоянно.
     const CW = Math.round(W * mapZoom), CH = Math.round(H * mapZoom);
+    // Нижняя граница размера текста. Холст вписывается в окно, и при зуме px на
+    // единицу не меняется, поэтому имя на ноутбуке выходило 7–8 px, а на телефоне
+    // 5–6 px. Карточки и подписи на стрелках растим так, чтобы имя было не
+    // мельче 10 px; раздвижка и концы стрелок ниже учитывают новый размер.
+    const pxPerU = box.width && box.height ? Math.min(box.width / W, box.height / H) : 1;
+    const cardK = Math.max(1, Math.min(1.6, 10 / (11.5 * pxPerU)));
 
     // Посадка сырого облака позиций сборщика: PCA-поворот главной осью
     // вдоль длинной стороны окна, ОДИН масштаб по обеим осям (пропорции
@@ -749,9 +806,9 @@
       // разворот geoOrient к краю раньше давали слипшийся, местами обрезанный
       // кластер, по которому не попасть кликом. Разносим по более дешёвой оси и
       // мягко держим в границах — кластер у края расползается внутрь карты.
-      const MINX = 114, MINY = 96;
-      const clX = (v) => Math.max(70, Math.min(CW - 70, v));
-      const clY = (v) => Math.max(48, Math.min(CH - 48, v));
+      const MINX = CARD.w * cardK + 12, MINY = CARD.h * cardK + 14;
+      const clX = (v) => Math.max(CARD.w * cardK / 2 + 19, Math.min(CW - CARD.w * cardK / 2 - 19, v));
+      const clY = (v) => Math.max(CARD.h * cardK / 2 + 7, Math.min(CH - CARD.h * cardK / 2 - 7, v));
       // Пары дальше MINX×MINY не пересекаются, поэтому вместо O(n²) на итерацию
       // бакетим позиции по сетке ячейками MINX×MINY: узел сравниваем лишь с его и
       // 8 соседними ячейками (только там возможно перекрытие). При сотнях узлов
@@ -802,7 +859,7 @@
       const world = !n.own;
       const c = world ? WCARD : CARD;
       const [cx, cy] = px[n.id] ?? [CW / 2, CH / 2];
-      nodes[n.id] = { ...n, cx, cy, w: c.w, h: c.h, r: c.r, world };
+      nodes[n.id] = { ...n, cx, cy, w: c.w * cardK, h: c.h * cardK, r: c.r * cardK, world };
     }
     // подсети своих нод и их цвета (переопределение из настроек или палитра)
     const ownSubnets = [...new Set(D.nodes.filter(n => n.own).map(n => subnetOf(n.sub)))].sort();
@@ -1127,7 +1184,7 @@
       const tw = label.length * 7.6 + sfx.length * 6.1 + 16;
       edgeSvg.push(`<g class="${cls}${dim}"><title>${esc(tip)}</title>
         ${geom}
-        <g transform="translate(${lx.toFixed(1)}, ${ly.toFixed(1)}) rotate(${rot.toFixed(1)})">
+        <g transform="translate(${lx.toFixed(1)}, ${ly.toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${cardK.toFixed(3)})">
           <rect x="${-tw / 2}" y="-10" width="${tw}" height="20" rx="10"
             fill="var(--bg)" fill-opacity="0.92" stroke="${col}" stroke-opacity="0.65"/>
           <text y="4.5" text-anchor="middle" fill="${col}" font-size="13"
@@ -1168,7 +1225,8 @@
               x2="${pn.cx.toFixed(1)}" y2="${pn.cy.toFixed(1)}"
               stroke="#8a8a90" stroke-width="1" stroke-dasharray="2 6" opacity="0.55"/></g>`);
         }
-        ghostCards.push(`<g class="node ghost n-${g.id}" data-id="${g.id}">
+        ghostCards.push(`<g class="node ghost n-${g.id}" data-id="${g.id}"
+          transform="translate(${gx.toFixed(1)} ${gy.toFixed(1)}) scale(${cardK.toFixed(3)}) translate(${(-gx).toFixed(1)} ${(-gy).toFixed(1)})">
           <title>${esc(tip)}</title>
           <rect x="${(gx - 34).toFixed(1)}" y="${(gy - 15).toFixed(1)}" width="68" height="30" rx="8"
             fill="var(--world-card)" stroke="#8a8a90" stroke-width="1.2" stroke-dasharray="4 4"/>
@@ -1184,7 +1242,9 @@
     // Карточки нод (поверх рёбер). Свои — последними, чтобы рисовались ПОВЕРХ
     // соседей и клик по своей ноде не перехватывался наложившимся соседом.
     for (const n of Object.values(nodes).sort((a, b) => (a.world === b.world ? 0 : a.world ? -1 : 1))) {
-      const x = n.cx - n.w / 2, y = n.cy - n.h / 2;
+      // рисуем в базовом размере, а группу масштабируем вокруг центра (cardK)
+      const w = n.w / cardK, h = n.h / cardK, rr = n.r / cardK;
+      const x = n.cx - w / 2, y = n.cy - h / 2;
       const isHop = n.hop != null;
       const scol = scolOf(subnetOf(n.sub));  // цвет своей ноды по её подсети
       const fill = isHop ? "#24242a" : n.world ? "var(--world-card)" : scol;
@@ -1208,12 +1268,12 @@
         : t("ownLost", n.tcpSince ? fmtAgeS(n.tcpSince) : "?")) : "";
       const downW = downTxt.length * 5.4 + 10;
       const badge = n.online
-        ? `<circle cx="${x + n.w - 9}" cy="${y + 9}" r="3.5" fill="#35c98e"/>`
-        : ownDown ? `<g transform="translate(${x + n.w - 4 - downW}, ${y + 4})">
+        ? `<circle cx="${x + w - 9}" cy="${y + 9}" r="3.5" fill="#35c98e"/>`
+        : ownDown ? `<g transform="translate(${x + w - 4 - downW}, ${y + 4})">
             <rect width="${downW}" height="14" rx="7" fill="${n.mobile ? "#55555c" : "#e0533c"}"/>
             <text x="${downW / 2}" y="10.5" text-anchor="middle" font-size="9" font-weight="700"
               fill="#fff">${esc(downTxt)}</text></g>`
-        : n.heard ? `<text x="${x + n.w - 5}" y="${y + 12}" text-anchor="end" font-size="9"
+        : n.heard ? `<text x="${x + w - 5}" y="${y + 12}" text-anchor="end" font-size="9"
             fill="${stale ? "#e0a03c" : "var(--muted)"}">${fmtAge(n.heard)}</text>` : "";
       const mailBadge = unread[n.id] ? `<g transform="translate(${x + 4}, ${y + 4})">
         <rect width="32" height="16" rx="8" fill="#e0a03c"/>
@@ -1221,18 +1281,19 @@
           fill="#141416">✉ ${unread[n.id]}</text></g>` : "";
       // замок в углу, если публичный ключ ноды ещё не получен (нельзя слать DM)
       const keyBadge = n.key === false
-        ? `<text x="${x + 6}" y="${y + n.h - 6}" font-size="11">🔒</text>` : "";
+        ? `<text x="${x + 6}" y="${y + h - 6}" font-size="11">🔒</text>` : "";
       // звезда — избранный узел (не прунится из кеша)
       const favBadge = n.fav
-        ? `<text x="${x + n.w - 6}" y="${y + n.h - 6}" text-anchor="end" font-size="12" fill="#e0c341">★</text>` : "";
+        ? `<text x="${x + w - 6}" y="${y + h - 6}" text-anchor="end" font-size="12" fill="#e0c341">★</text>` : "";
       // единая точка отказа: жёлтая рамка + ⚠N (сколько теряем при отказе)
       const critN = showCrit ? crit[n.id] : 0;
-      const critBadge = critN ? `<rect x="${x - 2}" y="${y - 2}" width="${n.w + 4}" height="${n.h + 4}" rx="${n.r + 2}"
+      const critBadge = critN ? `<rect x="${x - 2}" y="${y - 2}" width="${w + 4}" height="${h + 4}" rx="${rr + 2}"
           fill="none" stroke="#e0a03c" stroke-width="2"/>
-        <text x="${x + n.w - 5}" y="${y + n.h - 5}" text-anchor="end" font-size="11" font-weight="700" fill="#e0a03c">⚠${critN}</text>` : "";
-      out.push(`<g class="node n-${n.id}" data-id="${n.id}">
+        <text x="${x + w - 5}" y="${y + h - 5}" text-anchor="end" font-size="11" font-weight="700" fill="#e0a03c">⚠${critN}</text>` : "";
+      out.push(`<g class="node n-${n.id}" data-id="${n.id}"${cardK > 1.001
+        ? ` transform="translate(${n.cx} ${n.cy}) scale(${cardK.toFixed(3)}) translate(${-n.cx} ${-n.cy})"` : ""}>
         ${tipTxt ? `<title>${esc(tipTxt)}</title>` : ""}
-        <rect x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${n.r}"
+        <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rr}"
           fill="${fill}"${ownDown ? ' fill-opacity="0.32"' : ""}
           stroke="${ownDown && !n.mobile ? "#e0533c" : stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
         ${critBadge}${photo}${badge}${mailBadge}${keyBadge}${favBadge}
@@ -1250,7 +1311,7 @@
     const _now = Date.now() / 1000;
     const ageBk = (h) => !h ? -1 : (_now - h < 3600 ? Math.floor((_now - h) / 300) : Math.floor((_now - h) / 3600));
     await _yield();
-    const mapSig = JSON.stringify([CW, CH, mapLevel, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
+    const mapSig = JSON.stringify([CW, CH, cardK.toFixed(2), mapLevel, geoOrient ? 1 : 0, nodeCap, showCrit ? 1 : 0,
       traceNbrOnly ? 1 : 0,
       Object.keys(nodes).sort().map(id => {
         const nn = nodes[id], p = px[id] || [0, 0];
@@ -1346,7 +1407,7 @@
           + (g.posTs ? ` (${fmtAgo(g.posTs)})` : "");
         const parts = (g.parts || []).map(p => esc(((nodes[p] || {}).label) || p)).join(", ");
         panel.innerHTML = `<button id="pclose" aria-label="${t("close")}">×</button>
-          <div class="phead"><div><b>👻 ${esc(g.name || g.id)}</b><div class="psub">${esc(g.id)}</div></div></div>
+          <div class="phead"><div><b>👻 ${esc(g.name || g.id)}</b><div class="pgid">${esc(g.id)}</div></div></div>
           <div class="prow"><span>${esc(t("ghostCard"))}</span></div>
           <div class="prow"><span>${t("lastSeen")}</span><span>${g.seen ? fmtAgo(g.seen) : "—"}</span></div>
           <div class="prow"><span>${t("ghostPosLbl")}</span><span>${esc(posTxt)}</span></div>
@@ -1974,26 +2035,62 @@
     const chLoads = D.nodes.filter(n => n.own && n.info && n.info.chUtil != null).map(n => n.info.chUtil);
     const maxCh = chLoads.length ? Math.max(...chLoads) : null;
     const chItem = maxCh == null ? "" :
-      `<span class="item" title="${esc(t("chanLoadTip"))}"><span class="cdot" style="background:${chanColor(maxCh)}"></span>`
+      `<span class="item lg-opt" title="${esc(t("chanLoadTip"))}"><span class="cdot" style="background:${chanColor(maxCh)}"></span>`
       + `${maxCh >= 40 ? "⚠ " : ""}${t("chanLoad", maxCh.toFixed(0))}</span>`;
+    // Легенда: строка управления и счётчиков, под ней ключ к нодам и стрелкам.
+    // Раньше она не объясняла ни карточки, ни значки, ни что число на стрелке — SNR,
+    // счётчики не складывались в число узлов, а уровень показа жил только в ⚙.
+    // Ключ сворачивается кнопкой; на телефоне он свёрнут по умолчанию — там
+    // легенда съедала до трети высоты.
+    const ownN = D.nodes.filter(n => n.own);
+    const nNbr = D.nodes.filter(isNbr).length, nHeard = D.nodes.filter(heardOnly).length;
+    const nFormer = D.nodes.filter(n => !n.own && n.hop != null).length;
+    const nGhosts = mapLevel < 4 ? (D.ghosts || []).length : 0;
+    const cnt = [t("cntOwn", ownN.length, ownN.filter(n => n.online).length),
+      nNbr ? t("cntNbr", nNbr) : "",
+      nHeard ? `<span title="${esc(t("heardOnlyTip"))}">${t("cntHeard", nHeard)}</span>` : "",
+      nFormer ? t("cntFormer", nFormer) : ""].filter(Boolean).join(" · ");
+    const more = nGhosts ? ` · <a href="#" class="lg-ghosts">${t("ghostsMore", nGhosts)}</a>`
+      : hiddenByLevel ? ` · <span class="lg-dim">${t("cntHidden", hiddenByLevel)}</span>` : "";
+    const capped = nodeCap > 0 && D.meta.neighTotal > D.nodes.filter(n => !n.own).length
+      ? ` <b style="color:#e0a03c" title="${esc(t("capTip"))}">· ${t("capOf", D.meta.neighTotal)}</b>` : "";
+    const ownCol = ownN.length ? scolOf(subnetOf(ownN[0].sub)) : SUB_PALETTE[0];
+    const card = (fill, stroke, dash) => `<span class="lg-card" style="background:${fill};border-color:${stroke}${
+      dash ? ";border-style:dashed" : ""}"></span>`;
     document.getElementById("legend").innerHTML = `
-      <span class="item">0%<span class="grad" style="background:${grad}"></span>
-        ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
-      <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
-      ${D.links.some(l => l.via) ? `<span class="item" title="${esc(t("viaTr"))}"><span class="swatch dotted" style="border-color:#8a8a90"></span>${t("viaLeg")}</span>` : ""}
-      ${mapLevel >= 3 ? `<span class="item"><span class="swatch dashed" style="border-color:#55555c"></span>${t("showHops")}</span>` : ""}
-      ${chItem}
-      <span class="item">${t("nodeCount", D.nodes.length,
-        D.nodes.filter(n => n.own).length, D.nodes.filter(isNbr).length)}${
-        // «слышим напрямую, но трасса не дошла» — отдельным числом: иначе счётчик
-        // соседей врал (считал ВСЁ не-своё, включая многохоповых и неподтверждённых)
-        D.nodes.filter(heardOnly).length
-          ? ` <span title="${esc(t("heardOnlyTip"))}">· ${t("heardOnlyCount",
-              D.nodes.filter(heardOnly).length)}</span>` : ""}${
-        nodeCap > 0 && D.meta.neighTotal > D.nodes.filter(n => !n.own).length
-          ? ` <b style="color:#e0a03c" title="${esc(t("capTip"))}">· ${t("capOf", D.meta.neighTotal)}</b>` : ""}</span>
-      <span class="item">${t("scan")} · ${esc(scanLocal)}
-        ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>`;
+      <div class="lg-row">
+        <label class="item lg-lvl" title="${esc(t("lvlTip"))}">${t("lvlLbl")}
+          <select id="lvlSel">${[0, 1, 2, 3, 4].map(i =>
+            `<option value="${i}"${i === mapLevel ? " selected" : ""}>${t("lvl" + i)}</option>`).join("")}</select></label>
+        <span class="item lg-cnt"><b>${t("onMap", D.nodes.length)}</b><span class="lg-full">: ${cnt}${more}${capped}</span></span>
+        ${chItem}
+        <span class="item" title="${esc(scanLocal || "")}">${t("scan")} · ${esc(String(scanLocal || "").replace(/^(\d{4}-\d\d-\d\d) /, ""))}
+          ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>
+        <span class="lg-btns">
+          <button class="lg-more" title="${esc(t("legendMoreTip"))}">ⓘ<span class="lg-mtxt"> ${t("legendMore")}</span></button>
+          <button class="lg-help" title="${esc(t("helpTip"))}">?</button>
+        </span>
+      </div>
+      <div class="lg-row lg-key">
+        <span class="lg-h">${t("lgNodes")}</span>
+        <span class="item">${card(ownCol, lighten(ownCol, 0.35))}${t("lgOwn")}</span>
+        <span class="item">${card("var(--world-card)", "#3a3a3e")}${t("lgNbr")}</span>
+        <span class="item">${card("#24242a", "#55555c")}${t("lgFormer")}</span>
+        <span class="item">${card("var(--world-card)", "#8a8a90", true)}${t("lgGhost")}</span>
+        <span class="item"><span class="cdot" style="background:#35c98e"></span>${t("lgOnline")}</span>
+        <span class="item">✉ ${t("lgMail")}</span>
+        <span class="item">🔒 ${t("lgLock")}</span>
+      </div>
+      <div class="lg-row lg-key">
+        <span class="lg-h">${t("lgArrows")}</span>
+        <span class="item">→ ${t("lgHead")}</span>
+        <span class="item">${t("lgSnr")}: 0%<span class="grad" style="background:${grad}"></span>
+          ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
+        <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
+        ${D.links.some(l => l.via) ? `<span class="item" title="${esc(t("viaTr"))}"><span class="swatch dotted" style="border-color:#8a8a90"></span>${t("viaLeg")}</span>` : ""}
+        ${nFormer ? `<span class="item">${t("lgHop")}</span>` : ""}
+        ${showAge ? `<span class="item">${t("lgSrcLbl")} ${t("lgSrc")}</span>` : ""}
+      </div>`;
 
     // Заголовок вкладки: непрочитанное и отвалившиеся свои видны, даже когда
     // вкладка в фоне — раньше там всегда было просто «meshtastic-zoo».
@@ -2022,15 +2119,15 @@
     forcePanel = false;
   }
 
-  // ---- Опрос live.json раз в минуту; без него — подсказка запустить сборщик ----
+  // ---- Опрос live.json раз в минуту; статус отличает «хаб молчит» от «нод нет» ----
   async function loadLive() {
     try {
       const r = await fetch("data/live.json?ts=" + Date.now(), { cache: "no-store" });
-      return r.ok ? await r.json() : null;
-    } catch { return null; }
+      return { status: r.status, data: r.ok ? await r.json() : null };
+    } catch { return { status: 0, data: null }; }
   }
 
-  let lastStamp = "", openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
+  let openId = null, lastLive = null, rsTimer = null, msgs = [], forcePanel = false;
   let lastMapSig = "";   // сигнатура визуала карты — не пересобираем DOM зря (антимигание)
   const lastTrace = {};    // id → путь последней трассировки (переживает пере-рендер панели)
   const traceRunning = {}; // id → true, пока идёт активная проба (чтобы не терять индикатор)
@@ -2557,11 +2654,7 @@
     openId = null;
     setEl.querySelector("#sclose").onclick = () => setEl.classList.remove("open");
     setEl.querySelector("#sf-lang").onchange = (e) => {
-      lang = e.target.value;
-      localStorage.setItem("mzLang", lang);
-      document.getElementById("gear").title = t("settings");
-      searchLabels();
-      if (lastLive) render(lastLive);
+      setLang(e.target.value);
       openSettings(); // перестроить настройки на новом языке
     };
     // применить цвета подсетей из строк (клиентски) + мгновенно перерисовать
@@ -2891,7 +2984,7 @@
     localStorage.setItem("mzGeoView", on ? "1" : "0");
     document.body.classList.toggle("geo-on", on);
     const vt = document.getElementById("viewtab");
-    if (vt) vt.textContent = on ? "🕸" : "🗺";
+    if (vt) { vt.textContent = on ? "🕸" : "🗺"; vt.title = t(on ? "connViewTip" : "geoViewTip"); }
     if (on) { geoFitted = false; loadGeoCfg().then(() => setTimeout(renderGeo, 40)); }
   }
   document.getElementById("viewtab").onclick = () => setGeoView(!geoView);
@@ -2938,26 +3031,40 @@
     setTimeout(() => miniMap && miniMap.invalidateSize(), 30);
   }
 
+  // Сбой связи с хабом: раньше на экране оставалась команда для разработчика,
+  // а следующая попытка была только через минуту
+  const RETRY_S = 10;
+  let retryT = null;
+  const setNetWarn = (txt) => {
+    let el = document.getElementById("netwarn");
+    if (!txt) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement("div"); el.id = "netwarn"; document.body.appendChild(el); }
+    el.textContent = "⚠ " + txt;
+  };
   async function tick() {
-    await refreshMsgs();
-    const live = await loadLive();
+    const [, res] = await Promise.all([refreshMsgs(), loadLive()]);   // почта и карта параллельно
+    clearTimeout(retryT); retryT = null;
+    const live = res.data;
     if (!live) {
       // Карта с прошлого раза (из кеша) полезнее пустого экрана: сборщик мог просто
-      // перезапускаться. Заглушку рисуем только если на экране и так нечего смотреть.
-      if (lastStamp !== "empty" && !document.querySelector("#map svg")) {
-        lastStamp = "empty";
+      // перезапускаться. Пояснение во всю карту — только если смотреть не на что.
+      const noNodes = res.status === 404;
+      if (!document.querySelector("#map svg")) {
         document.getElementById("map").innerHTML =
-          `<p class="empty">${t("noDataYet")} <code>python3 collector/hub.py</code></p>`;
+          `<p class="empty">${esc(noNodes ? t("noNodesYet") : t("hubDown", RETRY_S))}</p>`;
         document.getElementById("legend").innerHTML = "";
       }
+      setNetWarn(noNodes ? "" : t("hubDownShort"));
+      retryT = setTimeout(tick, RETRY_S * 1e3);
       return;
     }
-    lastStamp = live.meta.updated;
+    setNetWarn("");
     anonMask(live);
     lastLive = live;
     render(live); // перерисовка дешёвая, заодно обновляет индикатор устаревания
     renderChannel(); // подхватить свежие имена/качество узлов в списке «приняли»
     renderGeo(); // обновить маркеры на гео-карте (если включён гео-режим)
+    showHint();
   }
 
   // Быстрый опрос почты и канала: статусы обновляются в течение секунд
@@ -3000,7 +3107,90 @@
     if (searchIn) searchIn.focus();
   });
 
+  // Подсказки кнопок верхнего ряда были зашиты в index.html по-английски и при
+  // смене языка не переводились
+  function chromeLabels() {
+    document.documentElement.lang = lang;
+    const lbl = (id, k) => {
+      const el = document.getElementById(id);
+      if (el) { el.title = t(k); el.setAttribute("aria-label", t(k)); }
+    };
+    lbl("chtab", "publicChannel"); lbl("mz-out", "zoomOut"); lbl("mz-in", "zoomIn");
+    lbl("mz-lbl", "zoomReset"); lbl("viewtab", geoView ? "connViewTip" : "geoViewTip");
+    lbl("statustab", "statusPage"); lbl("gear", "settings");
+    searchLabels();
+  }
+  function setLang(l) {
+    lang = l;
+    localStorage.setItem("mzLang", lang);
+    chromeLabels();
+    if (document.getElementById("hint")) { document.getElementById("hint").remove(); showHint(); }
+    if (lastLive) render(lastLive);
+    renderChannel();
+  }
+
+  // Справка «?»: выжимка README в четыре абзаца и переключатель языка
+  function openHelp() {
+    let el = document.getElementById("help");
+    if (!el) { el = document.createElement("aside"); el.id = "help"; document.body.appendChild(el); }
+    const readme = "https://github.com/anton-vinogradov/meshtastic-zoo/blob/main/"
+      + (lang === "ru" ? "README.ru.md" : "README.md");
+    el.innerHTML = `<button class="hclose" aria-label="${t("close")}">×</button>
+      <h3>${t("helpTitle")}</h3>
+      ${[1, 2, 3, 4].map(i => `<p>${t("help" + i)}</p>`).join("")}
+      <div class="hfoot"><a href="${readme}" target="_blank" rel="noopener">${t("helpMore")} →</a>
+        <span>${t("helpLang")}: ${["ru", "en"].map(l =>
+          `<button data-lang="${l}"${l === lang ? ' class="on"' : ""}>${l.toUpperCase()}</button>`).join("")}</span></div>`;
+    el.classList.add("open");
+    el.querySelector(".hclose").onclick = () => el.classList.remove("open");
+    el.querySelectorAll("[data-lang]").forEach(b => { b.onclick = () => { setLang(b.dataset.lang); openHelp(); }; });
+    dismissHint();
+  }
+  // Одноразовая подсказка новичку: что это за карта и куда нажимать
+  function showHint() {
+    if (document.getElementById("hint")) return;
+    try { if (localStorage.getItem("mzHintSeen")) return; } catch { return; }
+    const el = document.createElement("div");
+    el.id = "hint";
+    el.innerHTML = `<span>${t("hintText")}</span><button>${t("hintOk")}</button>`;
+    document.body.appendChild(el);
+    el.querySelector("button").onclick = dismissHint;
+  }
+  function dismissHint() {
+    try { localStorage.setItem("mzHintSeen", "1"); } catch { }
+    document.getElementById("hint")?.remove();
+  }
+
+  // Легенда: уровень показа, «показать призраков», ключ и справка
+  const setLevel = (lv) => {
+    mapLevel = Math.max(0, Math.min(4, lv || 0));
+    localStorage.setItem("mzMapLevel", String(mapLevel));
+    if (lastLive) { render(lastLive); renderGeo(); }
+  };
+  let legendOpen = (() => {
+    const v = localStorage.getItem("mzLegend");
+    return v == null ? !NARROW() : v === "1";
+  })();
+  document.body.classList.toggle("legend-open", legendOpen);
+  const legendEl = document.getElementById("legend");
+  legendEl.addEventListener("change", (e) => { if (e.target.id === "lvlSel") setLevel(+e.target.value); });
+  legendEl.addEventListener("click", (e) => {
+    if (e.target.closest(".lg-ghosts")) { e.preventDefault(); setLevel(4); }
+    else if (e.target.closest(".lg-more")) {
+      legendOpen = !legendOpen;
+      localStorage.setItem("mzLegend", legendOpen ? "1" : "0");
+      document.body.classList.toggle("legend-open", legendOpen);
+      if (lastLive) render(lastLive);   // высота карты изменилась
+    } else if (e.target.closest(".lg-help")) openHelp();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") document.getElementById("help")?.classList.remove("open");
+  });
+
+  chromeLabels();
   loadCfgCache();
+  const mapEl0 = document.getElementById("map");
+  if (!mapEl0.innerHTML.trim()) mapEl0.innerHTML = `<p class="empty">${t("loading")}</p>`;
   paintCachedMap();   // карта с прошлого раза — ДО сети, чтобы экран не был пустым
   tick();
   refreshChan();

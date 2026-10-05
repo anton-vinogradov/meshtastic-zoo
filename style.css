@@ -53,8 +53,8 @@ body.geo-on #mapzoom { display: none; }
 
 #legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
+  flex-direction: column;
+  gap: 7px;
   padding: 10px 16px 26px;
   padding-bottom: max(26px, env(safe-area-inset-bottom));
   font-size: 13px;
@@ -62,6 +62,63 @@ body.geo-on #mapzoom { display: none; }
   align-items: center;
 }
 #legend .item { display: flex; align-items: center; gap: 7px; }
+#legend .lg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
+#legend .lg-key { display: none; }
+body.legend-open #legend .lg-key { display: flex; }
+#legend .lg-h { color: var(--text); font-weight: 600; min-width: 56px; }
+#legend .lg-cnt b { color: var(--text); font-weight: 600; }
+#legend .lg-dim { opacity: .75; }
+#legend a.lg-ghosts { color: #8fb4ff; text-decoration: none; }
+#legend a.lg-ghosts:hover { text-decoration: underline; }
+#legend .lg-card { display: inline-block; width: 18px; height: 13px; border: 1.5px solid; border-radius: 3px; }
+#legend .lg-lvl select {
+  background: var(--zone-bg); color: var(--text); border: 1px solid var(--zone-stroke);
+  border-radius: 8px; padding: 3px 6px; font: inherit; cursor: pointer;
+}
+#legend .lg-btns { margin-left: auto; display: flex; gap: 6px; }
+#legend .lg-btns button {
+  background: var(--zone-bg); color: var(--muted); border: 1px solid var(--zone-stroke);
+  border-radius: 14px; padding: 4px 11px; font: inherit; cursor: pointer;
+}
+#legend .lg-btns button:hover { color: var(--text); }
+#legend .lg-help { font-weight: 700; min-width: 30px; }
+
+/* Справка «?» и одноразовая подсказка новичку */
+#help {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow-y: auto;
+  background: var(--zone-bg); border: 1px solid var(--zone-stroke); border-radius: 14px;
+  padding: 18px 20px; box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+  display: none; z-index: 20; font-size: 14px; line-height: 1.5;
+}
+#help.open { display: block; }
+#help h3 { font-size: 16px; margin: 0 28px 8px 0; }
+#help p { margin: 8px 0; color: var(--text); }
+#help p b { color: #fff; }
+#help .hclose {
+  position: absolute; top: 8px; right: 10px; background: none; border: 0;
+  color: var(--muted); font-size: 22px; cursor: pointer; padding: 4px 8px;
+}
+#help .hfoot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); }
+#help .hfoot a { color: #8fb4ff; text-decoration: none; }
+#help .hfoot button {
+  background: none; border: 1px solid var(--zone-stroke); color: var(--muted);
+  border-radius: 8px; padding: 2px 8px; margin-left: 4px; cursor: pointer; font: inherit;
+}
+#help .hfoot button.on { color: var(--text); border-color: #8fb4ff; }
+#hint, #netwarn {
+  position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(560px, calc(100vw - 32px));
+  border-radius: 12px; padding: 9px 12px; z-index: 9; font-size: 13.5px; line-height: 1.4;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+}
+#hint { display: flex; gap: 12px; align-items: center; background: #26324a; border: 1px solid #4c6aa0; }
+#hint button {
+  flex: none; background: #4c6aa0; color: #fff; border: 0; border-radius: 8px;
+  padding: 6px 12px; font: inherit; cursor: pointer;
+}
+#netwarn { background: #44241f; border: 1px solid #e0533c; color: #ffd9d2; }
 #legend .item.toggle { cursor: pointer; user-select: none; }
 #legend .item.toggle input { cursor: pointer; margin: 0; accent-color: #8fce6a; }
 #legend .swatch { width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; }
@@ -593,7 +650,7 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .phead img { width: 72px; height: 72px; object-fit: contain;
   background: rgba(255,255,255,.06); border-radius: 12px; padding: 4px; }
 #panel .phead b { font-size: 17px; }
-#panel .phead .psub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+#panel .phead .pgid { color: var(--muted); font-size: 12px; margin-top: 2px; }
 #panel .plong { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 /* звезда «избранное» в шапке панели — по НИЖНЕМУ краю шапки (в уровень с фото
    устройства), а не у верхнего: там она вплотную к «×» и легко промахнуться,
@@ -739,7 +796,7 @@ svg.focus .node.selected, svg.focus .node.peerhi { opacity: 1; }
   body.search-open #mapzoom { display: none; }   /* раскрытому полю нужно место */
   /* открытый канал — поверх верхнего ряда и во всю ширину: иначе его «‹»
      оказывалась под кнопками, и тап по ней включал гео-вид */
-  body:not(.chan-collapsed) #channel { z-index: 8; width: 100vw; }
+  body:not(.chan-collapsed) #channel { z-index: 8; width: 92vw; }  /* полоска карты справа — тап по ней закрывает */
   /* панель узла — нижней шторкой во всю ширину: сбоку она закрывала 77% карты
      вместе с выбранной нодой и её плечами */
   #panel {
@@ -754,4 +811,10 @@ svg.focus .node.selected, svg.focus .node.peerhi { opacity: 1; }
     content: ""; position: absolute; inset: -12px;
   }
   #panel #pclose { font-size: 26px; padding: 4px 8px; }
+  /* легенда — одной строкой, ключ и полные счётчики по «ⓘ» */
+  #legend { padding: 6px 12px; padding-bottom: max(10px, env(safe-area-inset-bottom)); font-size: 12px; gap: 5px; }
+  #legend .lg-row { gap: 5px 12px; }
+  body:not(.legend-open) #legend .lg-full, body:not(.legend-open) #legend .lg-opt { display: none; }
+  #legend .lg-mtxt { display: none; }
+  #hint, #netwarn { top: 58px; }
 }
