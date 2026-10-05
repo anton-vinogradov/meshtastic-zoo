@@ -3471,6 +3471,8 @@ def main():
             log(f"🔐 секреты Telegram ({n}) перенесены из config.json в secrets.json (0600)")
     except Exception as e:
         log(f"migrate_secrets: {e!r}")
+    if (CFG.get("alerts") or {}).get("tgToken") and not shutil.which("curl"):
+        log("⚠ Telegram настроен, но curl не найден: уведомления и мост работать не будут")
     try:
         n = nodestore.repair_freshness()
         if n:

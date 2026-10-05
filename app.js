@@ -1445,6 +1445,7 @@
         // только в title — на тач-экране его не увидеть вовсе.
         const g = ((lastLive && lastLive.ghosts) || []).find(x => x.id === id);
         if (!g) { panel.classList.remove("open"); openId = null; return; }
+        document.getElementById("settings").classList.remove("open");
         openId = id;
         const posTxt = (g.src === "gps" ? t("ghostPosGps") : t("ghostPosEst", g.by, (g.unc ?? 0).toFixed(1)))
           + (g.posTs ? ` (${fmtAgo(g.posTs)})` : "");
@@ -2544,6 +2545,11 @@
     }
     if (!e.target.closest("#settings") && !e.target.closest("#gear")) {
       document.getElementById("settings").classList.remove("open");
+    }
+    // справка «?» закрывается и тапом мимо (на телефоне Esc нет); кнопка RU/EN
+    // пересобирает справку, и её цель к этому моменту уже вне документа
+    if (e.target.isConnected && !e.target.closest("#help") && !e.target.closest(".lg-help")) {
+      document.getElementById("help")?.classList.remove("open");
     }
     // на телефоне открытый канал занимает весь экран — тап мимо него закрывает
     if (NARROW() && !e.target.closest("#channel") && !e.target.closest("#chtab")
