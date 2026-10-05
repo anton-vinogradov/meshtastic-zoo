@@ -48,19 +48,6 @@ body {
   cursor: pointer; font-size: 16px; padding: 5px 11px; line-height: 1;
 }
 #mapzoom #mz-lbl { font-size: 12px; min-width: 46px; border-left: 1px solid var(--zone-stroke); border-right: 1px solid var(--zone-stroke); }
-/* Узкое окно: правый ряд (кнопки + зум) занимает 262px, и на телефоне он
-   встречается с поиском. Двигать зум некуда — ниже по правому краю панель
-   узла, снизу слева панель канала. Поэтому ужимаем поиск, а не ряд. */
-/* Узкий экран: ряд из пяти элементов не влезает — ужимаем поле поиска, оно
-   единственное тянущееся. Двигать ряд некуда: ниже справа панель узла,
-   слева — панель канала. */
-@media (max-width: 900px) {
-  #searchbox input { width: 100px; }
-}
-@media (max-width: 560px) {
-  #searchbox input { width: 70px; }
-  #searchbox #searchcnt { display: none; }
-}
 #mapzoom button:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
 body.geo-on #mapzoom { display: none; }
 
@@ -606,6 +593,7 @@ body:not(.geo-on) #geoctl { display: none; }
 #panel .phead img { width: 72px; height: 72px; object-fit: contain;
   background: rgba(255,255,255,.06); border-radius: 12px; padding: 4px; }
 #panel .phead b { font-size: 17px; }
+#panel .phead .psub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 #panel .plong { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 /* звезда «избранное» в шапке панели — по НИЖНЕМУ краю шапки (в уровень с фото
    устройства), а не у верхнего: там она вплотную к «×» и легко промахнуться,
@@ -733,3 +721,37 @@ svg .node.selected > rect { stroke: #e0a03c; stroke-width: 3; }
 svg .node.peerhi > rect { stroke: #6aa3ff; stroke-width: 3; }
 svg.focus .node.selected, svg.focus .node.peerhi { opacity: 1; }
 #panel [data-peer] { cursor: default; }
+
+/* ===== Узкий экран (телефон) =====
+   Всё телефонное — одним блоком В КОНЦЕ файла. Медиазапросы раньше стояли выше
+   базовых правил и проигрывали им по порядку: на телефоне поле поиска
+   оставалось 150 px, верхний ряд вылезал за левый край на 83 px. */
+@media (max-width: 900px) {
+  #searchbox input { width: 100px; }
+}
+@media (max-width: 560px) {
+  /* поиск — лупой 38 px, по тапу раскрывается в поле (класс .open — app.js) */
+  #topbar { gap: 6px; }
+  #searchbox { width: 38px; padding: 0; justify-content: center; cursor: pointer; }
+  #searchbox input, #searchbox #searchcnt { display: none; }
+  #searchbox.open { width: auto; padding: 0 10px; }
+  #searchbox.open input { display: block; width: 130px; }
+  body.search-open #mapzoom { display: none; }   /* раскрытому полю нужно место */
+  /* открытый канал — поверх верхнего ряда и во всю ширину: иначе его «‹»
+     оказывалась под кнопками, и тап по ней включал гео-вид */
+  body:not(.chan-collapsed) #channel { z-index: 8; width: 100vw; }
+  /* панель узла — нижней шторкой во всю ширину: сбоку она закрывала 77% карты
+     вместе с выбранной нодой и её плечами */
+  #panel {
+    top: auto; bottom: 0; left: 0; right: 0; width: auto; max-width: none;
+    max-height: 58vh; max-height: 58dvh;
+    border-radius: 16px 16px 0 0; padding: 14px 16px 18px;
+  }
+  /* цели касания не меньше пальца: зона нажатия расширяется невидимым ::after,
+     вёрстка не меняется (тот же приём, что у «‹» канала) */
+  #panel #pclose, .mact2 .addreact, .mact2 .doreply { position: relative; }
+  #panel #pclose::after, .mact2 .addreact::after, .mact2 .doreply::after {
+    content: ""; position: absolute; inset: -12px;
+  }
+  #panel #pclose { font-size: 26px; padding: 4px 8px; }
+}

@@ -34,6 +34,7 @@
   // e-<from> e-<to>"), поэтому набор текста не вызывает перерисовку карты.
   let searchQ = "";
   let cfgCache = null;   // /api/config: что из настроек нужно панели (заглушённые)
+  const NARROW = () => window.matchMedia("(max-width: 560px)").matches;
   // АНОН-РЕЖИМ для публичных скриншотов (скрытый флаг, без UI): имена соседей
   // заменяются хвостом id, IP своих нод прячется. Включение — в консоли:
   //   localStorage.mzAnon = "1"  (выключить: удалить ключ и перезагрузить)
@@ -263,6 +264,7 @@
       ghostCard: "we never hear it — known only from other nodes' traceroutes",
       ghostSeen: "last seen in the air {0}", ghostPos: "position: {0}",
       ghostPosGps: "its own GPS", ghostPosEst: "estimate from {0} partners, ±{1} km",
+      ghostPosLbl: "Position", ghostPartners: "Seen next to",
       resizeTip: "drag to resize",
       compose: "Compose", legs: "Legs", twoWay: "two-way", oneWay: "one-way",
       onAir: "on air", delivered: "delivered", error: "error", noAck: "no ack",
@@ -397,6 +399,7 @@
       ghostCard: "мы его не слышим — знаем только из чужих трассировок",
       ghostSeen: "в эфире {0}", ghostPos: "позиция: {0}",
       ghostPosGps: "его собственный GPS", ghostPosEst: "оценка по {0} партнёрам, ±{1} км",
+      ghostPosLbl: "Позиция", ghostPartners: "Видели рядом с",
       resizeTip: "потяните, чтобы изменить ширину",
       compose: "Написать", legs: "Плечи", twoWay: "двусторонние", oneWay: "одиночные",
       onAir: "в эфире", delivered: "доставлено", error: "ошибка", noAck: "без квитанции",
@@ -1333,7 +1336,25 @@
       // сосед без прямого линка — напр. Corretto). Тогда берём сырые данные из
       // lastLive, чтобы панель всё равно показала свойства ноды.
       const n = nodes[id] || (lastLive && lastLive.nodes || []).find(x => x.id === id);
-      if (!n) { panel.classList.remove("open"); openId = null; return; }
+      if (!n) {
+        // Призрак: раньше тап по нему просто закрывал панель, а пояснение жило
+        // только в title — на тач-экране его не увидеть вовсе.
+        const g = ((lastLive && lastLive.ghosts) || []).find(x => x.id === id);
+        if (!g) { panel.classList.remove("open"); openId = null; return; }
+        openId = id;
+        const posTxt = (g.src === "gps" ? t("ghostPosGps") : t("ghostPosEst", g.by, (g.unc ?? 0).toFixed(1)))
+          + (g.posTs ? ` (${fmtAgo(g.posTs)})` : "");
+        const parts = (g.parts || []).map(p => esc(((nodes[p] || {}).label) || p)).join(", ");
+        panel.innerHTML = `<button id="pclose" aria-label="${t("close")}">×</button>
+          <div class="phead"><div><b>👻 ${esc(g.name || g.id)}</b><div class="psub">${esc(g.id)}</div></div></div>
+          <div class="prow"><span>${esc(t("ghostCard"))}</span></div>
+          <div class="prow"><span>${t("lastSeen")}</span><span>${g.seen ? fmtAgo(g.seen) : "—"}</span></div>
+          <div class="prow"><span>${t("ghostPosLbl")}</span><span>${esc(posTxt)}</span></div>
+          ${parts ? `<div class="prow"><span>${t("ghostPartners")}</span><span>${parts}</span></div>` : ""}`;
+        panel.classList.add("open");
+        panel.querySelector("#pclose").onclick = () => { panel.classList.remove("open"); openId = null; applySel(); };
+        return;
+      }
       document.getElementById("settings").classList.remove("open"); // взаимоисключение
       openId = id;
       const i = n.info || {};
@@ -2383,6 +2404,21 @@
     if (!e.target.closest("#settings") && !e.target.closest("#gear")) {
       document.getElementById("settings").classList.remove("open");
     }
+    // на телефоне открытый канал занимает весь экран — тап мимо него закрывает
+    if (NARROW() && !e.target.closest("#channel") && !e.target.closest("#chtab")
+        && !document.body.classList.contains("chan-collapsed")) {
+      setChan(false);
+    }
+    // лупа на телефоне: тап раскрывает поле, тап мимо пустого — сворачивает
+    const sb = document.getElementById("searchbox");
+    if (sb && NARROW()) {
+      if (e.target.closest("#searchbox")) {
+        sb.classList.add("open"); document.body.classList.add("search-open");
+        document.getElementById("searchin").focus();
+      } else if (!searchQ) {
+        sb.classList.remove("open"); document.body.classList.remove("search-open");
+      }
+    }
   });
 
   // ---- Настройки (⚙): читаются и сохраняются через hub ----
@@ -2947,6 +2983,8 @@
     searchIn.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         searchIn.value = ""; searchQ = ""; applySearch(); searchIn.blur();
+        document.getElementById("searchbox").classList.remove("open");
+        document.body.classList.remove("search-open");
       } else if (e.key === "Enter") {
         searchJump();
       }
