@@ -767,6 +767,12 @@ body:not(.geo-on) #geoctl { display: none; }
   text-align: center;
 }
 #map .empty code { color: var(--text); }
+#map .empty p { max-width: 560px; margin: 0 auto 10px; line-height: 1.5; }
+#map .empty b { color: var(--text); }
+#map .empty button {
+  margin-top: 6px; background: var(--zone-bg); color: var(--text); border: 1px solid var(--zone-stroke);
+  border-radius: 10px; padding: 7px 14px; font: inherit; cursor: pointer;
+}
 
 /* Подсветка при наведении на ноду; плечи внешних нод приглушены по умолчанию */
 svg .edge, svg .node { transition: opacity .15s ease; }
@@ -819,3 +825,7 @@ svg.focus .node.selected, svg.focus .node.peerhi { opacity: 1; }
   #legend .lg-mtxt { display: none; }
   #hint, #netwarn { top: 58px; }
 }
+
+/* ошибка ввода в ⚙ (подсети) */
+#settings .serr { color: #ff8a7a; font-size: 12px; margin-top: 4px; }
+#settings .sub-cidr.bad { border-color: #e0533c; }

@@ -1220,16 +1220,54 @@ async def port_open(ip):
         return None
 
 
+_scan_info = {}        # итог последнего скана для пустой карты и лога
+MAX_SCAN_PREFIX = 22   # шире /22 (1024 адреса) не сканируем: опечатка «/2» = миллиард проб
+_bad_nets_logged = set()
+
+
+def parse_subnet(s):
+    """Строка из «Подсетей» → IPv4Network или текст ошибки. Хост с маской
+    («10.77.77.5/24») принимаем как его сеть."""
+    try:
+        net = ipaddress.ip_network(str(s).strip(), strict=False)
+    except ValueError:
+        return f"«{s}» — не IPv4-сеть вида 10.0.0.0/24"
+    if net.version != 4:
+        return f"«{s}» — нужна IPv4-сеть"
+    if net.prefixlen < MAX_SCAN_PREFIX:
+        return f"«{s}» — слишком широкая сеть, не шире /{MAX_SCAN_PREFIX}"
+    return net
+
+
+def scan_nets(bad=None):
+    """Подсети для скана. Битая строка (правка config.json руками) раньше роняла
+    ValueError на каждом проходе — и переподключение своих нод вставало целиком."""
+    nets = []
+    for s in CFG.get("subnets") or []:
+        net = parse_subnet(s)
+        if isinstance(net, str):
+            if bad is not None:
+                bad.append(net)
+            if s not in _bad_nets_logged:
+                _bad_nets_logged.add(s)
+                log(f"⚠ подсеть пропущена: {net}")
+            continue
+        nets.append(net)
+    return nets
+
+
 def keeper():
     """Скан подсетей на новые ноды + вотчдог зависших соединений.
     Свои живые соединения портом НЕ трогаем — второй TCP-клиент
     вышибает первого."""
+    global _scan_info
     while True:
         try:
             with lock:
                 busy = {ip for ip, c in conns.items() if c.get("iface")}
-            hosts = [ip for s in CFG["subnets"]
-                     for ip in ipaddress.ip_network(s).hosts() if str(ip) not in busy]
+            bad = []
+            nets = scan_nets(bad)
+            hosts = [ip for net in nets for ip in net.hosts() if str(ip) not in busy]
 
             async def probe_all():
                 sem = asyncio.Semaphore(128)
@@ -1239,9 +1277,18 @@ def keeper():
                         return await port_open(h)
                 return [r for r in await asyncio.gather(*(one(h) for h in hosts)) if r]
 
-            for ip in asyncio.run(probe_all()):
+            opened = asyncio.run(probe_all())
+            for ip in opened:
                 if ip not in conns:
                     threading.Thread(target=connect_node, args=(ip,), daemon=True).start()
+            # Итог скана — в live.json для пустой карты и в лог при каждой смене:
+            # раньше после старта в журнале не было ни слова, нашлось ли что-то
+            res = dict(subnets=[str(n) for n in nets], probed=len(hosts),
+                       open=sorted(map(str, opened)), busy=sorted(busy), bad=bad)
+            if any(res[k] != _scan_info.get(k) for k in ("subnets", "open", "bad")):
+                log(f"🔎 скан {', '.join(res['subnets']) or '—'}, адресов: {len(hosts)}; "
+                    f"порт {CFG['port']} открыт: {', '.join(res['open']) or 'нигде'}")
+            _scan_info = dict(res, ts=int(time.time()))   # подмена целиком: reader читает без lock
             # вотчдог: давно молчащие соединения пересобираем
             now = time.time()
             for ip, c in list(conns.items()):
@@ -1312,31 +1359,43 @@ def snapshot(ent):
 
 
 # ---------- Telegram-алерты (Фаза 2) ----------
-# Отправка через твой telegram.sh (ретраи/прокси/очередь). Токен и чат — в
-# collector/secrets.json (0600, gitignore; см. scan.SECRETS); пусто → молчим.
-ALERT_BIN = shutil.which("telegram") or "/opt/telegram.sh-repo/telegram"
+# Токен и чат — в collector/secrets.json (0600, gitignore; см. scan.SECRETS);
+# пусто → молчим. Отправка — прямо в Bot API тем же curl, что и поллер: раньше
+# она шла через внешний скрипт telegram, которого нет на свежей машине, и
+# каждый алерт молча оседал в логе ошибкой.
 _batt_alerted = set()  # id нод, по которым уже слали «низкий заряд» (антидребезг)
 
 
-def alert(text):
+def tg_api(method, payload, timeout=30):
+    """Вызов Bot API → разобранный ответ (dict) или None при сбое сети.
+
+    URL с токеном и тело — в stdin-конфиге curl (-K -), чтобы токен не светился
+    в списке процессов. Прокси — alerts.tgProxy (Telegram бывает доступен только
+    через него). Тело ASCII-JSON: в кавычках конфига curl экранируем \\ и \"."""
     a = CFG.get("alerts") or {}
-    if not a.get("enabled", True):
-        return
-    tok, chat = a.get("tgToken"), a.get("tgChat")
-    if not tok or not chat:
-        return  # не настроено — тихо выходим
-    def _send():
-        try:
-            cmd = [ALERT_BIN, "-t", str(tok), "-a", "3"]
-            for c in str(chat).replace(",", " ").split():
-                cmd += ["-c", c]
-            cmd.append(text)
-            r = subprocess.run(cmd, timeout=90, capture_output=True)
-            if r.returncode != 0:
-                log(f"alert rc={r.returncode}: {r.stderr.decode('utf-8', 'replace')[:120]}")
-        except Exception as e:
-            log(f"alert: {e!r}")
-    threading.Thread(target=_send, daemon=True).start()
+    tok = a.get("tgToken")
+    if not tok:
+        return None
+    body = json.dumps(payload, ensure_ascii=True).replace("\\", "\\\\").replace('"', '\\"')
+    conf = (f'url = "https://api.telegram.org/bot{tok}/{method}"\n'
+            'header = "Content-Type: application/json"\n'
+            f'data-binary = "{body}"\n')
+    cmd = ["curl", "-s", "--max-time", str(timeout), "-K", "-"]
+    if a.get("tgProxy"):
+        cmd += ["-x", a["tgProxy"]]
+    try:
+        r = subprocess.run(cmd, timeout=timeout + 10, capture_output=True, input=conf.encode())
+        return json.loads(r.stdout.decode("utf-8", "replace") or "null")
+    except Exception as e:
+        log(f"tg {method}: {e!r}")
+        return None
+
+
+def alert(text):
+    """Алерт в Telegram в фоне (ответ не нужен)."""
+    a = CFG.get("alerts") or {}
+    if a.get("enabled", True) and a.get("tgToken") and a.get("tgChat"):
+        threading.Thread(target=tg_send, args=(text,), daemon=True).start()
 
 
 OUT_OWNDOWN = ROOT.parent / "data" / "owndown.json"
@@ -1511,27 +1570,30 @@ def send_dm(node, to, text, reply_id=None, tg=None):
 
 
 def tg_send(text):
-    """Отправить в Telegram через telegram.sh с -I; вернуть список message_id."""
+    """Отправить текст во все чаты tgChat; вернуть список message_id.
+
+    До трёх попыток на чат: повторяем сбой сети, 429 (с паузой retry_after) и
+    5xx; остальные ошибки (неверный токен, чат) — сразу в лог."""
     a = CFG.get("alerts") or {}
     tok, chat = a.get("tgToken"), a.get("tgChat")
     if not (a.get("enabled", True) and tok and chat):
         return []
     ids = []
-    try:
-        cmd = [ALERT_BIN, "-t", str(tok), "-a", "3", "-I"]
-        for c in str(chat).replace(",", " ").split():
-            cmd += ["-c", c]
-        cmd.append(text)
-        r = subprocess.run(cmd, timeout=90, capture_output=True)
-        for line in r.stdout.decode("utf-8", "replace").splitlines():
-            p = line.split()
-            if len(p) >= 3 and p[0] == "msgid":
-                try:
-                    ids.append(int(p[2]))
-                except ValueError:
-                    pass
-    except Exception as e:
-        log(f"tg_send: {e!r}")
+    for c in str(chat).replace(",", " ").split():
+        for attempt in range(3):
+            r = tg_api("sendMessage", {"chat_id": c, "text": text[:4096]})
+            if r and r.get("ok"):
+                mid = (r.get("result") or {}).get("message_id")
+                if mid is not None:
+                    ids.append(int(mid))
+                break
+            code = (r or {}).get("error_code")
+            if r is not None and code != 429 and not (code or 0) >= 500:
+                log(f"tg_send → {c}: {code} {str(r.get('description'))[:100]}")
+                break
+            time.sleep(((r or {}).get("parameters") or {}).get("retry_after") or 3 * (attempt + 1))
+        else:
+            log(f"tg_send → {c}: не ушло за 3 попытки")
     return ids
 
 
@@ -2612,6 +2674,7 @@ def reader_loop():
                                              traces=dict(traces), favorites=set(favorites),
                                              cache_wide=cache_wide,
                                              own_links=dict(_own_conn_ts))
+                data.setdefault("meta", {})["scan"] = dict(_scan_info)
                 atomic_write(OUT_LIVE, json.dumps(data, ensure_ascii=False, indent=1))
                 hist_tick(data)
                 nodestore.save_positions({n["id"]: (n.get("x"), n.get("y"))
@@ -3208,6 +3271,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if k in ("subnets", "mobile", "fragile", "pingWords"):
                     if not isinstance(v, list) or not all(isinstance(s, str) for s in v):
                         continue
+                    if k == "subnets":
+                        nets = [parse_subnet(s) for s in v if s.strip()]
+                        bad = [n for n in nets if isinstance(n, str)]
+                        if bad:
+                            self._json({"ok": False, "error": "; ".join(bad)}, 400)
+                            return
+                        v = [str(n) for n in nets]
                 elif k in ("pingReply", "pingPrimary"):
                     if not isinstance(v, bool):
                         continue
@@ -3436,8 +3506,11 @@ def main():
     threading.Thread(target=keyfetch_loop, daemon=True).start() # тихий добор ключей у keyless (темп по каналу)
     threading.Thread(target=geocode_loop, daemon=True).start()  # геокодинг адресных имён
     threading.Thread(target=gh_watch_loop, daemon=True).start() # дискуссии GitHub → Telegram
-    log(f"hub на http://localhost:{PORT} — сайт, /api/messages, /api/send, /api/read")
-    ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+    # bind: адрес прослушивания. Пусто — все интерфейсы (как раньше); LAN-адрес
+    # закрывает страницу от VPN- и docker-интерфейсов хоста
+    bind = str(CFG.get("bind") or "")
+    log(f"hub на http://{bind or 'localhost'}:{PORT} — сайт, /api/messages, /api/send, /api/read")
+    ThreadingHTTPServer((bind, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

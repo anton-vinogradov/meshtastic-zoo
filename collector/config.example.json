@@ -3,8 +3,8 @@
     "10.0.0.0/24"
   ],
   "port": 4403,
+  "bind": "",
   "connectTimeoutS": 0.6,
-  "queryTimeoutS": 45,
   "txQueueWaitS": 45,
   "fragile": [],
   "worldMaxAgeH": 24,

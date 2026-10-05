@@ -349,6 +349,11 @@
       loading: "Loading the map…",
       hubDown: "The map server is not responding — retrying every {0} s",
       hubDownShort: "server not responding, retrying",
+      emptyTitle: "None of your nodes is connected yet.",
+      emptyScanning: "The first scan of your subnets is still running…",
+      emptyNone: "Scanned {0}, addresses: {1}. TCP port 4403 is not open anywhere.",
+      emptyOpen: "Scanned {0}, addresses: {1}. Port 4403 is open on {2}, but the connection has not come up yet.",
+      emptyNeed: "What is needed: a Meshtastic node on the same network (Wi‑Fi or Ethernet) with the network API enabled (TCP 4403). The radio keeps only one TCP client, so the phone app must not be connected to it over Wi‑Fi. Subnets to scan are set in ⚙.",
       noNodesYet: "The hub is running but has not found any of your nodes yet. It needs a Meshtastic node on the network (Wi‑Fi or Ethernet) with TCP port 4403 open and no other app connected to it. Subnets to scan are in ⚙.",
       lgNodes: "Nodes", lgOwn: "own (colour = site)", lgNbr: "neighbour", lgFormer: "former",
       lgGhost: "ghost", lgOnline: "connected", lgMail: "unread", lgLock: "no key — can't DM",
@@ -369,6 +374,7 @@
       hintOk: "Got it",
       failedSend: "Failed to send:", failedSave: "Failed to save:",
       mapAria: "Mesh network map", language: "Language",
+      subBad: "«{0}» is not an IPv4 network like 10.0.0.0/24", subWide: "«{0}» is too wide: /22 at most (1024 addresses)",
       fSubnets: "Site subnets & colors", fFloor: "0% quality at SNR, dB",
       fIdeal: "100% quality at SNR, dB", fKeep: "History chart span, hours",
       fDirect: "Direct neighbor stays, hours", fFormer: "Former (grey) stays, hours",
@@ -507,6 +513,11 @@
       loading: "Загружаю карту…",
       hubDown: "Сервер карты не отвечает — пробую снова каждые {0} с",
       hubDownShort: "сервер не отвечает, пробую снова",
+      emptyTitle: "Своих нод на связи пока нет.",
+      emptyScanning: "Идёт первый скан подсетей…",
+      emptyNone: "Просканировал {0}, адресов: {1}. TCP-порт 4403 нигде не открыт.",
+      emptyOpen: "Просканировал {0}, адресов: {1}. Порт 4403 открыт у {2}, но соединение пока не поднялось.",
+      emptyNeed: "Что нужно: нода Meshtastic в той же сети (Wi‑Fi или Ethernet) с включённым сетевым API (TCP 4403). Рация держит одного TCP-клиента, поэтому телефонное приложение не должно быть подключено к ней по Wi‑Fi. Какие подсети сканировать — в ⚙.",
       noNodesYet: "Хаб работает, но своих нод пока не нашёл. Нужна нода Meshtastic в сети (Wi‑Fi или Ethernet) с открытым TCP-портом 4403, и к ней не должно быть подключено другое приложение. Какие подсети сканировать — в ⚙.",
       lgNodes: "Ноды", lgOwn: "свои (цвет — площадка)", lgNbr: "сосед", lgFormer: "бывший",
       lgGhost: "призрак", lgOnline: "на связи", lgMail: "непрочитанные", lgLock: "нет ключа — личку не отправить",
@@ -527,6 +538,7 @@
       hintOk: "Понятно",
       failedSend: "Не отправилось:", failedSave: "Не сохранилось:",
       mapAria: "Карта mesh-сети", language: "Язык",
+      subBad: "«{0}» — не IPv4-сеть вида 10.0.0.0/24", subWide: "«{0}» — слишком широкая сеть, не шире /22 (1024 адреса)",
       fSubnets: "Подсети площадок и цвета", fFloor: "0% качества при SNR, дБ",
       fIdeal: "100% качества при SNR, дБ", fKeep: "Окно графика истории, часов",
       fDirect: "Прямой сосед держится, часов", fFormer: "Бывший (серый) держится, часов",
@@ -679,7 +691,26 @@
       while (_renderPending) { const D = _renderPending; _renderPending = null; await _doRender(D); }
     } finally { _rendering = false; }
   }
+  // Ни одного узла: хаб работает, но своих нод не нашёл. Раньше здесь была
+  // команда «запусти hub.py», хотя страницу отдаёт как раз он. Показываем, что
+  // сканировали и что нужно, чтобы нода нашлась.
+  function renderEmpty(D) {
+    const sc = (D.meta || {}).scan || {};
+    const lines = [`<b>${t("emptyTitle")}</b>`];
+    if (!sc.ts) lines.push(t("emptyScanning"));
+    else if ((sc.open || []).length) lines.push(t("emptyOpen", esc((sc.subnets || []).join(", ") || "—"),
+      sc.probed || 0, esc(sc.open.join(", "))));
+    else lines.push(t("emptyNone", esc((sc.subnets || []).join(", ") || "—"), sc.probed || 0));
+    (sc.bad || []).forEach(b => lines.push("⚠ " + esc(b)));
+    lines.push(t("emptyNeed"));
+    lastMapSig = "";
+    document.getElementById("map").innerHTML = `<div class="empty">${lines.map(l => `<p>${l}</p>`).join("")}
+      <button id="empty-gear">⚙ ${t("settings")}</button></div>`;
+    document.getElementById("empty-gear").onclick = () => openSettings();
+    document.getElementById("legend").innerHTML = "";
+  }
   async function _doRender(D) {
+    if (!(D.nodes || []).length) { renderEmpty(D); return; }
     // Уровень карты (ползунок): оставляем узлы вплоть до выбранного тира (и их
     // плечи), остальное убираем ДО раскладки — карта вписывается по видимым.
     let hiddenByLevel = 0;   // для легенды: сколько ещё узлов на следующих ступенях
@@ -1284,6 +1315,11 @@
       // замок в углу, если публичный ключ ноды ещё не получен (нельзя слать DM)
       const keyBadge = n.key === false
         ? `<text x="${x + 6}" y="${y + h - 6}" font-size="11">🔒</text>` : "";
+      // заряд своей ноды на батарее — прямо на карточке: раньше он лежал в
+      // свёрнутом разделе панели. От сети нода шлёт 101 — его не показываем
+      const bat = n.own && n.info && n.info.battery != null && n.info.battery <= 100 ? n.info.battery : null;
+      const battBadge = bat == null ? "" : `<text x="${x + 6}" y="${y + h - 6}" font-size="9"
+          font-weight="700" fill="${bat <= 20 ? "#ff8a7a" : subFill}">🔋${bat}%</text>`;
       // звезда — избранный узел (не прунится из кеша)
       const favBadge = n.fav
         ? `<text x="${x + w - 6}" y="${y + h - 6}" text-anchor="end" font-size="12" fill="#e0c341">★</text>` : "";
@@ -1298,7 +1334,7 @@
         <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rr}"
           fill="${fill}"${ownDown ? ' fill-opacity="0.32"' : ""}
           stroke="${ownDown && !n.mobile ? "#e0533c" : stroke}" stroke-width="1.5"${n.mobile ? ' stroke-dasharray="7 5"' : ""}/>
-        ${critBadge}${photo}${badge}${mailBadge}${keyBadge}${favBadge}
+        ${critBadge}${photo}${badge}${mailBadge}${keyBadge}${battBadge}${favBadge}
         <text x="${n.cx}" y="${y + 55}" text-anchor="middle" fill="var(--text)"
           font-size="${nm.length > 10 ? 10 : 11.5}" font-weight="700">${esc(nm)}</text>
         <text x="${n.cx}" y="${y + 71}" text-anchor="middle" fill="${subFill}"
@@ -1319,7 +1355,9 @@
         const nn = nodes[id], p = px[id] || [0, 0];
         return [id, nn.label, nn.sub, nn.own ? 1 : 0, nn.hop ?? -1, nn.silent ? 1 : 0, nn.stale ? 1 : 0,
           nn.hw || "", nn.key ? 1 : 0, nn.traceNbr ? 1 : 0, nn.traceRelay ? 1 : 0, nn.relayNbr ? 1 : 0, Math.round(p[0]), Math.round(p[1]), ageBk(nn.heard),
-          unread[id] || 0, nn.fav ? 1 : 0];   // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
+          unread[id] || 0, nn.fav ? 1 : 0,    // «✉ N» и ★-избранное — в сигнатуру (иначе не перерисует)
+          nn.online ? 1 : 0, nn.own && !nn.online ? ageBk(nn.tcpSince) : 0,   // плашка «нет связи N ч»
+          nn.own ? ((nn.info || {}).battery ?? -1) : 0];
       }),
       showAge ? 1 : 0,
       D.links.map(l => [l.from, l.to, l.snr == null ? "" : Math.round(l.snr * 2) / 2, l.hops ?? -1,
@@ -2390,7 +2428,7 @@
     const tab = document.getElementById("chtab");
     if (!tab) return;
     tab.dataset.badge = n ? `↩${n}` : "";
-    tab.title = n ? t("chanRepliesTip") : "";
+    tab.title = n ? t("chanRepliesTip") : t("publicChannel");
   }
   async function refreshChan() {
     try {
@@ -2601,7 +2639,8 @@
     const subnetEditor = `<div class="srow scol"><span>${t("fSubnets")}</span>
       <div id="sub-list">${(cfg.subnets || []).map((c, i) =>
         subRowHtml(c, subColors[subnetOf(c)] || palAt(i))).join("")}</div>
-      <button id="sub-add" type="button">+ ${t("addSubnet")}</button></div>`;
+      <button id="sub-add" type="button">+ ${t("addSubnet")}</button>
+      <div id="sub-err" class="serr" hidden></div></div>`;
     setEl.innerHTML = `<button id="sclose" aria-label="${t("close")}">×</button>
       <b class="stitle">${t("settings")}</b>`
       + mapToggles()
@@ -2684,8 +2723,25 @@
       wireSubRow(row);
       row.querySelector(".sub-cidr").focus();
     };
+    // Подсети проверяем до отправки: опечатка раньше молча ломала скан своих нод
+    // (хаб падал на каждом проходе), а в ⚙ при этом писалось «сохранено»
+    const cidrErr = (c) => {
+      const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(c);
+      if (!m || m.slice(1, 5).some(o => +o > 255) || (m[5] != null && +m[5] > 32)) return t("subBad", c);
+      return m[5] != null && +m[5] < 22 ? t("subWide", c) : "";
+    };
     setEl.querySelector("#ssave").onclick = async () => {
       const g = (k) => document.getElementById(sfId(k));
+      const errs = [];
+      setEl.querySelectorAll("#sub-list .sub-cidr").forEach(i => {
+        const e = i.value.trim() ? cidrErr(i.value.trim()) : "";
+        i.classList.toggle("bad", !!e);
+        if (e) errs.push(e);
+      });
+      const errEl = setEl.querySelector("#sub-err");
+      errEl.hidden = !errs.length;
+      errEl.textContent = errs.join("; ");
+      if (errs.length) { errEl.scrollIntoView({ block: "nearest" }); return; }
       const lines = (el) => el.value.split("\n").map(s => s.trim()).filter(Boolean);
       applyColors();  // зафиксировать цвета подсетей перед сохранением
       const body = {
