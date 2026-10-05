@@ -732,6 +732,8 @@
     // мельче 10 px; раздвижка и концы стрелок ниже учитывают новый размер.
     const pxPerU = box.width && box.height ? Math.min(box.width / W, box.height / H) : 1;
     const cardK = Math.max(1, Math.min(1.6, 10 / (11.5 * pxPerU)));
+    // подписи на стрелках растут слабее (√k): в плотном центре крупные пилюли
+    // ложились друг на друга сплошной кашей
 
     // Посадка сырого облака позиций сборщика: PCA-поворот главной осью
     // вдоль длинной стороны окна, ОДИН масштаб по обеим осям (пропорции
@@ -1184,7 +1186,7 @@
       const tw = label.length * 7.6 + sfx.length * 6.1 + 16;
       edgeSvg.push(`<g class="${cls}${dim}"><title>${esc(tip)}</title>
         ${geom}
-        <g transform="translate(${lx.toFixed(1)}, ${ly.toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${cardK.toFixed(3)})">
+        <g transform="translate(${lx.toFixed(1)}, ${ly.toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${Math.sqrt(cardK).toFixed(3)})">
           <rect x="${-tw / 2}" y="-10" width="${tw}" height="20" rx="10"
             fill="var(--bg)" fill-opacity="0.92" stroke="${col}" stroke-opacity="0.65"/>
           <text y="4.5" text-anchor="middle" fill="${col}" font-size="13"
@@ -2059,12 +2061,12 @@
       dash ? ";border-style:dashed" : ""}"></span>`;
     document.getElementById("legend").innerHTML = `
       <div class="lg-row">
-        <label class="item lg-lvl" title="${esc(t("lvlTip"))}">${t("lvlLbl")}
+        <label class="item lg-lvl" title="${esc(t("lvlTip"))}"><span class="lg-opt">${t("lvlLbl")}</span>
           <select id="lvlSel">${[0, 1, 2, 3, 4].map(i =>
             `<option value="${i}"${i === mapLevel ? " selected" : ""}>${t("lvl" + i)}</option>`).join("")}</select></label>
         <span class="item lg-cnt"><b>${t("onMap", D.nodes.length)}</b><span class="lg-full">: ${cnt}${more}${capped}</span></span>
         ${chItem}
-        <span class="item" title="${esc(scanLocal || "")}">${t("scan")} · ${esc(String(scanLocal || "").replace(/^(\d{4}-\d\d-\d\d) /, ""))}
+        <span class="item" title="${esc(scanLocal || "")}"><span class="lg-opt">${t("scan")} · </span>${esc(String(scanLocal || "").replace(/^(\d{4}-\d\d-\d\d) /, ""))}
           ${stale ? `<b style="color:#e0a03c">· ${t("stale")}</b>` : ""}</span>
         <span class="lg-btns">
           <button class="lg-more" title="${esc(t("legendMoreTip"))}">ⓘ<span class="lg-mtxt"> ${t("legendMore")}</span></button>
@@ -2084,7 +2086,8 @@
       <div class="lg-row lg-key">
         <span class="lg-h">${t("lgArrows")}</span>
         <span class="item">→ ${t("lgHead")}</span>
-        <span class="item">${t("lgSnr")}: 0%<span class="grad" style="background:${grad}"></span>
+        <span class="item">${t("lgSnr")}</span>
+        <span class="item">0%<span class="grad" style="background:${grad}"></span>
           ${t("ofIdeal100", fmtSnr(S.floor), fmtSnr(S.ideal))}</span>
         <span class="item"><span class="swatch dashed" style="border-color:#8a8a90"></span>${t("noSnrData")}</span>
         ${D.links.some(l => l.via) ? `<span class="item" title="${esc(t("viaTr"))}"><span class="swatch dotted" style="border-color:#8a8a90"></span>${t("viaLeg")}</span>` : ""}

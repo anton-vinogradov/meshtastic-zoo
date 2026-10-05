@@ -66,6 +66,7 @@ body.geo-on #mapzoom { display: none; }
 #legend .lg-key { display: none; }
 body.legend-open #legend .lg-key { display: flex; }
 #legend .lg-h { color: var(--text); font-weight: 600; min-width: 56px; }
+#legend .lg-cnt { display: block; }
 #legend .lg-cnt b { color: var(--text); font-weight: 600; }
 #legend .lg-dim { opacity: .75; }
 #legend a.lg-ghosts { color: #8fb4ff; text-decoration: none; }
@@ -760,7 +761,7 @@ body:not(.geo-on) #geoctl { display: none; }
 #settings .nn-leg i:first-child { margin-left: 0; }
 
 #map .empty {
-  padding: 48px 24px;
+  padding: 84px 24px 48px;   /* сверху — под верхним рядом кнопок */
   color: var(--muted);
   font-size: 15px;
   text-align: center;
