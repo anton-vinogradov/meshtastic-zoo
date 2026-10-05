@@ -166,7 +166,7 @@
         return `<div class="card nrow"><span class="dot ${dot}"></span>
           <span><span class="nm">${esc(n.name)}</span> <span class="meta">${esc(n.ip || "")}</span><br>
           <span class="meta">${parts.join(" · ") || "на связи"}</span></span>
-          <span class="age">${n.connected ? "" : n.mobile ? "кочует" : "off"}</span></div>`;
+          <span class="age">${n.connected ? "" : n.mobile ? "кочует" : "нет связи"}</span></div>`;
       }).join("") || '<div class="meta">флот не описан: добавь свои ноды в known/names конфига</div>';
 
       // данные

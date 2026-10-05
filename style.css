@@ -59,10 +59,10 @@ body.geo-on #mapzoom { display: none; }
   padding-bottom: max(26px, env(safe-area-inset-bottom));
   font-size: 13px;
   color: var(--muted);
-  align-items: center;
+  align-items: stretch;
 }
 #legend .item { display: flex; align-items: center; gap: 7px; }
-#legend .lg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
+#legend .lg-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 18px; }
 #legend .lg-key { display: none; }
 body.legend-open #legend .lg-key { display: flex; }
 #legend .lg-h { color: var(--text); font-weight: 600; min-width: 56px; }
@@ -76,7 +76,7 @@ body.legend-open #legend .lg-key { display: flex; }
   background: var(--zone-bg); color: var(--text); border: 1px solid var(--zone-stroke);
   border-radius: 8px; padding: 3px 6px; font: inherit; cursor: pointer;
 }
-#legend .lg-btns { margin-left: auto; display: flex; gap: 6px; }
+#legend .lg-btns { display: flex; gap: 6px; }
 #legend .lg-btns button {
   background: var(--zone-bg); color: var(--muted); border: 1px solid var(--zone-stroke);
   border-radius: 14px; padding: 4px 11px; font: inherit; cursor: pointer;

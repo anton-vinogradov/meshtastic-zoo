@@ -6,7 +6,7 @@ A live map of your Meshtastic node zoo: who is on the air, who hears
 whom and how well, and which node has unread mail. Everything updates
 by itself while the page is open.
 
-![The connectivity map: own nodes tinted by site, neighbours confirmed by traceroute, every arrow labeled with SNR, measurement age and a source icon.](docs/screenshot.png)
+![The connectivity map: own nodes tinted by site (a lost one dimmed, with an "offline" badge), neighbours confirmed by traceroute, every arrow labeled with SNR, measurement age and a source icon; at the bottom — the Show level, the counters and the key to cards and arrows.](docs/screenshot.png)
 
 *(All doc shots are taken in the built-in anonymize mode: neighbours'
 names are replaced with their id tails, own nodes' IPs are hidden.)*
@@ -315,7 +315,7 @@ and a daily sparkline of its metric: connections, poll→cache,
 cache→map, tiers and precompression, pruning, tracing (background and
 own↔own), key collection, geocoding.
 
-![The status page: channel load and a 24-hour profile of every worker.](docs/status.png)
+![The status page: your own nodes (who is connected, who is gone), channel load and a 24-hour profile of every worker.](docs/status.png)
 
 ## The geo map 🗺
 

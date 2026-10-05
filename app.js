@@ -828,11 +828,14 @@
       const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
       const spanX = (Math.max(...xs) - Math.min(...xs)) || 1e-6;
       const spanY = (Math.max(...ys) - Math.min(...ys)) || 1e-6;
-      const scale = Math.min((W - 180) / spanX, (H - 200) / spanY) * mapZoom;
+      // верхний ряд кнопок лежит поверх карты (до 52 px) — облако опускаем под
+      // него; при зуме карта скроллится, и отступ не нужен
+      const topU = mapZoom > 1.001 ? 0 : 56 / pxPerU;
+      const scale = Math.min((W - 180) / spanX, (H - 200 - topU) / spanY) * mapZoom;
       const cx0 = (Math.max(...xs) + Math.min(...xs)) / 2;
       const cy0 = (Math.max(...ys) + Math.min(...ys)) / 2;
       ids.forEach((id, i) => {
-        px[id] = [CW / 2 + (P[i][0] - cx0) * scale, CH / 2 + (P[i][1] - cy0) * scale];
+        px[id] = [CW / 2 + (P[i][0] - cx0) * scale, CH / 2 + topU / 2 + (P[i][1] - cy0) * scale];
       });
       // Раздвижка перекрывшихся карточек (2D, симметрично). Со-локация своих
       // нод (одно железо → почти совпадающие точки в честной SNR-раскладке) плюс
@@ -841,7 +844,7 @@
       // мягко держим в границах — кластер у края расползается внутрь карты.
       const MINX = CARD.w * cardK + 12, MINY = CARD.h * cardK + 14;
       const clX = (v) => Math.max(CARD.w * cardK / 2 + 19, Math.min(CW - CARD.w * cardK / 2 - 19, v));
-      const clY = (v) => Math.max(CARD.h * cardK / 2 + 7, Math.min(CH - CARD.h * cardK / 2 - 7, v));
+      const clY = (v) => Math.max(CARD.h * cardK / 2 + 7 + topU, Math.min(CH - CARD.h * cardK / 2 - 7, v));
       // Пары дальше MINX×MINY не пересекаются, поэтому вместо O(n²) на итерацию
       // бакетим позиции по сетке ячейками MINX×MINY: узел сравниваем лишь с его и
       // 8 соседними ячейками (только там возможно перекрытие). При сотнях узлов

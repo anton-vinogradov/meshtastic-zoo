@@ -3448,7 +3448,7 @@ def gh_watch_loop():
             for n in notes:
                 log("🐙 " + n.splitlines()[0])
                 tg_send(n)
-            beat("ghwatch", f"{len(entries)} обсуждений"
+            beat("ghwatch", f"обсуждений: {len(entries)}"
                             + (f" · новых {len(notes)}" if notes else ""))
         except Exception as e:
             beat("ghwatch", f"ошибка: {e.__class__.__name__}")
