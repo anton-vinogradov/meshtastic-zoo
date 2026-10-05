@@ -1,16 +1,5 @@
+data/
 .DS_Store
-data/live.json
-data/tiers.json
-data/keyasks.json
-data/*.gz
-data/messages.json
-data/channel.json
-data/traces.json
-data/history.db*
-data/nodes.db*
-data/tgmap.json
-data/geo_addr.json
-data/geo_cache.json
 
 # рантайм-конфиг (копируется из config.example.json при установке)
 collector/config.json
@@ -19,7 +8,4 @@ collector/config.json
 # python bytecode
 __pycache__/
 *.pyc
-data/tracefail.json
-data/hearsus.json
-data/ghseen.json
 collector/secrets.json
