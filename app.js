@@ -304,7 +304,8 @@
       ghostLegend: "👻 {0} beyond our hearing — placed via mesh neighbors (grey dashed)",
       geoBySubnet: "· site {0} (by subnet)", geoAutoSrc: "site by subnet", cSubnet: "subnet",
       setAuto: "Auto-reply in the channel", setAutoHint: "A message that is exactly one of these words gets an answer listing which of your nodes heard it, at what SNR and over how many hops. One word per line; matching ignores case and surrounding punctuation. Never answers your own nodes, waits out per-sender and channel cooldowns, and stays quiet while the channel is busy.",
-      fPingOn: "answer trigger words", fPingWords: "trigger words",
+      fPingOn: "answer trigger words", fPingPrimary: "Answer in the primary channel",
+      fPingPrimaryTip: "Off by default: replies go only to the channel the ping came from, and pings in the primary channel get no reply — local meshes ask bots to keep pings in a service channel. A ping sent as a DM is always answered by DM.", fPingWords: "trigger words",
       multilineTip: "Enter sends, Shift+Enter starts a new line",
       fPingPrefix: "prefix — roughly where your nodes are (e.g. «Bogatyrsky here!»)",
       geoAutoNote: "placed at the site it is currently connected from — derived from the placed nodes of that subnet, so the map follows the node when it moves",
@@ -437,7 +438,8 @@
       ghostLegend: "👻 {0} вне нашего слуха — размещены по соседям меша (серый пунктир)",
       geoBySubnet: "· площадка {0} (по подсети)", geoAutoSrc: "площадка по подсети", cSubnet: "подсеть",
       setAuto: "Автоответ в канале", setAutoHint: "Сообщение, равное одному из этих слов, получает ответ: какие твои ноды его услышали, с каким SNR и за сколько хопов. По слову в строке; регистр и знаки вокруг не важны. Своим нодам никогда не отвечаем, соблюдаются паузы на отправителя и на канал, при загруженном канале молчим.",
-      fPingOn: "отвечать на слова-триггеры", fPingWords: "слова-триггеры",
+      fPingOn: "отвечать на слова-триггеры", fPingPrimary: "Отвечать в основном канале",
+      fPingPrimaryTip: "По умолчанию выключено: ответ уходит только в тот канал, откуда пришёл ping, а на пинги в основном канале бот молчит — местные меши просят держать пинги в сервисном канале. Ping в личку всегда получает ответ в личку.", fPingWords: "слова-триггеры",
       multilineTip: "Enter — отправить, Shift+Enter — новая строка",
       fPingPrefix: "префикс — где примерно стоят ноды (напр. «Богатырский на связи!»)",
       geoAutoNote: "показана там, откуда сейчас подключена — по размещённым нодам этой подсети; переедет нода, переедет и точка",
@@ -2402,6 +2404,7 @@
       ["worldMaxAgeH", "fKeep", "num"]] },
     { title: "setAuto", hint: "setAutoHint", fields: [
       ["pingReply", "fPingOn", "bool"],
+      ["pingPrimary", "fPingPrimary", "bool"],
       ["pingPrefix", "fPingPrefix", "text"],
       ["pingWords", "fPingWords", "area"]] },
   ];
@@ -2476,7 +2479,7 @@
           ? `<label class="srow"><span>${t(label)}</span>
               <textarea id="${sfId(k)}" rows="2">${esc((val(k) || []).join("\n"))}</textarea></label>`
           : kind === "bool"
-          ? `<label class="srow stog"><span>${t(label)}</span>
+          ? `<label class="srow stog"${T.en[label + "Tip"] ? ` title="${esc(t(label + "Tip"))}"` : ""}><span>${t(label)}</span>
               <input id="${sfId(k)}" type="checkbox"${val(k) === false ? "" : " checked"}></label>`
           : kind === "text"
           ? `<label class="srow scol"><span>${t(label)}</span>
@@ -2565,6 +2568,7 @@
         mobile: lines(g("mobile")),
         fragile: lines(g("fragile")),
         pingReply: g("pingReply").checked,
+        pingPrimary: g("pingPrimary").checked,
         pingPrefix: g("pingPrefix").value.trim(),
         pingWords: lines(g("pingWords")),
       };

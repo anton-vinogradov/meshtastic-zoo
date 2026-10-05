@@ -56,7 +56,7 @@ PORT = 8814
 # что можно менять из UI (остальное — только руками в config.json)
 EDITABLE = ["subnets", "snrScale", "worldMaxAgeH", "directWindowH", "formerWindowH",
             "topoEveryS", "renderEveryS", "rescanS", "mobile", "fragile",
-            "pingReply", "pingWords", "pingPrefix", "muted"]
+            "pingReply", "pingWords", "pingPrefix", "pingPrimary", "muted"]
 
 lock = threading.RLock()
 conns = {}     # ip -> {"iface", "id", "num", "light", "last"}
@@ -699,9 +699,17 @@ def on_receive(packet=None, interface=None):
         # пишем, но без «непрочитано» и без пересылки в Telegram — иначе один бот
         # держал на карте «✉ 9» и сыпал уведомлениями.
         muted = frm in set(CFG.get("muted") or [])
+        # ping в личку отвечаем сами (с тем же личным кулдауном) — это сообщение
+        # обработано ботом, держать его непрочитанным и звать владельца незачем
+        own_set = {c.get("id") for c in conns.values()}
+        dm_ping = (not muted and frm not in own_set and CFG.get("pingReply", True)
+                   and is_ping(text)
+                   and time.time() - _ping_last.get(frm, 0) >= CFG.get("pingCooldownS", 600))
+        if dm_ping:
+            _ping_last[frm] = time.time()
         msg = dict(id=f'{ent["id"]}·{packet.get("id")}', pid=packet.get("id"),
                    node=ent["id"], frm=frm, frmName=frm_name, text=text,
-                   ts=int(time.time()), snr=packet.get("rxSnr"), read=muted)
+                   ts=int(time.time()), snr=packet.get("rxSnr"), read=muted or dm_ping)
         if reply_id:
             msg["replyTo"] = reply_id
         with lock:
@@ -710,7 +718,13 @@ def on_receive(packet=None, interface=None):
             messages.append(msg)
         save_messages()
         log(f"✉ {msg['frmName']} → {ent['id']}: {msg['text'][:60]!r}" + (" [заглушён]" if muted else ""))
-        if not muted and (CFG.get("alerts") or {}).get("dm", True):
+        if dm_ping:
+            hs3, hl3 = packet.get("hopStart"), packet.get("hopLimit")
+            hops3 = hs3 - hl3 if isinstance(hs3, int) and isinstance(hl3, int) and hs3 >= hl3 else None
+            threading.Thread(target=ping_reply_dm, daemon=True,
+                             args=(ent, frm, msg["frmName"], msg.get("pid"),
+                                   packet.get("rxSnr"), hops3)).start()
+        elif not muted and (CFG.get("alerts") or {}).get("dm", True):
             threading.Thread(target=mirror_dm, daemon=True,
                              args=(ent["id"], frm, msg["frmName"], msg.get("pid"), text)).start()
     except Exception as e:
@@ -1597,11 +1611,16 @@ def mirror_dm(node, peer, peer_name, pid, text):
 
 _ping_last = {}           # id отправителя → ts последнего автоответа (личный кулдаун)
 _ping_last_any = 0.0      # ts любого автоответа (общий троттл на канал)
-PING_WORDS = ["ping", "пинг", "test", "тест", "проверка", "hi", "привет"]  # дефолт; правится в ⚙
+# Приветствия («hi», «привет») больше не триггер: на них уходило 19 из 96 ответов,
+# то есть бот встревал в обычный разговор. Дефолт; правится в ⚙.
+PING_WORDS = ["ping", "пинг", "test", "тест", "проверка"]
 # Досыпаем дефолты в CFG (в память, не в файл): иначе /api/config отдаёт null и
 # в ⚙ словарь выглядит ПУСТЫМ, хотя автоответчик работает по значениям из кода.
 CFG.setdefault("pingWords", list(PING_WORDS))
 CFG.setdefault("pingReply", True)
+# Явное значение, а не «нет ключа»: ⚙ рисует отсутствующий bool ВКЛЮЧЁННЫМ, и
+# первое же сохранение настроек тихо включило бы ответы в основном канале.
+CFG.setdefault("pingPrimary", False)
 CFG.setdefault("pingPrefix", "")   # напр. «Богатырский на связи!» — откуда отвечаем
 
 
@@ -1639,34 +1658,20 @@ def is_ping(text):
     return any(t == str(w).strip().casefold() for w in words if str(w).strip())
 
 
-def ping_reply(pid, frm, frm_name):
-    """Ответ на ping в общем канале: кто из наших его слышал, с каким SNR и через
-    сколько хопов. ЭФИРА НА ПРОБУ НЕ ТРАТИМ — приёмы этого же пакета уже собраны
-    в gotBy; ответ это один broadcast. Отвечает нода, услышавшая лучше всех:
-    её вероятнее услышат в ответ."""
-    global _ping_last_any
-    time.sleep(CFG.get("pingWaitS", 8))    # дать остальным своим нодам услышать пакет
-    with lock:
-        m = next((x for x in channel if x.get("pid") == pid), None)
-        got = dict((m or {}).get("gotBy") or {})
-    if not got:
-        return
-    cu = chan_util()
-    if cu is not None and cu > CFG.get("busyChUtil", 35):
-        log(f"🏓 ping от {frm_name}: канал занят ({cu:.0f}%) — молчим")
-        return
-    def rank(item):                        # ближе по хопам, затем громче
-        v = item[1] if isinstance(item[1], dict) else {}
-        return (v.get("hops") if v.get("hops") is not None else 9,
-                -(v.get("snr") if v.get("snr") is not None else -99))
-    order = sorted(got.items(), key=rank)
-    ent = next((e for e in (ent_by_id(i) for i, _ in order) if e), None)
-    if not ent:
-        return
+def _ping_rank(item):
+    """ближе по хопам, затем громче"""
+    v = item[1] if isinstance(item[1], dict) else {}
+    return (v.get("hops") if v.get("hops") is not None else 9,
+            -(v.get("snr") if v.get("snr") is not None else -99))
+
+
+def ping_report(got):
+    """Текст ответа на ping по приёмам {своя нода: {snr, hops}}."""
+    order = sorted(got.items(), key=_ping_rank)
     # SNR ОСМЫСЛЕН ТОЛЬКО ПРИ 0 ХОПОВ: у ретранслированной копии он описывает
     # передатчик последнего реле, а не пингующего, — сообщать его как «вот как мы
     # тебя слышим» значит врать. Поэтому: прямые — с цифрой, дальние — только
-    # числом хопов, свёрнутые по группам.
+    # числом хопов, свёрнутые по группам, каждая группа своей строкой.
     nm_of = lambda i: (CFG.get("names") or {}).get(i, i[-4:])
     direct, relayed = [], {}
     for nid, v in order:
@@ -1676,34 +1681,26 @@ def ping_reply(pid, frm, frm_name):
             direct.append((nid, v.get("snr")))
         else:
             relayed.setdefault(h if h is not None else "?", []).append(nid)
-    # КАЖДАЯ ГРУППА — СВОЕЙ СТРОКОЙ. Одной строкой через « · » это читалось как
-    # сплошняк, а на телефоне ещё и переносилось в произвольном месте. Заодно
-    # экономнее: перевод строки — 1 байт против 4 у разделителя, а лимит 200.
-    # «Напрямую» всегда первой строкой: это главное, что хочет знать пингующий,
-    # и «не слышим» тоже должно стоять сразу, а не в хвосте перечисления.
-    # Метка группы — без «через»: в столбце оно повторялось в каждой строке и
-    # только съедало место, а «1🐇» рядом с «напрямую» и так читается однозначно.
     # Префикс — примерное местоположение наших нод: пингующему полезно знать,
     # ОТКУДА ему ответили (сигнал сам по себе этого не говорит). Настраивается.
     pre = str(CFG.get("pingPrefix") or "").strip()
 
     def compose(marks):
-        """Текст ответа. marks — рисовать ли стрелки антенн у имён; они уходят в
-        эфир ТОЛЬКО в паре с легендой, иначе стрелка читается как «уровень
-        сигнала». Не влезли в лимит — собираем без символов вовсе: непонятый
-        значок хуже отсутствующего."""
+        """marks — рисовать ли стрелки антенн у имён. Не влезли в лимит эфира —
+        собираем без них: строки хопов важнее."""
         nm = lambda i: nm_of(i) + (ant_mark(i) if marks else "")
-        # Каждая группа — своей строкой: одной через « · » читалось сплошняком, а
-        # на телефоне переносилось в произвольном месте. Заодно экономнее:
-        # перевод строки — 1 байт против 4 у разделителя. «Напрямую» всегда
-        # первой строкой (и «не слышим» тоже — это главный ответ, не хвост).
+        # «напрямую: …» — первой строкой, когда прямой приём есть. Строку
+        # «напрямую не слышим» больше не пишем: она стояла в 94 ответах из 96, то
+        # есть ничего не сообщала, а случайный человек читал её как «тебя не
+        # слышно». Ещё и 35 байт к самому длинному ответу среди ботов канала.
         bits = ["напрямую: " + ", ".join(
             f"{nm(i)} {s:+.1f}" if s is not None else nm(i) for i, s in direct)
-        ] if direct else ["напрямую не слышим"]
+        ] if direct else []
         for h in sorted(relayed, key=lambda x: (x == "?", x)):
             who = ", ".join(nm(i) for i in relayed[h])
             # метка группы без «через»: в столбце оно повторялось впустую
-            bits.append(f"реле: {who}" if h == "?" else f"{h}🐇: {who}")
+            # хопы неизвестны — это не «через реле», а просто «приняли»
+            bits.append(f"приняли: {who}" if h == "?" else f"{h}🐇: {who}")
         # Ракетка — метка ВСЕГО сообщения, поэтому перед префиксом, а не перед
         # первой строкой перечисления: строки-группы читаются ровным столбцом.
         t = "🏓 " + (pre + "\n" if pre else "") + "\n".join(bits)
@@ -1712,15 +1709,65 @@ def ping_reply(pid, frm, frm_name):
     txt = compose(True)
     if len(txt.encode()) > 200:
         txt = compose(False)
-    txt = clip_bytes(txt, 200)
+    return clip_bytes(txt, 200)
+
+
+def reply_hop_limit(ent, got):
+    """Хоп-лимит ответа: не меньше, чем пришёл сам ping (максимум 7). С лимитом
+    ноды по умолчанию ответ на пинг из-за 6 хопов до пингующего не долетал.
+    None — лимит ноды и так достаточен (не тратим эфир зря)."""
+    h = min((v.get("hops") for v in got.values()
+             if isinstance(v, dict) and v.get("hops") is not None), default=None)
     try:
-        ent["iface"].sendText(txt, replyId=pid or None)
+        own = ent["iface"].localNode.localConfig.lora.hop_limit
+    except Exception:
+        own = 3
+    return min(7, h) if h is not None and h > own else None
+
+
+def ping_reply(pid, frm, frm_name):
+    """Ответ на ping в канале: кто из наших его слышал, с каким SNR и через сколько
+    хопов. ЭФИРА НА ПРОБУ НЕ ТРАТИМ — приёмы этого же пакета уже собраны в gotBy;
+    ответ это один broadcast. Отвечает нода, услышавшая лучше всех: её вероятнее
+    услышат в ответ. Отвечаем В ТОТ ЖЕ КАНАЛ, откуда пришёл ping, а в основном
+    (0) — только при pingPrimary: сообщество прямо просит уводить пинги в
+    сервисный канал, а на каждый пинг в основном отвечали 2–4 бота."""
+    global _ping_last_any
+    time.sleep(CFG.get("pingWaitS", 8))    # дать остальным своим нодам услышать пакет
+    with lock:
+        m = next((x for x in channel if x.get("pid") == pid), None)
+        got = dict((m or {}).get("gotBy") or {})
+    if not got:
+        return
+    ch = int((m or {}).get("ch") or 0)
+    if ch == 0 and not CFG.get("pingPrimary", False):
+        log(f"🏓 ping от {frm_name} в основном канале — молчим (pingPrimary выключен)")
+        return
+    cu = chan_util()
+    if cu is not None and cu > CFG.get("busyChUtil", 35):
+        log(f"🏓 ping от {frm_name}: канал занят ({cu:.0f}%) — молчим")
+        return
+    ent = next((e for e in (ent_by_id(i) for i, _ in sorted(got.items(), key=_ping_rank)) if e), None)
+    if not ent:
+        return
+    txt = ping_report(got)
+    try:
+        ent["iface"].sendText(txt, replyId=pid or None, channelIndex=ch,
+                              hopLimit=reply_hop_limit(ent, got))
     except Exception as e:
         log(f"🏓 ping-ответ: {e!r}")
         return
     with lock:
         _ping_last_any = time.time()
-    log(f"🏓 ping от {frm_name} → ответили с {ent['id']}: {txt}")
+    log(f"🏓 ping от {frm_name} (канал {ch}) → ответили с {ent['id']}: {txt}")
+
+
+def ping_reply_dm(ent, frm, frm_name, pid, snr, hops):
+    """Ping В ЛИЧКУ своей ноде — тихий путь без шума в общем канале. Раньше его
+    пересылали в Telegram и ждали ручного ответа (до 52 мин)."""
+    txt = ping_report({ent["id"]: {"snr": snr, "hops": hops}})
+    ok, err = send_dm(ent["id"], frm, txt, reply_id=pid)
+    log(f"🏓 ping в личку от {frm_name} → " + ("ответили" if ok else f"не ответили: {err}"))
 
 
 def chan_pid_from_note(note):
@@ -3161,7 +3208,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if k in ("subnets", "mobile", "fragile", "pingWords"):
                     if not isinstance(v, list) or not all(isinstance(s, str) for s in v):
                         continue
-                elif k == "pingReply":
+                elif k in ("pingReply", "pingPrimary"):
                     if not isinstance(v, bool):
                         continue
                 elif k == "pingPrefix":

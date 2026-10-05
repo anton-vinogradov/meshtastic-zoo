@@ -68,14 +68,13 @@
   "traceStaggerS": 4,
   "traceCandMin": 180,
   "pingReply": true,
+  "pingPrimary": false,
   "pingWords": [
     "ping",
     "пинг",
     "test",
     "тест",
-    "проверка",
-    "hi",
-    "привет"
+    "проверка"
   ],
   "pingPrefix": "",
   "pingCooldownS": 600,
